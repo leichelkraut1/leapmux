@@ -10,6 +10,16 @@ import (
 // OptionOutputStyle selects a native style through the process settings override.
 const OptionOutputStyle = "outputStyle"
 
+// OptionSwarmMode selects native teammate event streaming at process launch.
+const OptionSwarmMode = "swarmMode"
+
+const codebuddyRestartNotice = "Changing this setting restarts the agent and stops any active turn."
+
+var codebuddySwarmGroup = agent.SelectGroup(OptionSwarmMode, "Swarm Mode", agent.OptionOrderProviderThird, "false", []agent.OptionDef{
+	{Id: "false", Name: "Off", Description: codebuddyRestartNotice + " Use standard headless operation.", Default: true},
+	{Id: "true", Name: "On", Description: codebuddyRestartNotice + " Enable native Swarm Mode and teammate event streaming."},
+})
+
 const (
 	OptionThinking        = "thinking"
 	codebuddyThinkingAuto = "auto"
@@ -31,12 +41,10 @@ func codebuddyThinkingGroup(current string) *leapmuxv1.AvailableOptionGroup {
 // `cbc` is the short alias and resolves to the same executable.
 var codebuddyLocator = launch.Binaries("codebuddy", "cbc")
 
-// codebuddyPermissionModes are the four modes `get_available_modes` advertises.
+// codebuddyPermissionModes are the advertised modes plus the verified Auto mode.
 //
-// The CLI's --permission-mode flag accepts six words (the same set as
-// contracts/claude-protocol.json), but the runtime advertises only these four
-// and its plan description is a copy-paste from Claude Code. LeapMux offers the
-// advertised set until a live probe proves dontAsk and auto are enterable.
+// The native catalog omits Auto and dontAsk. The settings route accepts Auto;
+// dontAsk remains unoffered until its live behavior is verified.
 var codebuddyPermissionModes = []agent.OptionDef{
 	{Id: contracts.CodebuddyModeDefault, Name: "Default", Default: true, Description: "Prompts for dangerous operations."},
 	{Id: contracts.CodebuddyModeAcceptEdits, Name: "Accept Edits", Description: "Auto-accept file edit operations."},
@@ -81,6 +89,7 @@ func Registration() agent.Registration {
 			codebuddyEffortGroup(""),
 			codebuddyPermissionModeGroup(""),
 			codebuddyThinkingGroup(""),
+			codebuddySwarmGroup,
 		},
 		AdditionalOptionIDs: []string{agent.OptionIDEffort, OptionOutputStyle},
 		PermissionDefaults: agent.PermissionDefaults{

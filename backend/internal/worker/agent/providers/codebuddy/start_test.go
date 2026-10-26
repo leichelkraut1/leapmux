@@ -258,3 +258,21 @@ func TestCodebuddyStartRejectsUnknownThinkingBeforeLaunch(t *testing.T) {
 	assert.False(t, called)
 	assert.Empty(t, sink.SessionIDs())
 }
+
+func TestCodebuddyStartRejectsUnknownSwarmBeforeLaunch(t *testing.T) {
+	previous := codebuddyLocator
+	called := false
+	codebuddyLocator = launch.Custom(func(context.Context, string, bool) (launch.Spec, launch.Resolution) {
+		called = true
+		return launch.Spec{Program: filepath.Join(t.TempDir(), "missing-agent")}, launch.Found
+	})
+	t.Cleanup(func() { codebuddyLocator = previous })
+	started, err := Start(t.Context(), agent.Options{Options: map[string]string{"swarmMode": "invalid"}}, agent.NewProviderServices(&agenttest.Sink{}))
+	if started != nil {
+		t.Cleanup(started.Stop)
+	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "swarmMode")
+	assert.False(t, called)
+	assert.Nil(t, started)
+}

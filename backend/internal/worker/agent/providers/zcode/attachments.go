@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/leapmux/leapmux/generated/contracts"
+
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/worker/agent"
 	"github.com/leapmux/leapmux/internal/worker/agent/providers/internal/providerkit"
@@ -58,9 +60,9 @@ type zcodeMediaKind struct {
 }
 
 // zcodeMediaKinds lists the LeapMux attachment kinds that travel with their bytes.
-var zcodeMediaKinds = map[agent.AttachmentKind]zcodeMediaKind{
-	agent.AttachmentKindImage: {wire: zcodeAttachmentKindImage, modality: zcodeModalityImage, label: "image"},
-	agent.AttachmentKindPDF:   {wire: zcodeAttachmentKindPDF, modality: zcodeModalityPDF, label: "PDF"},
+var zcodeMediaKinds = map[contracts.AttachmentMediaKind]zcodeMediaKind{
+	contracts.AttachmentMediaKindImage: {wire: zcodeAttachmentKindImage, modality: zcodeModalityImage, label: "image"},
+	contracts.AttachmentMediaKindPdf:   {wire: zcodeAttachmentKindPDF, modality: zcodeModalityPDF, label: "PDF"},
 }
 
 // zcodeWireAttachment is one entry of session/send.attachments.
@@ -100,7 +102,7 @@ func (a *Agent) buildZCodeInput(content string, attachments []*leapmuxv1.Attachm
 		if err := (zcodeProvider{}).ValidateAttachment(attachment); err != nil {
 			return "", nil, err
 		}
-		if attachment.Kind == agent.AttachmentKindText {
+		if attachment.Kind == contracts.AttachmentMediaKindText {
 			blocks = append(blocks, providerkit.BuildInlineTextAttachmentBlock(attachment))
 			continue
 		}

@@ -964,8 +964,9 @@ export async function answerElevationPrompt(page: Page, password: string, prompt
 export async function openAgentInfoCard(page: Page): Promise<Locator> {
   const infoTrigger = page.locator('[data-testid="agent-info-trigger"]')
   await expect(infoTrigger).toBeVisible()
-  await infoTrigger.click()
   const popover = page.locator('[data-testid="agent-info-popover"]')
+  if (!await popover.isVisible())
+    await infoTrigger.click()
   await expect(popover).toBeVisible()
   return popover
 }
