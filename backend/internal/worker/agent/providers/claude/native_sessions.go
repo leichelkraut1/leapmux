@@ -33,7 +33,30 @@ type nativeSessionStatus struct {
 // session files. The caller verifies process ownership and excludes managed agents.
 // https://code.claude.com/docs/en/agent-view#read-session-state-from-a-script
 func observeNativeSessions(ctx context.Context) ([]agent.NativeSessionObservation, error) {
-	return observeNativeSessionsWithRunner(ctx, providerkit.RunCLI)
+	return observeNativeSessionsWithRunner(ctx, runNativeSessionCLI)
+}
+
+// Prefer the native executable so periodic reads do not pay shell startup costs.
+// A failed native invocation is not retried through a shell.
+func runNativeSessionCLI(ctx context.Context, run providerkit.CLIRun) ([]byte, error) {
+	return runNativeSessionCLIWithRunners(ctx, run, providerkit.RunNativeCLI, providerkit.RunCLI)
+}
+
+func runNativeSessionCLIWithRunners(ctx context.Context, run providerkit.CLIRun,
+	nativeRun func(context.Context, providerkit.NativeCLIRun) ([]byte, error),
+	shellRun func(context.Context, providerkit.CLIRun) ([]byte, error),
+) ([]byte, error) {
+	output, err := nativeRun(ctx, providerkit.NativeCLIRun{
+		Program: "claude", Label: run.Label, Args: run.Args,
+		WorkingDir: run.WorkingDir, Timeout: run.Timeout, MaxOutput: run.MaxOutput,
+	})
+	if errors.Is(err, providerkit.ErrNativeCLIUnavailable) {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return nil, contextErr
+		}
+		return shellRun(ctx, run)
+	}
+	return output, err
 }
 
 func observeNativeSessionsWithRunner(ctx context.Context, run func(context.Context, providerkit.CLIRun) ([]byte, error)) ([]agent.NativeSessionObservation, error) {

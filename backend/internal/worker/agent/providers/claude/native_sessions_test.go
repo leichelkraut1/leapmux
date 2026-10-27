@@ -157,3 +157,84 @@ func TestParseNativeSessionsOmitsInvalidOrAmbiguousIdentities(t *testing.T) {
 	assert.False(t, validNativeSessionID("a\nb"))
 	assert.False(t, validNativeSessionID("☃"))
 }
+
+func TestObserveNativeSessionsPrefersDirectExecutable(t *testing.T) {
+	t.Parallel()
+	result, err := observeNativeSessionsWithRunner(context.Background(), func(ctx context.Context, run providerkit.CLIRun) ([]byte, error) {
+		return runNativeSessionCLIWithRunners(ctx, run, func(nativeCtx context.Context, native providerkit.NativeCLIRun) ([]byte, error) {
+			assert.Same(t, ctx, nativeCtx)
+			assert.Equal(t, "claude", native.Program)
+			assert.Equal(t, "Claude", native.Label)
+			assert.Equal(t, []string{"agents", "--json"}, native.Args)
+			assert.Equal(t, run.WorkingDir, native.WorkingDir)
+			assert.Equal(t, nativeSessionsTimeout, native.Timeout)
+			assert.Equal(t, maxNativeSessionsOutput, native.MaxOutput)
+			return []byte("[{\"pid\":42,\"sessionId\":\"session-42\",\"kind\":\"interactive\",\"status\":\"idle\"}]"), nil
+		}, func(context.Context, providerkit.CLIRun) ([]byte, error) {
+			t.Fatal("a native result must not launch a shell")
+			return nil, nil
+		})
+	})
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, 42, result[0].PID)
+	assert.Equal(t, leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_IDLE, result[0].ActivityState)
+}
+
+func TestNativeSessionCLIFallsBackOnlyForUnavailableExecutable(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		nativeErr error
+		wantShell bool
+	}{
+		{"not resolved", providerkit.ErrNativeCLIUnavailable, true},
+		{"start or exit failure", errors.New("native invocation failed"), false},
+		{"deadline", context.DeadlineExceeded, false},
+		{"success", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), nativeSessionsTimeout)
+			defer cancel()
+			run := providerkit.CLIRun{Locator: claudeLocator, Args: []string{"agents", "--json"}}
+			shellCalls := 0
+			output, err := runNativeSessionCLIWithRunners(ctx, run,
+				func(context.Context, providerkit.NativeCLIRun) ([]byte, error) {
+					return []byte("native"), tc.nativeErr
+				},
+				func(shellCtx context.Context, shell providerkit.CLIRun) ([]byte, error) {
+					shellCalls++
+					assert.Same(t, ctx, shellCtx, "fallback must keep the original deadline")
+					assert.Equal(t, claudeLocator, shell.Locator)
+					assert.Equal(t, run.Args, shell.Args)
+					return []byte("shell"), nil
+				})
+			if tc.wantShell {
+				require.NoError(t, err)
+				assert.Equal(t, 1, shellCalls)
+				assert.Equal(t, "shell", string(output))
+			} else {
+				assert.Equal(t, 0, shellCalls)
+				assert.Equal(t, tc.nativeErr, err)
+				assert.Equal(t, "native", string(output))
+			}
+		})
+	}
+}
+
+func TestNativeSessionCLIDoesNotFallbackAfterCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	output, err := runNativeSessionCLIWithRunners(ctx, providerkit.CLIRun{},
+		func(context.Context, providerkit.NativeCLIRun) ([]byte, error) {
+			cancel()
+			return nil, providerkit.ErrNativeCLIUnavailable
+		},
+		func(context.Context, providerkit.CLIRun) ([]byte, error) {
+			t.Fatal("canceled native lookup must not start a shell")
+			return nil, nil
+		})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, output)
+}
