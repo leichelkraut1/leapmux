@@ -1,9 +1,10 @@
 package codex
 
 import (
+	"testing"
+
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestRecognizeNativeProcess(t *testing.T) {
