@@ -56,7 +56,7 @@ func TestInspectNativeAgentProcessesScopesOwnerAndExcludesWorkerTree(t *testing.
 	t.Parallel()
 	svc, _, _ := setupTestService(t)
 	source := nativeProcessFixture()
-	result, err := inspectNativeAgentProcesses(context.Background(), source, 100, svc.Agents.Registry(), maxNativeProcesses)
+	result, _, err := inspectNativeAgentProcesses(context.Background(), source, 100, svc.Agents.Registry(), maxNativeProcesses)
 	require.NoError(t, err)
 	require.Len(t, result.Processes, 2)
 	assert.Equal(t, int32(2), result.TotalCount)
@@ -74,7 +74,7 @@ func TestInspectNativeAgentProcessesScopesOwnerAndExcludesWorkerTree(t *testing.
 func TestInspectNativeAgentProcessesCapsRowsWithoutLosingCount(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := setupTestService(t)
-	result, err := inspectNativeAgentProcesses(context.Background(), nativeProcessFixture(), 100, svc.Agents.Registry(), 1)
+	result, _, err := inspectNativeAgentProcesses(context.Background(), nativeProcessFixture(), 100, svc.Agents.Registry(), 1)
 	require.NoError(t, err)
 	require.Len(t, result.Processes, 1)
 	assert.Equal(t, int32(11), result.Processes[0].Pid, "PID ordering remains stable across OS snapshot ordering")
@@ -88,7 +88,7 @@ func TestInspectNativeAgentProcessesRefusesUnknownOwnership(t *testing.T) {
 		t.Run(strconv.Itoa(pid), func(t *testing.T) {
 			source := nativeProcessFixture()
 			delete(source.users, pid)
-			result, err := inspectNativeAgentProcesses(context.Background(), source, 100, svc.Agents.Registry(), maxNativeProcesses)
+			result, _, err := inspectNativeAgentProcesses(context.Background(), source, 100, svc.Agents.Registry(), maxNativeProcesses)
 			require.Error(t, err)
 			assert.Nil(t, result, "an unreadable scan must not masquerade as an empty successful scan")
 			assert.NotContains(t, source.pathReads, pid)
@@ -101,7 +101,7 @@ func TestInspectNativeAgentProcessesRetainsUnknownKindWhenPathIsUnavailable(t *t
 	svc, _, _ := setupTestService(t)
 	source := nativeProcessFixture()
 	delete(source.paths, 11)
-	result, err := inspectNativeAgentProcesses(context.Background(), source, 100, svc.Agents.Registry(), maxNativeProcesses)
+	result, _, err := inspectNativeAgentProcesses(context.Background(), source, 100, svc.Agents.Registry(), maxNativeProcesses)
 	require.NoError(t, err)
 	require.Len(t, result.Processes, 2)
 	assert.Equal(t, leapmuxv1.NativeAgentProcessKind_NATIVE_AGENT_PROCESS_KIND_UNKNOWN, result.Processes[0].Kind)
@@ -113,7 +113,7 @@ func TestInspectNativeAgentProcessesHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	source := nativeProcessFixture()
-	result, err := inspectNativeAgentProcesses(ctx, source, 100, svc.Agents.Registry(), maxNativeProcesses)
+	result, _, err := inspectNativeAgentProcesses(ctx, source, 100, svc.Agents.Registry(), maxNativeProcesses)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Nil(t, result)
 	assert.Empty(t, source.pathReads)
@@ -129,7 +129,7 @@ func TestInspectNativeAgentProcessesReportsNameReadFailure(t *testing.T) {
 	t.Parallel()
 	svc, _, _ := setupTestService(t)
 	source := nativeProcessFixture()
-	result, err := inspectNativeAgentProcesses(context.Background(), unreadableNativeProcessName{source}, 100, svc.Agents.Registry(), maxNativeProcesses)
+	result, _, err := inspectNativeAgentProcesses(context.Background(), unreadableNativeProcessName{source}, 100, svc.Agents.Registry(), maxNativeProcesses)
 	require.Error(t, err)
 	assert.Nil(t, result)
 	assert.Empty(t, source.pathReads)
@@ -151,7 +151,7 @@ func TestInspectNativeAgentProcessesSkipsOnlyVerifiedExitedCandidates(t *testing
 	t.Parallel()
 	svc, _, _ := setupTestService(t)
 	source := nativeProcessFixture()
-	result, err := inspectNativeAgentProcesses(context.Background(), exitedNativeProcessSource{source, 11}, 100, svc.Agents.Registry(), maxNativeProcesses)
+	result, _, err := inspectNativeAgentProcesses(context.Background(), exitedNativeProcessSource{source, 11}, 100, svc.Agents.Registry(), maxNativeProcesses)
 	require.NoError(t, err)
 	require.Len(t, result.Processes, 1)
 	assert.Equal(t, int32(30), result.Processes[0].Pid)
@@ -159,8 +159,32 @@ func TestInspectNativeAgentProcessesSkipsOnlyVerifiedExitedCandidates(t *testing
 	assert.Equal(t, []int{30}, source.pathReads)
 
 	source = nativeProcessFixture()
-	result, err = inspectNativeAgentProcesses(context.Background(), exitedNativeProcessSource{source, 100}, 100, svc.Agents.Registry(), maxNativeProcesses)
+	result, _, err = inspectNativeAgentProcesses(context.Background(), exitedNativeProcessSource{source, 100}, 100, svc.Agents.Registry(), maxNativeProcesses)
 	require.Error(t, err, "the scanner must establish its own owner even if that process disappeared")
 	assert.Nil(t, result)
 	assert.Empty(t, source.pathReads)
+}
+
+type reusedDuringClassificationSource struct {
+	nativeProcessSource
+	calls map[int]int
+}
+
+func (s *reusedDuringClassificationSource) ObservationIdentity(_ context.Context, pid int) (procutil.ProcessIdentity, error) {
+	s.calls[pid]++
+	start := int64(100)
+	if pid == 11 && s.calls[pid] > 1 {
+		start = 200
+	}
+	return procutil.ProcessIdentity{PID: pid, StartTime: start}, nil
+}
+func TestInspectNativeAgentProcessesAnchorsIdentityDuringClassification(t *testing.T) {
+	t.Parallel()
+	svc, _, _ := setupTestService(t)
+	source := &reusedDuringClassificationSource{nativeProcessSource: nativeProcessFixture(), calls: map[int]int{}}
+	result, identities, err := inspectNativeAgentProcesses(context.Background(), source, 100, svc.Agents.Registry(), maxNativeProcesses)
+	require.NoError(t, err)
+	require.Len(t, result.Processes, 2)
+	assert.NotContains(t, identities, 11, "a replacement process cannot inherit verified owner/provider metadata")
+	assert.Equal(t, procutil.ProcessIdentity{PID: 30, StartTime: 100}, identities[30])
 }

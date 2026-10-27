@@ -260,3 +260,13 @@ export const processObservation = style({
   minWidth: 0,
   color: 'var(--muted-foreground)',
 })
+
+export const unobservedProcesses = style({
+  fontSize: 'var(--text-7)',
+})
+
+export const processSummary = style({
+  cursor: 'pointer',
+  color: 'var(--muted-foreground)',
+  paddingBlock: 'var(--space-2)',
+})

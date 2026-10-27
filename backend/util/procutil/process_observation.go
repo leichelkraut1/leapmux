@@ -3,6 +3,9 @@ package procutil
 import (
 	"context"
 	"errors"
+	"math"
+
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 // ErrObservedProcessGone means OS metadata confirms the observed process exited.
@@ -45,4 +48,20 @@ func (t *ProcessTable) ShortName(ctx context.Context, pid int) (string, error) {
 		return "", nil
 	}
 	return name, err
+}
+
+// ObservationIdentity reads fresh creation metadata, avoiding cached snapshot
+// values when checking whether a PID was reused during a provider query.
+func (t *ProcessTable) ObservationIdentity(ctx context.Context, pid int) (ProcessIdentity, error) {
+	if err := ctx.Err(); err != nil {
+		return ProcessIdentity{}, err
+	}
+	if t == nil || t.byPID[pid] == nil || pid <= 0 || pid > math.MaxInt32 {
+		return ProcessIdentity{}, errors.New("process absent from snapshot")
+	}
+	created, err := (&process.Process{Pid: int32(pid)}).CreateTimeWithContext(ctx)
+	if err != nil || created <= 0 {
+		return ProcessIdentity{}, errors.New("process creation metadata unavailable")
+	}
+	return ProcessIdentity{PID: pid, StartTime: created}, nil
 }

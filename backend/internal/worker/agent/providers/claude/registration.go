@@ -58,6 +58,7 @@ var claudeLocator = launch.Binaries("claude")
 // any of its agents runs.
 func Registration() agent.Registration {
 	return agent.Registration{
+		ObserveNativeSessions:  observeNativeSessions,
 		RecognizeNativeProcess: recognizeNativeProcess,
 		Provider:               leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE,
 		Plugin:                 claudeProvider{},

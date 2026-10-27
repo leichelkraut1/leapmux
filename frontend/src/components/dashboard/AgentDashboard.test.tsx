@@ -1,4 +1,5 @@
 import type { DashboardAgent } from '~/stores/agentDashboard'
+import type { DashboardExternalWorker } from '~/stores/externalAgentInventory'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -163,7 +164,7 @@ describe('AgentDashboard', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
   })
 
-  it('keeps external processes separate from leapmux activity counts and filters', () => {
+  it('counts and filters observed sessions across computers without counting native helper processes', () => {
     const onRefreshExternal = vi.fn()
     render(() => (
       <AgentDashboard
@@ -172,23 +173,126 @@ describe('AgentDashboard', () => {
           workerId: 'external',
           workerName: 'External PC',
           status: 'available',
-          processes: [{ pid: 100, providerName: 'Claude', processName: 'claude.exe', kind: 'cli' }],
+          processes: [
+            { pid: 100, providerName: 'Claude', processName: 'claude.exe', kind: 'cli', sessions: [
+              { sessionId: 'working-external', status: 'working' },
+              { sessionId: 'waiting-external', status: 'waiting' },
+              { sessionId: 'idle-external', status: 'idle' },
+              { sessionId: 'unknown-external', status: 'unknown' },
+            ] },
+            { pid: 200, providerName: 'Codex', processName: 'Codex', kind: 'desktop', sessions: [] },
+          ],
         }]}
         onRefreshExternal={onRefreshExternal}
         onOpenAgent={vi.fn()}
         onClose={vi.fn()}
       />
     ))
-    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working1')
-    fireEvent.click(screen.getByRole('radio', { name: 'Working' }))
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working2')
+    expect(screen.getByTestId('agent-count-waiting')).toHaveTextContent('Waiting on you2')
+    expect(screen.getByTestId('agent-count-idle')).toHaveTextContent('Idle2')
+    expect(screen.getByTestId('agent-count-unavailable')).toHaveTextContent('Unavailable3')
+    expect(screen.getByText('Showing 9 of 9 agents')).toBeInTheDocument()
     const external = within(screen.getByRole('region', { name: 'Outside LeapMux' }))
-    expect(external.getByText('Process detected', { exact: true })).toBeInTheDocument()
+    expect(external.getByText('Processes without session observations (1)').closest('details')).not.toHaveAttribute('open')
     expect(external.queryByRole('button', { name: /Open chat/ })).not.toBeInTheDocument()
+
+    for (const label of ['Working', 'Waiting on you', 'Idle']) {
+      fireEvent.click(screen.getByRole('radio', { name: label }))
+      expect(agentList().getAllByRole('listitem')).toHaveLength(1)
+      expect(within(external.getByRole('list', { name: 'Observed sessions on External PC' })).getAllByRole('listitem')).toHaveLength(1)
+      expect(external.getByText(label, { exact: true })).toBeInTheDocument()
+      expect(external.queryByText('Process detected', { exact: true })).not.toBeInTheDocument()
+      expect(screen.getByText('Showing 2 of 9 agents')).toBeInTheDocument()
+    }
+
     fireEvent.click(external.getByRole('button', { name: 'Refresh external processes' }))
     expect(onRefreshExternal).toHaveBeenCalledOnce()
     fireEvent.input(screen.getByRole('searchbox', { name: 'Search agents' }), { target: { value: 'External PC' } })
-    expect(external.getByText('Process detected', { exact: true })).toBeInTheDocument()
+    expect(external.getByText('Idle', { exact: true })).toBeInTheDocument()
     expect(screen.getByText('No matching agents')).toBeInTheDocument()
+    expect(screen.getByText('Showing 1 of 9 agents')).toBeInTheDocument()
+  })
+
+  it.each(['loading', 'unavailable', 'offline'] as const)('excludes stale native session counts while a computer is %s', (status) => {
+    render(() => (
+      <AgentDashboard
+        rows={rows}
+        externalWorkers={[{
+          workerId: 'external',
+          workerName: 'External PC',
+          status,
+          processes: [{ pid: 100, providerName: 'Claude', processName: 'claude.exe', kind: 'cli', sessions: [
+            { sessionId: 'stale-working', status: 'working' },
+            { sessionId: 'stale-idle', status: 'idle' },
+          ] }],
+        }]}
+        onOpenAgent={vi.fn()}
+        onClose={vi.fn()}
+      />
+    ))
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working1')
+    expect(screen.getByTestId('agent-count-idle')).toHaveTextContent('Idle1')
+    expect(screen.getByText('Showing 5 of 5 agents')).toBeInTheDocument()
+  })
+
+  it('excludes old session counts when the computer registry becomes unavailable', () => {
+    const [registryStatus, setRegistryStatus] = createSignal<'available' | 'unavailable'>('available')
+    render(() => (
+      <AgentDashboard
+        rows={rows}
+        registryStatus={registryStatus()}
+        externalWorkers={[{
+          workerId: 'external',
+          workerName: 'External PC',
+          status: 'available',
+          processes: [{ pid: 100, providerName: 'Claude', processName: 'claude.exe', kind: 'cli', sessions: [
+            { sessionId: 'active-external', status: 'working' },
+          ] }],
+        }]}
+        onOpenAgent={vi.fn()}
+        onClose={vi.fn()}
+      />
+    ))
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working2')
+    setRegistryStatus('unavailable')
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working1')
+    expect(screen.queryByRole('list', { name: 'Observed sessions on External PC' })).not.toBeInTheDocument()
+  })
+
+  it('keeps observed session totals stable while updating and clears them after failure', () => {
+    const snapshot = {
+      workerId: 'external',
+      workerName: 'External PC',
+      status: 'available' as const,
+      observedAt: '2026-10-27T12:00:00Z',
+      processes: [{ pid: 100, providerName: 'Claude', processName: 'claude.exe', kind: 'cli' as const, sessions: [
+        { sessionId: 'active-external', status: 'working' as const },
+      ] }],
+    }
+    const [externalWorkers, setExternalWorkers] = createSignal<readonly DashboardExternalWorker[]>([snapshot])
+    render(() => (
+      <AgentDashboard
+        rows={rows}
+        externalWorkers={externalWorkers()}
+        onRefreshExternal={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onClose={vi.fn()}
+      />
+    ))
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working2')
+    setExternalWorkers([{ ...snapshot, refreshing: true }])
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working2')
+    expect(screen.getByText('Showing 6 of 6 agents')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Updating observation…')
+    expect(screen.getByText(/Observed at/).querySelector('time')).toHaveAttribute('datetime', snapshot.observedAt)
+    expect(screen.getByRole('button', { name: 'Refresh external processes' })).toBeDisabled()
+    setExternalWorkers([{ ...snapshot, status: 'unavailable', refreshing: false, processes: [], observedAt: undefined }])
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working1')
+    expect(screen.getByText('Showing 5 of 5 agents')).toBeInTheDocument()
+    expect(screen.queryByText('Updating observation…')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Observed at/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Refresh external processes' })).toBeEnabled()
   })
 
   it('passes the computer registry state to the external observation section', () => {

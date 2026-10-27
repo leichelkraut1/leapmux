@@ -26,6 +26,9 @@ type StartFunc func(ctx context.Context, opts Options, sink ProviderServices) (A
 // static catalog, and its option policy. Each provider states one Registration,
 // and NewRegistry collects them; nothing mutates a Registration after that.
 type Registration struct {
+	// ObserveNativeSessions queries live, read-only status metadata from an existing provider.
+	// nil means native session status is not supported. It must not start or resume sessions.
+	ObserveNativeSessions func(context.Context) ([]NativeSessionObservation, error)
 	// RecognizeNativeProcess classifies OS executable metadata without reading native sessions.
 	// nil means this provider does not support process observation.
 	RecognizeNativeProcess func(name, executablePath string) leapmuxv1.NativeAgentProcessKind

@@ -356,10 +356,18 @@ enum NativeAgentProcessKind {
 message NativeAgentProcess {
   int32 pid = 1;
   int32 parent_pid = 2;
-  // Basename only. No executable path, arguments, environment or session data.
+  // Basename only. No executable path, arguments, or environment.
   string executable_name = 3;
   AgentProvider agent_provider = 4;
   NativeAgentProcessKind kind = 5;
+  // Live, read-only observations reported by the provider. Empty when unavailable.
+  repeated NativeAgentSession sessions = 6;
+}
+
+message NativeAgentSession {
+  // Opaque provider session identifier. No title, directory, or conversation content.
+  string session_id = 1;
+  AgentActivityState activity_state = 2;
 }
 
 message InspectNativeAgentProcessesResponse {

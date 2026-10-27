@@ -1,8 +1,9 @@
 import type { Accessor } from 'solid-js'
-import type { DashboardExternalWorker } from '~/stores/externalAgentInventory'
+import type { DashboardExternalSession, DashboardExternalWorker } from '~/stores/externalAgentInventory'
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from 'solid-js'
 import { inspectNativeAgentProcesses } from '~/api/workerRpc'
 import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
+import { AgentActivityState } from '~/generated/proto/leapmux/v1/agent_pb'
 import { NativeAgentProcessKind } from '~/generated/proto/leapmux/v1/worker_pb'
 
 export interface InventoryWorker {
@@ -11,8 +12,21 @@ export interface InventoryWorker {
   online: boolean
 }
 
-const REFRESH_INTERVAL_MS = 30_000
+const REFRESH_INTERVAL_MS = 15_000
 const REQUEST_TIMEOUT_MS = 15_000
+
+function sessionStatus(state: AgentActivityState): DashboardExternalSession['status'] {
+  switch (state) {
+    case AgentActivityState.WORKING:
+      return 'working'
+    case AgentActivityState.WAITING_FOR_USER:
+      return 'waiting'
+    case AgentActivityState.IDLE:
+      return 'idle'
+    default:
+      return 'unknown'
+  }
+}
 
 /** Observe only while the dashboard is open. A failed observation is never an empty inventory. */
 export function useExternalAgentInventory(
@@ -43,12 +57,22 @@ export function useExternalAgentInventory(
     cancel()
     const run = generation
     pending = true
-    setRows(current.map(w => ({
-      workerId: w.workerId,
-      workerName: w.workerName,
-      status: w.online ? 'loading' : 'offline',
-      processes: [],
-    })))
+    setRows((previous) => {
+      const byId = new Map(previous.map(row => [row.workerId, row]))
+      return current.map((worker): DashboardExternalWorker => {
+        const snapshot = byId.get(worker.workerId)
+        // Source changes clear rows before reaching here. Preserve only a
+        // successful snapshot during this request's bounded timeout.
+        if (worker.online && snapshot?.status === 'available')
+          return { ...snapshot, refreshing: true }
+        return {
+          workerId: worker.workerId,
+          workerName: worker.workerName,
+          status: worker.online ? 'loading' : 'offline',
+          processes: [],
+        }
+      })
+    })
     await Promise.all(current.filter(w => w.online).map(async (worker) => {
       const controller = new AbortController()
       controllers.push(controller)
@@ -68,20 +92,26 @@ export function useExternalAgentInventory(
         ])
         observation = {
           status: 'available',
-          ...(response.observedAt ? { observedAt: response.observedAt } : {}),
+          refreshing: false,
+          observedAt: response.observedAt || undefined,
+          statusDetail: undefined,
           totalCount: response.totalCount,
           processes: response.processes.map(process => ({
             pid: process.pid,
             processName: process.executableName,
             providerName: agentProviderLabel(process.agentProvider),
             kind: process.kind === NativeAgentProcessKind.CLI ? 'cli' : process.kind === NativeAgentProcessKind.DESKTOP ? 'desktop' : 'unknown',
+            sessions: process.sessions.map(session => ({ sessionId: session.sessionId, status: sessionStatus(session.activityState) })),
           })),
         }
       }
       catch {
         observation = {
           status: 'unavailable',
+          refreshing: false,
           processes: [],
+          observedAt: undefined,
+          totalCount: undefined,
           statusDetail: 'This computer could not provide an observation. Check its connection and Worker version, then refresh.',
         }
       }

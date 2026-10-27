@@ -1,9 +1,10 @@
 import type { Component } from 'solid-js'
 import type { DashboardAgent } from '~/stores/agentDashboard'
-import type { DashboardExternalWorker, WorkerRegistryStatus } from '~/stores/externalAgentInventory'
+import type { DashboardExternalWorker, DashboardStatusFilter, WorkerRegistryStatus } from '~/stores/externalAgentInventory'
 import { createMemo, createSignal, For, Show } from 'solid-js'
 import { Dialog } from '~/components/common/Dialog'
 import { PillGroup } from '~/components/common/PillGroup'
+import { externalAgentSessions, filterExternalAgentWorkers } from '~/stores/externalAgentInventory'
 import * as styles from './AgentDashboard.css'
 import { ExternalAgentProcesses } from './ExternalAgentProcesses'
 
@@ -15,8 +16,6 @@ export interface AgentDashboardProps {
   onOpenAgent: (row: DashboardAgent) => void
   onClose: () => void
 }
-
-type StatusFilter = 'all' | 'working' | 'waiting' | 'idle'
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -35,10 +34,13 @@ const STATUS_LABELS: Record<DashboardAgent['status'], string> = {
 
 export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
   const [query, setQuery] = createSignal('')
-  const [filter, setFilter] = createSignal<StatusFilter>('all')
+  const [filter, setFilter] = createSignal<DashboardStatusFilter>('all')
+  const externalWorkers = createMemo(() => (props.registryStatus ?? 'available') === 'available' ? (props.externalWorkers ?? []) : [])
+  const externalSessions = createMemo(() => externalAgentSessions(externalWorkers()))
+  const visibleExternalSessions = createMemo(() => externalAgentSessions(filterExternalAgentWorkers(externalWorkers(), query(), filter())))
   const counts = createMemo(() => {
     const result = { working: 0, waiting: 0, idle: 0, unavailable: 0 }
-    for (const row of props.rows) {
+    for (const row of [...props.rows, ...externalSessions()]) {
       if (row.status === 'offline' || row.status === 'unknown')
         result.unavailable++
       else
@@ -61,9 +63,9 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
   return (
     <Dialog title="Agents dashboard" wide tall onClose={props.onClose} data-testid="agent-dashboard">
       <div class={styles.dashboard}>
-        <p class={styles.description}>LeapMux chats and agent processes across your computers.</p>
+        <p class={styles.description}>LeapMux chats and observed native sessions across your computers.</p>
 
-        <section aria-label="LeapMux agent status summary">
+        <section aria-label="Agent status summary">
           <dl class={styles.summary}>
             <div class={styles.summaryItem} data-testid="agent-count-working">
               <dt>Working</dt>
@@ -94,7 +96,7 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
               onInput={event => setQuery(event.currentTarget.value)}
             />
           </label>
-          <PillGroup<StatusFilter>
+          <PillGroup<DashboardStatusFilter>
             label="Filter agents by status"
             options={FILTERS}
             selectedKey={filter()}
@@ -103,7 +105,7 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
         </div>
 
         <p class={styles.resultCount} aria-live="polite">
-          {`Showing ${visibleRows().length} of ${props.rows.length} agents`}
+          {`Showing ${visibleRows().length + visibleExternalSessions().length} of ${props.rows.length + externalSessions().length} agents`}
         </p>
 
         <div class={styles.results}>
@@ -174,7 +176,7 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
             <p class={styles.note}>Unavailable includes offline computers and agents whose status has not arrived.</p>
           </section>
           <Show when={props.externalWorkers}>
-            {workers => <ExternalAgentProcesses workers={workers()} query={query()} registryStatus={props.registryStatus ?? 'available'} onRefresh={props.onRefreshExternal} />}
+            {workers => <ExternalAgentProcesses workers={workers()} query={query()} statusFilter={filter()} registryStatus={props.registryStatus ?? 'available'} onRefresh={props.onRefreshExternal} />}
           </Show>
         </div>
       </div>
