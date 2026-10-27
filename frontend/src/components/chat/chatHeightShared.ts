@@ -1,10 +1,10 @@
 /** Maximum visual rows shown for a collapsed command input summary. */
-export const COLLAPSED_COMMAND_INPUT_ROWS = 3
+export const COLLAPSED_COMMAND_INPUT_ROWS = 1
 
 /**
  * Long single-line commands must be expandable even though they contain no hard
- * newline. This threshold intentionally approximates "likely to exceed three
- * visual rows" without reading layout; DOM measurement supplies the exact height
+ * newline. This threshold intentionally approximates "likely to exceed the
+ * preview" without reading layout; DOM measurement supplies the exact height
  * after render.
  */
 export const COMMAND_INPUT_EXPAND_CHAR_THRESHOLD = 240
@@ -23,7 +23,7 @@ export function isMultiLineCommand(command: string | null | undefined): boolean 
 
 /**
  * Whether command input needs an expand affordance. Multi-line commands always
- * need it because the collapsed summary clips after three rows; long single-line
+ * need it because the collapsed summary clips after one row; long single-line
  * commands need it because `pre-wrap` + `break-all` can wrap into many rows.
  */
 export function commandInputNeedsExpansion(command: string | null | undefined): boolean {

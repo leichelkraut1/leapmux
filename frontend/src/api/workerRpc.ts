@@ -72,6 +72,7 @@ import type {
 } from '~/generated/proto/leapmux/v1/terminal_pb'
 import type {
   GetWorkerSystemInfoResponse,
+  InspectNativeAgentProcessesResponse,
 } from '~/generated/proto/leapmux/v1/worker_pb'
 import type {
   GetTabPayloadResponse,
@@ -209,6 +210,8 @@ import {
 import {
   GetWorkerSystemInfoRequestSchema,
   GetWorkerSystemInfoResponseSchema,
+  InspectNativeAgentProcessesRequestSchema,
+  InspectNativeAgentProcessesResponseSchema,
 } from '~/generated/proto/leapmux/v1/worker_pb'
 import {
   GetTabPayloadRequestSchema,
@@ -383,6 +386,14 @@ async function callWorker<
 // ---------------------------------------------------------------------------
 // System Info (via E2EE channel to worker)
 // ---------------------------------------------------------------------------
+
+/** Owner-only read-only observation; never resumes or controls native sessions. */
+export function inspectNativeAgentProcesses(
+  workerId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<InspectNativeAgentProcessesResponse> {
+  return callWorker(workerId, 'InspectNativeAgentProcesses', InspectNativeAgentProcessesRequestSchema, InspectNativeAgentProcessesResponseSchema, {}, opts)
+}
 
 export function getWorkerSystemInfo(workerId: string): Promise<GetWorkerSystemInfoResponse> {
   return callWorker(workerId, 'GetWorkerSystemInfo', GetWorkerSystemInfoRequestSchema, GetWorkerSystemInfoResponseSchema, {})

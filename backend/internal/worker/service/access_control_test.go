@@ -361,6 +361,9 @@ var ownerGuardedProbes = func() []ownerGuardedProbe {
 				Agents: []*leapmuxv1.WatchAgentEntry{{AgentId: "agent-1"}},
 			}
 		}},
+		ownerGuardedProbe{"InspectNativeAgentProcesses", "InspectNativeAgentProcesses", func() proto.Message {
+			return &leapmuxv1.InspectNativeAgentProcessesRequest{}
+		}},
 		ownerGuardedProbe{"ListAgentSessions", "ListAgentSessions", func() proto.Message {
 			return &leapmuxv1.ListAgentSessionsRequest{
 				AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE,

@@ -1477,6 +1477,7 @@ func registerAllClassified(d *channel.Dispatcher, svc *Service) (map[string]meth
 	registerTerminalHandlers(r, svc)
 	registerAgentHandlers(r, svc)
 	registerAgentSessionHandlers(r, svc)
+	registerNativeProcessHandlers(r, svc)
 	registerCleanupHandlers(r, svc)
 	registerSysInfoHandlers(ownerOnly, svc)
 	tunnels := registerTunnelHandlers(ownerOnly)

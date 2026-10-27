@@ -2,7 +2,8 @@ import type { Component } from 'solid-js'
 import type { KeyPinConfirmState } from './AppShellDialogs'
 import type { Worker } from '~/generated/proto/leapmux/v1/worker_pb'
 import type { DialogState } from '~/hooks/createDialogState'
-import { createEffect, createSignal, onCleanup, Show } from 'solid-js'
+import type { WorkerRegistryStatus } from '~/stores/externalAgentInventory'
+import { batch, createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { workerClient } from '~/api/clients'
 import { channelManager, setConfirmKeyPin } from '~/api/workerRpc'
 import { AddTunnelDialog } from '~/components/workers/AddTunnelDialog'
@@ -44,6 +45,8 @@ export interface UseWorkerSectionOpts {
 
 export interface WorkerSection {
   workers: () => Worker[]
+  registryStatus: () => WorkerRegistryStatus
+  refreshWorkers: () => Promise<void>
   workerInfoFn: typeof workerInfoStore.workerInfo
   channelStatusFn: ReturnType<typeof createWorkerChannelStatusStore>['getStatus']
   tunnelStore: ReturnType<typeof createTunnelStore>
@@ -56,6 +59,7 @@ export interface WorkerSection {
 export function useWorkerSection(opts: UseWorkerSectionOpts): WorkerSection {
   const workerChannelStatusStore = createWorkerChannelStatusStore(channelManager)
   const [workers, setWorkers] = createSignal<Worker[]>([])
+  const [registryStatus, setRegistryStatus] = createSignal<WorkerRegistryStatus>('loading')
   const [deregisterTarget, setDeregisterTarget] = createSignal<Worker | null>(null)
   const [addTunnelTarget, setAddTunnelTarget] = createSignal<Worker | null>(null)
   const [showRegisterWorker, setShowRegisterWorker] = createSignal(false)
@@ -66,20 +70,57 @@ export function useWorkerSection(opts: UseWorkerSectionOpts): WorkerSection {
   // remount every worker row on each refresh / WORKERS_CHANGED push.
   const workerIdentity = createIdentityCache<Worker>({ keyOf: w => w.id })
 
-  async function fetchWorkers() {
+  let registryRequest: AbortController | undefined
+  let disposed = false
+  onCleanup(() => {
+    disposed = true
+    registryRequest?.abort()
+  })
+
+  async function fetchWorkers(): Promise<void> {
+    if (disposed)
+      return
+    registryRequest?.abort()
+    setRegistryStatus('loading')
     if (!opts.getUserId())
       return
+    const request = new AbortController()
+    registryRequest = request
     try {
-      const resp = await workerClient.listWorkers({})
-      const stable = workerIdentity.stabilize(resp.workers)
-      setWorkers(stable)
+      const collected: Worker[] = []
+      const cursors = new Set<string>()
+      let cursor = ''
+      while (true) {
+        const resp = await workerClient.listWorkers({ page: { cursor } }, { signal: request.signal })
+        if (request.signal.aborted)
+          return
+        collected.push(...resp.workers)
+        if (!resp.page?.hasMore)
+          break
+        const next = resp.page.nextCursor
+        if (!next || cursors.has(next))
+          throw new Error('Worker pagination did not advance')
+        cursors.add(next)
+        cursor = next
+      }
+      const stable = workerIdentity.stabilize(collected)
+      batch(() => {
+        setWorkers(stable)
+        setRegistryStatus('available')
+      })
       for (const w of stable) {
         if (w.online)
           workerInfoStore.fetchWorkerInfo(w.id)
       }
     }
     catch {
-      // Best effort — sidebar will show an empty workers list.
+      // Keep the sidebar's last list, but do not present it as a fresh inventory.
+      if (!request.signal.aborted)
+        setRegistryStatus('unavailable')
+    }
+    finally {
+      if (registryRequest === request)
+        registryRequest = undefined
     }
   }
 
@@ -163,6 +204,8 @@ export function useWorkerSection(opts: UseWorkerSectionOpts): WorkerSection {
 
   return {
     workers,
+    registryStatus,
+    refreshWorkers: fetchWorkers,
     workerInfoFn: workerInfoStore.workerInfo,
     channelStatusFn: workerChannelStatusStore.getStatus,
     tunnelStore,

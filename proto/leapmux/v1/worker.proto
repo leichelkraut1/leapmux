@@ -2,6 +2,7 @@ syntax = "proto3";
 package leapmux.v1;
 
 import "google/protobuf/timestamp.proto";
+import "leapmux/v1/agent.proto";
 import "leapmux/v1/channel.proto";
 import "leapmux/v1/common.proto";
 import "leapmux/v1/workspace.proto";
@@ -337,4 +338,34 @@ message GetWorkerSystemInfoResponse {
   string commit_hash = 6; // Optional short git commit ID injected at build time
   string build_time = 7;  // Optional build timestamp injected at build time
   string branch = 8;      // Optional git ref (branch or tag) injected at build time; empty for detached HEAD
+}
+
+// InspectNativeAgentProcesses observes same-OS-user processes outside this
+// Worker's process tree. It never attaches to or resumes a native session.
+message InspectNativeAgentProcessesRequest {}
+
+// Classification describes an executable, not whether a chat is working.
+// UNKNOWN means a provider's name matched but CLI versus desktop is ambiguous.
+enum NativeAgentProcessKind {
+  NATIVE_AGENT_PROCESS_KIND_UNSPECIFIED = 0;
+  NATIVE_AGENT_PROCESS_KIND_CLI = 1;
+  NATIVE_AGENT_PROCESS_KIND_DESKTOP = 2;
+  NATIVE_AGENT_PROCESS_KIND_UNKNOWN = 3;
+}
+
+message NativeAgentProcess {
+  int32 pid = 1;
+  int32 parent_pid = 2;
+  // Basename only. No executable path, arguments, environment or session data.
+  string executable_name = 3;
+  AgentProvider agent_provider = 4;
+  NativeAgentProcessKind kind = 5;
+}
+
+message InspectNativeAgentProcessesResponse {
+  repeated NativeAgentProcess processes = 1;
+  // RFC3339 time when the successful observation completed.
+  string observed_at = 2;
+  // Recognized same-user processes before the response cap, including omitted rows.
+  int32 total_count = 3;
 }

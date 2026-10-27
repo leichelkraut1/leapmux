@@ -1,5 +1,5 @@
 import type { Component } from 'solid-js'
-import { useNavigate } from '@solidjs/router'
+import { useNavigate, useSearchParams } from '@solidjs/router'
 import { Show } from 'solid-js'
 import { platformBridge } from '~/api/platformBridge'
 import { DropdownMenuItemContent } from '~/components/common/DropdownMenu'
@@ -19,6 +19,7 @@ export const AppAboutMenuItem: Component = () => (
 export const UserMenuItems: Component = () => {
   const auth = useAuth()
   const navigate = useNavigate()
+  const [, setSearchParams] = useSearchParams()
   // Hoisted so the spread narrows; `detail?: string` takes no undefined.
   const preferencesHint = getShortcutHintsText('app.openPreferences')
 
@@ -54,6 +55,9 @@ export const UserMenuItems: Component = () => {
 
   return (
     <>
+      <button role="menuitem" onClick={() => setSearchParams({ dashboard: 'agents' })}>
+        Agent dashboard
+      </button>
       <AppAboutMenuItem />
       <button role="menuitem" onClick={() => openPreferences()}>
         <DropdownMenuItemContent label="Preferences..." {...(preferencesHint !== undefined ? { detail: preferencesHint } : {})} />

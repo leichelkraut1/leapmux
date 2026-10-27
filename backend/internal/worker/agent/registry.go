@@ -26,6 +26,9 @@ type StartFunc func(ctx context.Context, opts Options, sink ProviderServices) (A
 // static catalog, and its option policy. Each provider states one Registration,
 // and NewRegistry collects them; nothing mutates a Registration after that.
 type Registration struct {
+	// RecognizeNativeProcess classifies OS executable metadata without reading native sessions.
+	// nil means this provider does not support process observation.
+	RecognizeNativeProcess func(name, executablePath string) leapmuxv1.NativeAgentProcessKind
 	// ShutdownGrace permits the native relay to drain before forced process cleanup.
 	// Zero selects the common process grace.
 	ShutdownGrace time.Duration

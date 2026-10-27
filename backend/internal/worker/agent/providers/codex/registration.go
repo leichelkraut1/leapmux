@@ -92,12 +92,13 @@ var codexLocator = launch.Binaries(contracts.CodexExecutableKeys...)
 // its agents runs.
 func Registration() agent.Registration {
 	return agent.Registration{
-		Provider:      leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX,
-		Plugin:        codexProvider{},
-		Start:         Start,
-		Locator:       codexLocator,
-		DefaultModels: codexDefaultModels,
-		OptionGroups:  codexStaticOptionGroups,
+		RecognizeNativeProcess: recognizeNativeProcess,
+		Provider:               leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX,
+		Plugin:                 codexProvider{},
+		Start:                  Start,
+		Locator:                codexLocator,
+		DefaultModels:          codexDefaultModels,
+		OptionGroups:           codexStaticOptionGroups,
 		// The static option groups declare the provider axes except effort.
 		// The model catalog supplies effort, so declare that axis here.
 		AdditionalOptionIDs: []string{agent.OptionIDEffort},

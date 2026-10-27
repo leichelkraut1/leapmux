@@ -1584,3 +1584,119 @@ describe('useTabHydrators', () => {
     })
   })
 })
+
+describe('refreshWorkerAgents', () => {
+  it('restores idle and waiting agents in an inactive workspace without a hub liveness change', async () => {
+    vi.useFakeTimers()
+    const s = setup('ws-active')
+    let dispose!: () => void
+    try {
+      mockListAgents.mockResolvedValue({
+        agents: ['idle', 'waiting'].map(id => agentInfo(id, { publishedActivityState: AgentActivityState.WORKING })),
+        verdicts: [],
+      })
+      const hydrators = createRoot((d) => {
+        dispose = d
+        seedWorkspace(s.harness, 'ws-other', 'tile-other')
+        s.add(TabType.AGENT, 'idle', 'w1', 'tile-other')
+        s.add(TabType.AGENT, 'waiting', 'w1', 'tile-other')
+        return s.mount(() => new Set(['w1']))
+      })
+      await flush()
+      await flush()
+      expect(mockListAgents).toHaveBeenCalledTimes(1)
+      s.agentActivityStore.forget('idle')
+      s.agentActivityStore.forget('waiting')
+      expect(s.agentActivityStore.hasPublished('waiting')).toBe(false)
+      mockListAgents.mockResolvedValue({
+        agents: [
+          agentInfo('idle', { publishedActivityState: AgentActivityState.IDLE }),
+          agentInfo('waiting', { publishedActivityState: AgentActivityState.WAITING_FOR_USER }),
+        ],
+        verdicts: [],
+      })
+      hydrators.refreshWorkerAgents('w1')
+      await flush()
+      await flush()
+      expect(mockListAgents).toHaveBeenCalledTimes(2)
+      expect(mockListAgents.mock.calls[1]?.[1].tabIds.sort()).toEqual(['idle', 'waiting'])
+      expect(s.agentActivityStore.publishedState('idle')).toBe(AgentActivityState.IDLE)
+      expect(s.agentActivityStore.hasPublished('idle')).toBe(true)
+      expect(s.agentActivityStore.publishedState('waiting')).toBe(AgentActivityState.WAITING_FOR_USER)
+      expect(s.view.getAgentTab('waiting')?.workspaceId).toBe('ws-other')
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(mockListAgents).toHaveBeenCalledTimes(2)
+    }
+    finally {
+      dispose?.()
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores an older in-flight reply when a replacement stream reopens', async () => {
+    vi.useFakeTimers()
+    const s = setup()
+    const oldReply = heldReply()
+    let dispose!: () => void
+    try {
+      mockListAgents.mockReturnValueOnce(oldReply.promise)
+      const hydrators = createRoot((d) => {
+        dispose = d
+        s.add(TabType.AGENT, 'a1')
+        return s.mount()
+      })
+      await flush()
+      hydrators.refreshWorkerAgents('w1')
+      oldReply.settle({
+        agents: [agentInfo('a1', { title: 'Stale', publishedActivityState: AgentActivityState.WORKING })],
+        verdicts: [],
+      })
+      await flush()
+      await flush()
+      expect(s.agentActivityStore.hasPublished('a1')).toBe(false)
+      expect(s.view.getAgentTab('a1')?.title).not.toBe('Stale')
+      mockListAgents.mockResolvedValue({
+        agents: [agentInfo('a1', { title: 'Current', publishedActivityState: AgentActivityState.WAITING_FOR_USER })],
+        verdicts: [],
+      })
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(mockListAgents).toHaveBeenCalledTimes(2)
+      expect(s.view.getAgentTab('a1')?.title).toBe('Current')
+      expect(s.agentActivityStore.publishedState('a1')).toBe(AgentActivityState.WAITING_FOR_USER)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(mockListAgents).toHaveBeenCalledTimes(2)
+    }
+    finally {
+      dispose?.()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a newer live publication when a reconnect snapshot arrives', async () => {
+    const s = setup()
+    mockListAgents.mockResolvedValue({ agents: [agentInfo('a1')], verdicts: [] })
+    let dispose!: () => void
+    const hydrators = createRoot((d) => {
+      dispose = d
+      s.add(TabType.AGENT, 'a1')
+      return s.mount()
+    })
+    try {
+      await flush()
+      await flush()
+      const reply = heldReply()
+      mockListAgents.mockReturnValueOnce(reply.promise)
+      hydrators.refreshWorkerAgents('w1')
+      expect(s.agentActivityStore.hasPublished('a1')).toBe(false)
+      s.agentActivityStore.apply('a1', AgentActivityState.WAITING_FOR_USER)
+      reply.settle({ agents: [agentInfo('a1', { publishedActivityState: AgentActivityState.WORKING })], verdicts: [] })
+      await flush()
+      await flush()
+      expect(s.agentActivityStore.publishedState('a1')).toBe(AgentActivityState.WAITING_FOR_USER)
+      expect(mockListAgents).toHaveBeenCalledTimes(2)
+    }
+    finally {
+      dispose()
+    }
+  })
+})

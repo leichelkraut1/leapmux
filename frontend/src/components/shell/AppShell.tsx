@@ -13,6 +13,7 @@ import type { BranchRef } from '~/components/workspace/workspaceTabTree.model'
 import type { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import type { LinkConfirmState } from '~/hooks/createLinkConfirm'
 import type { ChangeBranchMode } from '~/hooks/useGitModeState'
+import type { DashboardAgent } from '~/stores/agentDashboard'
 import type { GoalAction, GoalSurface } from '~/stores/chatGoal'
 import type { SavedViewportScroll } from '~/stores/chatTypes'
 import type { TabView } from '~/stores/tabView'
@@ -23,7 +24,9 @@ import { apiLoadingTimeoutMs, workspaceBootstrapTimeoutMs } from '~/api/transpor
 import { setExpectedUserId } from '~/api/workerRpc'
 import { createAgentComposerActionStateStore } from '~/components/chat/agentComposerActionState'
 import { pluginFor } from '~/components/chat/providers/registry'
+import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
 import { BootSplash } from '~/components/common/BootSplash'
+import { AgentDashboard } from '~/components/dashboard/AgentDashboard'
 import { CliPathDialog } from '~/components/desktop/CliPathDialog'
 import { isWorkspaceMutatable } from '~/components/shell/sectionUtils'
 import { focusedTerminalId, setTerminalScreenSink, writeToFocusedTerminal } from '~/components/terminal/TerminalView'
@@ -37,6 +40,7 @@ import { createDialogState } from '~/hooks/createDialogState'
 import { createLinkConfirm } from '~/hooks/createLinkConfirm'
 import { createLoadingSignal } from '~/hooks/createLoadingSignal'
 import { useChatAutoFocus } from '~/hooks/useChatAutoFocus'
+import { useExternalAgentInventory } from '~/hooks/useExternalAgentInventory'
 import { useIsMobileLayout } from '~/hooks/useIsMobileLayout'
 import { useShortcuts } from '~/hooks/useShortcuts'
 import { useVisualViewportInset } from '~/hooks/useVisualViewportInset'
@@ -59,6 +63,7 @@ import { printConsoleBanner } from '~/lib/systemInfo'
 import { interceptUntrustedLinkClicks } from '~/lib/untrustedLinkClicks'
 import { isWorkerKnownOnline, onlineWorkerIdSet, workerOnlineState } from '~/lib/workerLiveness'
 import { createAgentActivityStore } from '~/stores/agentActivity.store'
+import { buildAgentDashboard } from '~/stores/agentDashboard'
 import { createAgentInputQueueStore } from '~/stores/agentInputQueue.store'
 import { createAgentSessionStore } from '~/stores/agentSession.store'
 import { createChatStore } from '~/stores/chat.store'
@@ -352,7 +357,7 @@ export const AppShell: Component = () => {
   // agent record, terminal title) hasn't arrived yet. The hook fires
   // off one best-effort fetch per pending tab; see useTabHydrators for
   // the per-type predicates.
-  useTabHydrators({
+  const tabHydrators = useTabHydrators({
     view: tabView,
     metadata: tabMetadata,
     repoGitStore,
@@ -439,7 +444,7 @@ export const AppShell: Component = () => {
   onCleanup(() => turnEndRefresh.dispose())
 
   // Streaming connection management
-  useWorkspaceConnection({
+  const workspaceConnection = useWorkspaceConnection({
     chatStore,
     agentInputQueueStore,
     view: tabView,
@@ -458,6 +463,7 @@ export const AppShell: Component = () => {
     // keeps the agent busy afterwards. The gate decides which turn end can
     // show in the tree the user sees, and collapses a burst of them.
     onTurnEndRefresh: turnEndRefresh.notify,
+    onWorkerStreamReopened: tabHydrators.refreshWorkerAgents,
   })
 
   // Auto-open new workspace dialog from URL search params
@@ -1548,6 +1554,35 @@ export const AppShell: Component = () => {
     },
   })
 
+  const externalInventory = useExternalAgentInventory(
+    () => workerSection.workers().map(worker => ({
+      workerId: worker.id,
+      workerName: workerSection.workerInfoFn(worker.id)?.name || worker.id,
+      online: worker.online,
+    })),
+    () => searchParams.dashboard === 'agents' && workerSection.registryStatus() === 'available',
+  )
+  const dashboardRows = createMemo(() => buildAgentDashboard({
+    tabs: tabView.all(),
+    workspaces: workspaceStore.state.workspaces,
+    workers: workerSection.workers(),
+    workerName: id => workerSection.workerInfoFn(id)?.name,
+    workerFresh: id => workerSection.channelStatusFn(id) === 'connected' && workspaceConnection.workerStreamReady(id),
+    providerName: provider => provider === undefined ? undefined : agentProviderLabel(provider),
+    activity: agentActivityStore,
+  }))
+
+  const closeAgentDashboard = () => setSearchParams({ dashboard: undefined }, { replace: true })
+  const openDashboardAgent = (row: DashboardAgent) => {
+    // Resolve again on click: a live row may have moved or closed while shown.
+    const tab = tabView.getAgentTab(row.agentId)
+    if (!tab)
+      return
+    tabOps.handleTabSelect(tab)
+    handleSelectWorkspace(tab.workspaceId)
+    closeAgentDashboard()
+  }
+
   // Sidebar element factories
   // Use getters for reactive values so that LeftSidebar/RightSidebar props
   // remain reactive when accessed through the intermediate opts object.
@@ -1862,6 +1897,22 @@ export const AppShell: Component = () => {
           onRefreshProviders={agentOps.loadAvailableProviders}
           repoGitStore={repoGitStore}
         />
+
+        <Show when={searchParams.dashboard === 'agents'}>
+          <AgentDashboard
+            rows={dashboardRows()}
+            registryStatus={workerSection.registryStatus()}
+            externalWorkers={externalInventory.rows()}
+            onRefreshExternal={() => {
+              if (workerSection.registryStatus() === 'unavailable')
+                void workerSection.refreshWorkers()
+              else
+                void externalInventory.refresh()
+            }}
+            onOpenAgent={openDashboardAgent}
+            onClose={closeAgentDashboard}
+          />
+        </Show>
 
         <workerSection.Dialogs />
 
