@@ -175,7 +175,7 @@ describe('AgentDashboard', () => {
           status: 'available',
           processes: [
             { pid: 100, providerName: 'Claude', processName: 'claude.exe', kind: 'cli', sessions: [
-              { sessionId: 'working-external', status: 'working' },
+              { sessionId: 'working-external', displayName: 'Plan the release', status: 'working' },
               { sessionId: 'waiting-external', status: 'waiting' },
               { sessionId: 'idle-external', status: 'idle' },
               { sessionId: 'unknown-external', status: 'unknown' },
@@ -212,6 +212,11 @@ describe('AgentDashboard', () => {
     expect(external.getByText('Idle', { exact: true })).toBeInTheDocument()
     expect(screen.getByText('No matching agents')).toBeInTheDocument()
     expect(screen.getByText('Showing 1 of 9 agents')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Working' }))
+    fireEvent.input(screen.getByRole('searchbox', { name: 'Search agents' }), { target: { value: ' PLAN THE RELEASE ' } })
+    expect(external.getByText('Plan the release')).toBeInTheDocument()
+    expect(screen.getByText('Showing 1 of 9 agents')).toBeInTheDocument()
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working2')
   })
 
   it.each(['loading', 'unavailable', 'offline'] as const)('excludes stale native session counts while a computer is %s', (status) => {

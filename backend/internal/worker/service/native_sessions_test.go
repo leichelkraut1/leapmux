@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
@@ -33,14 +34,16 @@ func TestApplyNativeSessionsVerifiesIdentityAndExcludesUnmatchedProcesses(t *tes
 	after := nativeIdentityFixture{11: before[11], 12: {PID: 12, StartTime: 200}}
 	rows := []*leapmuxv1.NativeAgentProcess{{Pid: 11}, {Pid: 12}, {Pid: 13}}
 	applyNativeSessions(context.Background(), after, rows, before, []agent.NativeSessionObservation{
-		{PID: 11, SessionID: "session-one", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WORKING},
+		{PID: 11, SessionID: "session-one", DisplayName: "  Review\n dashboard\t ", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WORKING},
 		{PID: 11, SessionID: "session-two", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WAITING_FOR_USER},
-		{PID: 12, SessionID: "reused-pid", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_IDLE},
+		{PID: 12, SessionID: "reused-pid", DisplayName: "Reused process name", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_IDLE},
 		{PID: 13, SessionID: "exited-pid", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_IDLE},
-		{PID: 100, SessionID: "managed-or-other-user", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WORKING},
+		{PID: 100, SessionID: "managed-or-other-user", DisplayName: "Excluded process name", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WORKING},
 	})
 	require.Len(t, rows[0].Sessions, 2)
 	assert.Equal(t, "session-one", rows[0].Sessions[0].SessionId)
+	assert.Equal(t, "Review dashboard", rows[0].Sessions[0].DisplayName)
+	assert.Empty(t, rows[0].Sessions[1].DisplayName)
 	assert.Equal(t, leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WAITING_FOR_USER, rows[0].Sessions[1].ActivityState)
 	assert.Empty(t, rows[1].Sessions)
 	assert.Empty(t, rows[2].Sessions)
@@ -137,4 +140,27 @@ func TestObserveNativeSessionsReturnsWhileCanceledProviderCleansUp(t *testing.T)
 	result := &leapmuxv1.InspectNativeAgentProcessesResponse{Processes: []*leapmuxv1.NativeAgentProcess{{Pid: 11, AgentProvider: reg.Provider}}}
 	observeNativeSessions(ctx, identities, result, identities, registry)
 	assert.Empty(t, result.Processes[0].Sessions, "late results never mutate the response after cancellation")
+}
+
+func TestNormalizeNativeSessionDisplayName(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"absent", "", ""},
+		{"whitespace", " \t Review\n dashboard\r\n ", "Review dashboard"},
+		{"controls and formatting", "Fix\x00\u202Estatus\u2069\u200B dashboard", "Fix status dashboard"},
+		{"controls only", "\x00\u202E\u2069\t", ""},
+		{"unicode", "修复状态 🧭", "修复状态 🧭"},
+		{"literal markup", "<b>Review & fix</b>", "<b>Review & fix</b>"},
+		{"limit", strings.Repeat("a", maxNativeSessionDisplayNameRunes), strings.Repeat("a", maxNativeSessionDisplayNameRunes)},
+		{"over limit", strings.Repeat("a", maxNativeSessionDisplayNameRunes+1), strings.Repeat("a", maxNativeSessionDisplayNameRunes)},
+		{"unicode limit", strings.Repeat("🧭", maxNativeSessionDisplayNameRunes+1), strings.Repeat("🧭", maxNativeSessionDisplayNameRunes)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, normalizeNativeSessionDisplayName(tc.input))
+		})
+	}
 }

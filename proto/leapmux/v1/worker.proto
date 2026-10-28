@@ -365,9 +365,12 @@ message NativeAgentProcess {
 }
 
 message NativeAgentSession {
-  // Opaque provider session identifier. No title, directory, or conversation content.
+  // Opaque provider session identifier; no directory or conversation content.
   string session_id = 1;
   AgentActivityState activity_state = 2;
+  // Optional provider-reported display name, bounded and normalized as plain text.
+  // Empty when the provider has no usable name. Never derived from conversation text.
+  string display_name = 3;
 }
 
 message InspectNativeAgentProcessesResponse {

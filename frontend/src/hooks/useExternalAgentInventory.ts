@@ -101,7 +101,11 @@ export function useExternalAgentInventory(
             processName: process.executableName,
             providerName: agentProviderLabel(process.agentProvider),
             kind: process.kind === NativeAgentProcessKind.CLI ? 'cli' : process.kind === NativeAgentProcessKind.DESKTOP ? 'desktop' : 'unknown',
-            sessions: process.sessions.map(session => ({ sessionId: session.sessionId, status: sessionStatus(session.activityState) })),
+            sessions: process.sessions.map(session => ({
+              sessionId: session.sessionId,
+              ...(session.displayName ? { displayName: session.displayName } : {}),
+              status: sessionStatus(session.activityState),
+            })),
           })),
         }
       }

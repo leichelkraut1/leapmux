@@ -29,6 +29,40 @@ function renderProcesses(items: readonly DashboardExternalWorker[] = workers, qu
 }
 
 describe('ExternalAgentProcesses', () => {
+  it('renders the native name as literal text while preserving provider and session identity', () => {
+    const name = '<img src=x onerror="alert(1)"> & rollout'
+    renderProcesses([{
+      ...workers[0]!,
+      processes: [{
+        ...workers[0]!.processes[0]!,
+        sessions: [{ sessionId: 'named-id', displayName: name, status: 'working' }],
+      }],
+    }])
+    const sessions = screen.getByRole('list', { name: 'Observed sessions on Windows PC' })
+    expect(within(sessions).getByText(name).tagName).toBe('STRONG')
+    expect(within(sessions).getByText('Claude · Session named-id · PID 123')).toBeInTheDocument()
+    expect(sessions.querySelector('img')).toBeNull()
+    expect(within(sessions).queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it.each([undefined, '', '   '])('falls back to the provider when the native name is %s', (displayName) => {
+    renderProcesses([{
+      ...workers[0]!,
+      processes: [{
+        ...workers[0]!.processes[0]!,
+        sessions: [{
+          sessionId: 'unnamed-id',
+          ...(displayName === undefined ? {} : { displayName }),
+          status: 'idle',
+        }],
+      }],
+    }])
+    const sessions = within(screen.getByRole('list', { name: 'Observed sessions on Windows PC' }))
+    expect(sessions.getByText('Claude', { exact: true }).tagName).toBe('STRONG')
+    expect(sessions.getByText('Session unnamed-id · PID 123')).toBeInTheDocument()
+    expect(sessions.getByText('Idle')).toBeInTheDocument()
+  })
+
   it('renders multiple read-only sessions from one process with separate statuses and short identifiers', () => {
     renderProcesses([{
       ...workers[0]!,
@@ -63,7 +97,7 @@ describe('ExternalAgentProcesses', () => {
           processes: [
             { ...workers[0]!.processes[0]!, sessions: [
               { sessionId: 'one-active-session', status: 'working' },
-              { sessionId: 'two-idle-session', status: 'idle' },
+              { sessionId: 'two-idle-session', displayName: 'Release checklist', status: 'idle' },
             ] },
             { ...workers[0]!.processes[0]!, pid: 456, sessions: [] },
           ],
@@ -83,6 +117,11 @@ describe('ExternalAgentProcesses', () => {
     setFilter('idle')
     expect(screen.getByText('Idle')).toBeInTheDocument()
     expect(screen.queryByText('Working')).not.toBeInTheDocument()
+    setQuery(' RELEASE CHECKLIST ')
+    expect(screen.getByText('Release checklist')).toBeInTheDocument()
+    expect(screen.getByText('Idle')).toBeInTheDocument()
+    setFilter('working')
+    expect(screen.getByText('No matching external sessions, processes, or computers.')).toBeInTheDocument()
   })
 
   it.each(['loading', 'unavailable', 'offline'] as const)('hides stale session statuses when the observation is %s', (status) => {

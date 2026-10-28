@@ -69,16 +69,16 @@ func TestObserveNativeSessionsDiscardsLateResults(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-func TestParseNativeSessionsKeepsOnlyStatusMetadata(t *testing.T) {
+func TestParseNativeSessionsKeepsOnlyAllowedMetadata(t *testing.T) {
 	t.Parallel()
 	result, err := parseNativeSessions([]byte(`[
 		{"pid":42,"sessionId":"session-42","kind":"interactive","status":"busy",
-		 "cwd":"/private/project","name":"private conversation","transcript":"private content","token":"secret"},
+		 "cwd":"/private/project","name":"Review status dashboard","transcript":"private content","token":"secret"},
 		{"pid":43,"sessionId":"session-43","kind":"interactive","status":"waiting","waitingFor":"permission prompt"}
 	]`))
 	require.NoError(t, err)
 	assert.Equal(t, []agent.NativeSessionObservation{
-		{PID: 42, SessionID: "session-42", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WORKING},
+		{PID: 42, SessionID: "session-42", DisplayName: "Review status dashboard", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WORKING},
 		{PID: 43, SessionID: "session-43", ActivityState: leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WAITING_FOR_USER},
 	}, result)
 }
@@ -237,4 +237,18 @@ func TestNativeSessionCLIDoesNotFallbackAfterCancellation(t *testing.T) {
 		})
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Nil(t, output)
+}
+
+func TestParseNativeSessionsPreservesStatusWithoutUsableName(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"null", "42", "{}", "[]", `""`} {
+		t.Run(name, func(t *testing.T) {
+			input := `[{"pid":42,"sessionId":"session-42","kind":"interactive","status":"idle","name":` + name + `}]`
+			result, err := parseNativeSessions([]byte(input))
+			require.NoError(t, err)
+			require.Len(t, result, 1)
+			assert.Empty(t, result[0].DisplayName)
+			assert.Equal(t, leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_IDLE, result[0].ActivityState)
+		})
+	}
 }

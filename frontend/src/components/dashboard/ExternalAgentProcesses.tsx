@@ -106,8 +106,10 @@ export const ExternalAgentProcesses: Component<{
                               {({ process, session }) => (
                                 <li class={styles.externalProcess} data-session-id={session.sessionId}>
                                   <div class={styles.processIdentity}>
-                                    <strong class={styles.agentTitle}>{process.providerName}</strong>
-                                    <span class={styles.secondary}>{`Session ${shortSessionId(session.sessionId)} · PID ${process.pid}`}</span>
+                                    <strong class={styles.agentTitle}>{session.displayName?.trim() || process.providerName}</strong>
+                                    <span class={styles.secondary}>
+                                      {`${session.displayName?.trim() ? `${process.providerName} · ` : ''}Session ${shortSessionId(session.sessionId)} · PID ${process.pid}`}
+                                    </span>
                                   </div>
                                   <div class={styles.processObservation}>
                                     <span class={`${styles.status} ${styles.statusColor[session.status]}`} data-status={session.status}>

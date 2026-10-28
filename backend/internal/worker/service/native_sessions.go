@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"regexp"
+	"strings"
+	"unicode"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/worker/agent"
@@ -10,6 +12,7 @@ import (
 )
 
 const maxNativeSessions = 256
+const maxNativeSessionDisplayNameRunes = 160
 
 var nativeSessionID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
@@ -96,7 +99,24 @@ func applyNativeSessions(ctx context.Context, source nativeSessionIdentitySource
 		default:
 			state = leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_UNSPECIFIED
 		}
-		process.Sessions = append(process.Sessions, &leapmuxv1.NativeAgentSession{SessionId: observation.SessionID, ActivityState: state})
+		process.Sessions = append(process.Sessions, &leapmuxv1.NativeAgentSession{
+			SessionId:     observation.SessionID,
+			ActivityState: state,
+			DisplayName:   normalizeNativeSessionDisplayName(observation.DisplayName),
+		})
 		published++
 	}
+}
+
+// normalizeNativeSessionDisplayName keeps provider labels readable and bounded.
+// Names are untrusted plain text, never markup or a source of inferred content.
+func normalizeNativeSessionDisplayName(name string) string {
+	normalized := strings.Join(strings.FieldsFunc(name, func(char rune) bool {
+		return unicode.IsSpace(char) || unicode.IsControl(char) || unicode.In(char, unicode.Cf)
+	}), " ")
+	runes := []rune(normalized)
+	if len(runes) > maxNativeSessionDisplayNameRunes {
+		runes = runes[:maxNativeSessionDisplayNameRunes]
+	}
+	return string(runes)
 }

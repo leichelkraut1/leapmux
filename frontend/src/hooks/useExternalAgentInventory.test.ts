@@ -49,10 +49,10 @@ afterEach(() => {
 })
 
 describe('useExternalAgentInventory', () => {
-  it('maps every session independently and keeps absent or unknown activity unavailable', async () => {
+  it('maps session names and statuses independently and keeps absent or unknown activity unavailable', async () => {
     const snapshot = response()
     snapshot.processes[0]!.sessions = [
-      create(NativeAgentSessionSchema, { sessionId: 'working-session', activityState: AgentActivityState.WORKING }),
+      create(NativeAgentSessionSchema, { sessionId: 'working-session', displayName: 'Plan <layout>', activityState: AgentActivityState.WORKING }),
       create(NativeAgentSessionSchema, { sessionId: 'waiting-session', activityState: AgentActivityState.WAITING_FOR_USER }),
       create(NativeAgentSessionSchema, { sessionId: 'idle-session', activityState: AgentActivityState.IDLE }),
       create(NativeAgentSessionSchema, { sessionId: 'missing-state' }),
@@ -62,7 +62,7 @@ describe('useExternalAgentInventory', () => {
     const hook = setup()
     await vi.advanceTimersByTimeAsync(0)
     expect(hook.rows()[0]?.processes[0]?.sessions).toEqual([
-      { sessionId: 'working-session', status: 'working' },
+      { sessionId: 'working-session', displayName: 'Plan <layout>', status: 'working' },
       { sessionId: 'waiting-session', status: 'waiting' },
       { sessionId: 'idle-session', status: 'idle' },
       { sessionId: 'missing-state', status: 'unknown' },

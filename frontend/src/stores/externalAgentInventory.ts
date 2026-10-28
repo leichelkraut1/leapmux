@@ -3,6 +3,8 @@ export type DashboardStatusFilter = 'all' | 'working' | 'waiting' | 'idle'
 
 export interface DashboardExternalSession {
   sessionId: string
+  /** Provider-supplied name, normalized and bounded by the Worker. */
+  displayName?: string
   status: 'working' | 'waiting' | 'idle' | 'unknown'
 }
 
@@ -53,7 +55,8 @@ export function filterExternalAgentWorkers(
         return status === 'all' && processMatches ? [process] : []
       const sessions = process.sessions.filter(session =>
         (status === 'all' || session.status === status)
-        && (processMatches || session.sessionId.toLocaleLowerCase().includes(search)),
+        && (processMatches || [session.sessionId, session.displayName ?? '']
+          .some(value => value.toLocaleLowerCase().includes(search))),
       )
       return sessions.length > 0 ? [{ ...process, sessions }] : []
     })

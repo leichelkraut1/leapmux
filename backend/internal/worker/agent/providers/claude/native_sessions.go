@@ -19,14 +19,16 @@ const (
 
 var errNativeSessionsUnavailable = errors.New("native Claude session status is unavailable")
 
-// nativeSessionStatus deliberately omits names, directories and conversation data.
+// nativeSessionStatus allows the documented display name, but omits directories
+// and conversation data. The service bounds names before publishing matched rows.
 type nativeSessionStatus struct {
-	PID        int    `json:"pid"`
-	SessionID  string `json:"sessionId"`
-	Kind       string `json:"kind"`
-	State      string `json:"state"`
-	Status     string `json:"status"`
-	WaitingFor string `json:"waitingFor"`
+	PID        int             `json:"pid"`
+	SessionID  string          `json:"sessionId"`
+	Kind       string          `json:"kind"`
+	State      string          `json:"state"`
+	Status     string          `json:"status"`
+	WaitingFor string          `json:"waitingFor"`
+	Name       json.RawMessage `json:"name"`
 }
 
 // observeNativeSessions uses Claude's supported status command, never its private
@@ -110,9 +112,13 @@ func parseNativeSessions(output []byte) ([]agent.NativeSessionObservation, error
 		if activity == leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_UNSPECIFIED {
 			continue
 		}
+		// An absent or malformed optional name must not hide valid status.
+		var displayName string
+		_ = json.Unmarshal(session.Name, &displayName)
 		result = append(result, agent.NativeSessionObservation{
 			PID:           session.PID,
 			SessionID:     session.SessionID,
+			DisplayName:   displayName,
 			ActivityState: activity,
 		})
 	}

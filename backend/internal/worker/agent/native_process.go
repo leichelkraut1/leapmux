@@ -18,10 +18,11 @@ func (r *Registry) RecognizeNativeProcess(name, executablePath string) (leapmuxv
 	return leapmuxv1.AgentProvider_AGENT_PROVIDER_UNSPECIFIED, leapmuxv1.NativeAgentProcessKind_NATIVE_AGENT_PROCESS_KIND_UNSPECIFIED
 }
 
-// NativeSessionObservation carries only live provider status metadata. The service
-// matches PID against verified same-user external processes before publishing it.
+// NativeSessionObservation carries live provider status and display metadata. The
+// service matches PID against verified same-user external processes before publishing it.
 type NativeSessionObservation struct {
 	PID           int
 	SessionID     string
+	DisplayName   string
 	ActivityState leapmuxv1.AgentActivityState
 }
