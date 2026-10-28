@@ -376,6 +376,26 @@ message NativeAgentSession {
   // Original RFC3339 report time. Polling never refreshes these timestamps.
   string reported_at = 5;
   string report_expires_at = 6;
+  // Runtime evidence time, separate from a verified continuous source heartbeat.
+  string status_observed_at = 7;
+  string source_verified_at = 8;
+  string expires_at = 9;
+}
+
+// An OS-verified application service. Its PID is not an individual agent PID.
+message NativeAgentServiceGroup {
+  string source_id = 1;
+  AgentProvider agent_provider = 2;
+  int32 service_pid = 3;
+  // Basename only; no path, owner SID, or runtime payload.
+  string executable_name = 4;
+  bool available = 5;
+  // Coverage is bounded and may omit sessions with no known owner.
+  bool partial = 6;
+  int32 candidate_count = 7;
+  bool candidate_truncated = 8;
+  int32 subscription_limit = 9;
+  repeated NativeAgentSession sessions = 10;
 }
 
 message InspectNativeAgentProcessesResponse {
@@ -384,4 +404,5 @@ message InspectNativeAgentProcessesResponse {
   string observed_at = 2;
   // Recognized same-user processes before the response cap, including omitted rows.
   int32 total_count = 3;
+  repeated NativeAgentServiceGroup service_groups = 4;
 }

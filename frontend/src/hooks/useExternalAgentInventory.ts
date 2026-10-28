@@ -1,4 +1,5 @@
 import type { Accessor } from 'solid-js'
+import type { NativeAgentSession } from '~/generated/proto/leapmux/v1/worker_pb'
 import type { DashboardExternalSession, DashboardExternalWorker } from '~/stores/externalAgentInventory'
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack } from 'solid-js'
 import { inspectNativeAgentProcesses } from '~/api/workerRpc'
@@ -28,6 +29,19 @@ function sessionStatus(state: AgentActivityState): DashboardExternalSession['sta
   }
 }
 
+function mapSession(session: NativeAgentSession): DashboardExternalSession {
+  return {
+    sessionId: session.sessionId,
+    ...(session.displayName ? { displayName: session.displayName } : {}),
+    ...(session.agentReported ? { agentReported: true } : {}),
+    ...(session.reportedAt ? { reportedAt: session.reportedAt } : {}),
+    ...(session.reportExpiresAt ? { reportExpiresAt: session.reportExpiresAt } : {}),
+    ...(session.statusObservedAt ? { statusObservedAt: session.statusObservedAt } : {}),
+    ...(session.sourceVerifiedAt ? { sourceVerifiedAt: session.sourceVerifiedAt } : {}),
+    ...(session.expiresAt ? { expiresAt: session.expiresAt } : {}),
+    status: sessionStatus(session.activityState),
+  }
+}
 /** Observe only while the dashboard is open. A failed observation is never an empty inventory. */
 export function useExternalAgentInventory(
   workers: Accessor<readonly InventoryWorker[]>,
@@ -96,23 +110,24 @@ export function useExternalAgentInventory(
           observedAt: response.observedAt || undefined,
           statusDetail: undefined,
           totalCount: response.totalCount,
-          processes: response.processes.map(process => ({
+          processes: (response.processes ?? []).map(process => ({
             pid: process.pid,
             processName: process.executableName,
             providerName: agentProviderLabel(process.agentProvider),
             kind: process.kind === NativeAgentProcessKind.CLI ? 'cli' : process.kind === NativeAgentProcessKind.DESKTOP ? 'desktop' : 'unknown',
-            sessions: process.sessions.map(session => ({
-              sessionId: session.sessionId,
-              ...(session.displayName ? { displayName: session.displayName } : {}),
-              ...(session.agentReported
-                ? {
-                    agentReported: true,
-                    ...(session.reportedAt ? { reportedAt: session.reportedAt } : {}),
-                    ...(session.reportExpiresAt ? { reportExpiresAt: session.reportExpiresAt } : {}),
-                  }
-                : {}),
-              status: sessionStatus(session.activityState),
-            })),
+            sessions: (process.sessions ?? []).map(mapSession),
+          })),
+          serviceGroups: (response.serviceGroups ?? []).map(group => ({
+            sourceId: group.sourceId,
+            providerName: agentProviderLabel(group.agentProvider),
+            servicePid: group.servicePid,
+            processName: group.executableName,
+            available: group.available,
+            partial: group.partial,
+            candidateCount: group.candidateCount,
+            candidateTruncated: group.candidateTruncated,
+            subscriptionLimit: group.subscriptionLimit,
+            sessions: (group.sessions ?? []).map(mapSession),
           })),
         }
       }
@@ -121,6 +136,7 @@ export function useExternalAgentInventory(
           status: 'unavailable',
           refreshing: false,
           processes: [],
+          serviceGroups: [],
           observedAt: undefined,
           totalCount: undefined,
           statusDetail: 'This computer could not provide an observation. Check its connection and Worker version, then refresh.',

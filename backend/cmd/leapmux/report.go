@@ -12,8 +12,7 @@ import (
 	"time"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
-	"github.com/leapmux/leapmux/internal/worker/agent"
-	"github.com/leapmux/leapmux/internal/worker/agent/providers/codex"
+	"github.com/leapmux/leapmux/internal/worker/bootstrap"
 	"github.com/leapmux/leapmux/util/agentreport"
 	"github.com/leapmux/leapmux/util/procutil"
 )
@@ -64,15 +63,11 @@ type reportTarget struct {
 }
 
 func runReport(args []string, stdout io.Writer) error {
-	registry, err := agent.NewRegistry(codex.Registration())
-	if err != nil {
-		return errors.New("the Codex process recognition is unavailable")
-	}
 	return runReportWith(args, stdout, reportDependencies{
 		snapshot: func(ctx context.Context) (reportProcessSource, error) {
 			return procutil.SnapshotProcessTable(ctx)
 		},
-		recognize: registry.RecognizeNativeProcess,
+		recognize: bootstrap.NativeProcessRecognizer(),
 		directory: agentreport.Directory,
 		write:     agentreport.Write,
 		getenv:    os.Getenv,

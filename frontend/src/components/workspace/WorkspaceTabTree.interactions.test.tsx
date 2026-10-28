@@ -15,6 +15,7 @@ import { withPreferences } from '~/test-support/preferencesProvider'
 import * as iconButtonStyles from '../common/IconButton.css'
 import { label as workingTreeLabel } from '../common/WorkingTree.css'
 import { labelWithStats } from '../tree/sharedTree.css'
+import { AgentTreeStatusContext } from './AgentTreeStatus'
 import { WorkspaceTabTree } from './WorkspaceTabTree'
 import { buildTree } from './workspaceTabTree.model'
 
@@ -2163,5 +2164,34 @@ describe('WorkspaceTabTree activity marker', () => {
     setTabs([])
 
     expect(screen.queryByTestId(MARKER)).not.toBeInTheDocument()
+  })
+})
+
+describe('WorkspaceTabTree agent activity', () => {
+  it('updates the agent label in place without labeling terminals or changing row selection', () => {
+    const [status, setStatus] = createSignal<'working' | 'waiting' | 'idle'>('working')
+    const onSelect = vi.fn()
+    renderTree(() => (
+      <AgentTreeStatusContext.Provider value={status}>
+        <WorkspaceTabTree
+          repoGitStore={repoGitStore}
+          tabs={[makeTab(TabType.AGENT, 'live-agent', 'Live agent'), makeTab(TabType.TERMINAL, 'terminal', 'Terminal')]}
+          activeTabKey={null}
+          onTabClick={onSelect}
+          isLocalWorkerFn={() => false}
+          workspaceId="ws-1"
+        />
+      </AgentTreeStatusContext.Provider>
+    ))
+    const badge = screen.getByTestId('agent-tree-status')
+    expect(badge).toHaveTextContent('Running')
+    const row = badge.closest('[data-testid="tab-tree-leaf"]')!
+    expect(row).toHaveAttribute('data-tab-id', 'live-agent')
+    setStatus('waiting')
+    expect(screen.getByTestId('agent-tree-status')).toBe(badge)
+    expect(badge).toHaveTextContent('Waiting')
+    setStatus('idle')
+    expect(badge).toHaveTextContent('Idle')
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })

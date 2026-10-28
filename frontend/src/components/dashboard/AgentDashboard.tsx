@@ -36,7 +36,7 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
   const [query, setQuery] = createSignal('')
   const [filter, setFilter] = createSignal<DashboardStatusFilter>('all')
   const [now, setNow] = createSignal(Date.now())
-  // Reports must expire even when a Worker refresh is still pending.
+  // Cached observations and reports expire even while a Worker refresh is pending.
   onMount(() => {
     const expiryClock = setInterval(() => setNow(Date.now()), 1000)
     onCleanup(() => clearInterval(expiryClock))
@@ -69,7 +69,7 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
   return (
     <Dialog title="Agents dashboard" wide tall onClose={props.onClose} data-testid="agent-dashboard">
       <div class={styles.dashboard}>
-        <p class={styles.description}>LeapMux chats, observed Claude sessions, and agent-reported Codex chats across your computers.</p>
+        <p class={styles.description}>LeapMux chats and native sessions across your computers.</p>
 
         <section aria-label="Agent status summary">
           <dl class={styles.summary}>
@@ -179,7 +179,7 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
                 </ul>
               </Show>
             </Show>
-            <p class={styles.note}>Unavailable includes offline computers and agents whose status has not arrived, including expired reports.</p>
+            <p class={styles.note}>Unavailable includes offline computers and agents whose status has not arrived, including expired observations and reports.</p>
           </section>
           <Show when={props.externalWorkers}>
             {workers => <ExternalAgentProcesses workers={workers()} nowMs={now()} query={query()} statusFilter={filter()} registryStatus={props.registryStatus ?? 'available'} onRefresh={props.onRefreshExternal} />}

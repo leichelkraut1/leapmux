@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test'
-import { InspectTerminalProcessesRequestSchema, InspectTerminalProcessesResponseSchema, TerminalStatus } from '../../src/generated/proto/leapmux/v1/terminal_pb'
+import { InspectTerminalProcessesRequestSchema, InspectTerminalProcessesResponseSchema, ListTerminalsRequestSchema, ListTerminalsResponseSchema, TerminalStatus } from '../../src/generated/proto/leapmux/v1/terminal_pb'
 import { test } from './fixtures'
 import { getTestChannel } from './helpers/api'
 import { retryUntilPass } from './helpers/retryUntilPass'
@@ -86,6 +86,79 @@ test.describe('Terminal', () => {
 
     // Verify xterm element is rendered
     await expect(activeXterm(page)).toBeVisible()
+  })
+
+  test('preserves stdout, stderr, mixed output, and generated file output live and after reload', async ({ page, authenticatedWorkspace, leapmuxServer }) => {
+    const saved = waitForLayoutSave(page)
+    await openTerminalViaUI(page)
+    await saved
+    await waitForTerminalReady(page)
+
+    const terminalId = await visibleOnly(terminalTabs(page)).first().getAttribute('data-tab-id')
+    if (!terminalId)
+      throw new Error('The terminal tab has no ID.')
+    const channel = await getTestChannel(leapmuxServer.hubUrl, leapmuxServer.adminToken)
+    const nonce = Math.random().toString(36).slice(2, 10).toUpperCase()
+    const stdout = `STDOUT_${nonce}`
+    const stderr = `STDERR_${nonce}`
+    const mixedOut = `MIXED_OUT_${nonce}`
+    const mixedErr = `MIXED_ERR_${nonce}`
+    const fileOutput = `FILE_OUT_${nonce}`
+    const fileName = `leapmux-output-${nonce}.txt`
+
+    // Neither a wrapped command echo nor shell input alone can satisfy a marker:
+    // the shell must first join its two quoted halves and execute the command.
+    const shellWord = (marker: string) => {
+      const half = Math.ceil(marker.length / 2)
+      return `'${marker.slice(0, half)}''${marker.slice(half)}'`
+    }
+    const cases = [
+      { command: `printf '\\n%s\\n' ${shellWord(stdout)}`, markers: [stdout] },
+      { command: `printf '\\n%s\\n' ${shellWord(stderr)} >&2`, markers: [stderr] },
+      {
+        command: `printf '\\n%s\\n' ${shellWord(mixedOut)}; printf '\\n%s\\n' ${shellWord(mixedErr)} >&2`,
+        markers: [mixedOut, mixedErr],
+      },
+      {
+        command: `printf '\\n%s\\n' ${shellWord(fileOutput)} > '${fileName}' && cat '${fileName}' && rm '${fileName}'`,
+        markers: [fileOutput],
+      },
+    ]
+
+    for (const { command, markers } of cases) {
+      await typeInTerminal(page, command)
+      await retryUntilPass(async () => {
+        const rendered = await getTerminalText(page)
+        const response = await channel.callWorker(
+          leapmuxServer.workerId,
+          'ListTerminals',
+          ListTerminalsRequestSchema,
+          ListTerminalsResponseSchema,
+          { tabIds: [terminalId] },
+        )
+        const terminal = response.terminals.find(entry => entry.terminalId === terminalId)
+        expect(terminal, 'the Worker retains the same live terminal').toBeDefined()
+        // Worker bytes preserve line boundaries; the xterm text hook joins rows.
+        // A leading newline in each command separates its output from prompt escapes.
+        const retainedScreen = new TextDecoder().decode(terminal!.screen)
+        const retainedLines = retainedScreen.replaceAll('\r', '').split('\n').map(line => line.trimEnd())
+        for (const marker of markers) {
+          expect(rendered, 'the live terminal renders the command output').toContain(marker)
+          expect(retainedLines, 'the Worker retains an exact output line').toContain(marker)
+        }
+      })
+    }
+
+    await page.reload()
+    const restoredTab = visibleOnly(terminalTabs(page)).and(page.locator(tabIdSelector(terminalId)))
+    await expect(restoredTab).toBeVisible()
+    await restoredTab.click()
+    await expect(activeXterm(page)).toBeVisible()
+    await retryUntilPass(async () => {
+      const restored = await getTerminalText(page)
+      for (const marker of cases.flatMap(item => item.markers))
+        expect(restored, 'the terminal restores both streams and generated file output').toContain(marker)
+    })
   })
 
   test('should preserve terminal content when switching between tabs', async ({ page, authenticatedWorkspace }) => {

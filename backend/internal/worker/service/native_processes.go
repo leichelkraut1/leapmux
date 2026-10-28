@@ -30,6 +30,9 @@ type nativeProcessSource interface {
 func registerNativeProcessHandlers(d registrar, svc *Service) {
 	registerOwnerGuarded(d, "InspectNativeAgentProcesses", leapmuxv1.Scope_SCOPE_AGENT_READ, dispatchPlain,
 		func(ctx context.Context, _ channel.Caller, _ *leapmuxv1.InspectNativeAgentProcessesRequest, sender channel.ResponseWriter) {
+			requestCtx := ctx
+			// Start lazy observers early; this call returns cached metadata immediately.
+			_ = svc.Agents.InspectNativeServices(requestCtx)
 			ctx, cancel := context.WithTimeout(ctx, nativeProcessScanTimeout)
 			defer cancel()
 			table, err := procutil.SnapshotProcessTable(ctx)
@@ -44,6 +47,8 @@ func registerNativeProcessHandlers(d registrar, svc *Service) {
 				return
 			}
 			observeNativeSessions(ctx, table, result, identities, svc.Agents.Registry())
+			applyNativeServices(result, svc.Agents.InspectNativeServices(requestCtx), time.Now())
+			excludeManagedNativeServiceSessions(requestCtx, svc.Queries, svc.Agents.ListAgentIDs, result)
 			result.ObservedAt = timefmt.Format(time.Now())
 			sendProtoResponse(sender, result)
 		})

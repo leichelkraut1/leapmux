@@ -9,8 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leapmux/leapmux/internal/worker/agent"
-	"github.com/leapmux/leapmux/internal/worker/agent/providers/codex"
+	"github.com/leapmux/leapmux/internal/worker/bootstrap"
 	"github.com/leapmux/leapmux/util/agentreport"
 	"github.com/leapmux/leapmux/util/procutil"
 	"github.com/stretchr/testify/assert"
@@ -89,12 +88,10 @@ func (p *reportTestProcesses) VerifiedDescendants(_ context.Context, root procut
 
 func reportTestDependencies(t *testing.T, table *reportTestProcesses) (reportDependencies, *[]agentreport.Report) {
 	t.Helper()
-	registry, err := agent.NewRegistry(codex.Registration())
-	require.NoError(t, err)
 	reports := new([]agentreport.Report)
 	return reportDependencies{
 		snapshot:  func(context.Context) (reportProcessSource, error) { return table, nil },
-		recognize: registry.RecognizeNativeProcess,
+		recognize: bootstrap.NativeProcessRecognizer(),
 		directory: func() (string, error) { return "/private/report-directory", nil },
 		write: func(dir string, report agentreport.Report) error {
 			assert.Equal(t, "/private/report-directory", dir)
@@ -140,6 +137,17 @@ func TestReportSelectsNearestVerifiedCodexAncestor(t *testing.T) {
 	assert.NotContains(t, output.String(), "Private chat")
 	assert.NotContains(t, output.String(), "/private")
 	assert.NotContains(t, output.String(), "pid")
+}
+
+func TestReportSkipsOtherProviderAncestors(t *testing.T) {
+	t.Parallel()
+	table := newReportTestProcesses()
+	table.names[90] = "claude"
+	deps, reports := reportTestDependencies(t, table)
+	require.NoError(t, runReportWith([]string{"--status", "idle"}, io.Discard, deps))
+	require.Len(t, *reports, 1)
+	assert.Equal(t, 80, (*reports)[0].PID)
+	assert.NotContains(t, table.pathReads, 90, "another registered provider must not become a Codex report target")
 }
 
 func TestReportExplicitSessionAndProcess(t *testing.T) {

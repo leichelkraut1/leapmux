@@ -26,6 +26,9 @@ type StartFunc func(ctx context.Context, opts Options, sink ProviderServices) (A
 // static catalog, and its option policy. Each provider states one Registration,
 // and NewRegistry collects them; nothing mutates a Registration after that.
 type Registration struct {
+	// NewNativeServiceObserver constructs an independently owned passive service watcher.
+	// nil means service observation is unsupported. The Manager closes it on shutdown.
+	NewNativeServiceObserver func() NativeServiceObserver
 	// ObserveNativeSessions queries live, read-only status metadata from an existing provider.
 	// nil means native session status is not supported. It must not start or resume sessions.
 	ObserveNativeSessions func(context.Context) ([]NativeSessionObservation, error)

@@ -495,3 +495,19 @@ WHERE id = sqlc.arg(id)
 UPDATE agents SET provider_child_key = sqlc.arg(provider_child_key)
 WHERE id = sqlc.arg(id) AND parent_agent_id = sqlc.arg(parent_agent_id)
   AND provider_child_key = '';
+
+-- ListAgentTreeNativeSessionIdentities reads only provider/session ownership
+-- metadata. The caller supplies a currently running Manager agent ID, then
+-- rechecks that runtime owner before filtering external observations. Closed
+-- history and unrelated inactive open tabs do not confer live ownership.
+-- LIMIT 4097 lets the caller detect its 4096-identity safety bound.
+-- name: ListAgentTreeNativeSessionIdentities :many
+WITH RECURSIVE tree AS (
+    SELECT a.id AS id FROM agents a WHERE a.id = ? AND a.closed_at IS NULL
+    UNION
+    SELECT a.id AS id FROM agents a JOIN tree ON a.parent_agent_id = tree.id
+    WHERE a.closed_at IS NULL
+)
+SELECT a.id, a.agent_provider, a.agent_session_id, a.pending_resume_session_id
+FROM agents AS a JOIN tree ON a.id = tree.id
+LIMIT 4097;

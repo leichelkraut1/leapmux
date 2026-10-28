@@ -270,3 +270,11 @@ export const processSummary = style({
   color: 'var(--muted-foreground)',
   paddingBlock: 'var(--space-2)',
 })
+
+export const serviceGroup = style({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 'var(--space-1)',
+  paddingTop: 'var(--space-2)',
+  borderTop: '1px solid var(--border)',
+})

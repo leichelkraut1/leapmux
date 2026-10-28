@@ -30,6 +30,7 @@ import { AgentDashboard } from '~/components/dashboard/AgentDashboard'
 import { CliPathDialog } from '~/components/desktop/CliPathDialog'
 import { isWorkspaceMutatable } from '~/components/shell/sectionUtils'
 import { focusedTerminalId, setTerminalScreenSink, writeToFocusedTerminal } from '~/components/terminal/TerminalView'
+import { AgentTreeStatusContext } from '~/components/workspace/AgentTreeStatus'
 import { useAuth } from '~/context/AuthContext'
 import { usePreferences } from '~/context/PreferencesContext'
 import { TunnelProvider } from '~/context/TunnelContext'
@@ -1572,6 +1573,9 @@ export const AppShell: Component = () => {
     activity: agentActivityStore,
   }))
 
+  const dashboardRowsById = createMemo(() => new Map(dashboardRows().map(row => [row.agentId, row])))
+  const agentTreeStatus = (agentId: string) => dashboardRowsById().get(agentId)?.status ?? 'unknown'
+
   const closeAgentDashboard = () => setSearchParams({ dashboard: undefined }, { replace: true })
   const openDashboardAgent = (row: DashboardAgent) => {
     // Resolve again on click: a live row may have moved or closed while shown.
@@ -1813,9 +1817,11 @@ export const AppShell: Component = () => {
             lookupTileIdForTab={tileDrag.lookupTileIdForTab}
             renderDragOverlay={tileDrag.renderDragOverlay}
           >
-            <Show when={!isMobileLayout()} fallback={<MobileShellLayer />}>
-              <DesktopShellLayer />
-            </Show>
+            <AgentTreeStatusContext.Provider value={agentTreeStatus}>
+              <Show when={!isMobileLayout()} fallback={<MobileShellLayer />}>
+                <DesktopShellLayer />
+              </Show>
+            </AgentTreeStatusContext.Provider>
           </TabDragProvider>
         </SectionDragProvider>
       </div>

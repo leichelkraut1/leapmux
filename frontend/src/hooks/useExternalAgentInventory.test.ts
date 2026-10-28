@@ -4,7 +4,7 @@ import { create } from '@bufbuild/protobuf'
 import { createRoot, createSignal } from 'solid-js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentActivityState, AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
-import { NativeAgentProcessKind, NativeAgentSessionSchema } from '~/generated/proto/leapmux/v1/worker_pb'
+import { NativeAgentProcessKind, NativeAgentServiceGroupSchema, NativeAgentSessionSchema } from '~/generated/proto/leapmux/v1/worker_pb'
 import { deferred } from '~/test-support/async'
 
 const inspect = vi.fn<(workerId: string, opts?: { signal?: AbortSignal }) => Promise<InspectNativeAgentProcessesResponse>>()
@@ -17,6 +17,7 @@ function response(pid = 100): InspectNativeAgentProcessesResponse {
     $typeName: 'leapmux.v1.InspectNativeAgentProcessesResponse',
     observedAt: '2026-10-27T12:00:00Z',
     totalCount: 1,
+    serviceGroups: [],
     processes: [{
       $typeName: 'leapmux.v1.NativeAgentProcess',
       pid,
@@ -250,5 +251,56 @@ describe('useExternalAgentInventory', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(signal.aborted).toBe(true)
     expect(hook.rows()).toEqual([])
+  })
+})
+
+describe('useExternalAgentInventory service groups', () => {
+  it('maps generic service coverage and original evidence timestamps then clears them on failure', async () => {
+    const snapshot = response()
+    snapshot.serviceGroups = [create(NativeAgentServiceGroupSchema, {
+      sourceId: 'application-service',
+      agentProvider: AgentProvider.CODEX,
+      servicePid: 800,
+      executableName: 'codex',
+      available: true,
+      partial: true,
+      candidateCount: 128,
+      candidateTruncated: true,
+      subscriptionLimit: 8,
+      sessions: [{
+        sessionId: 'native-chat',
+        displayName: 'Native plan',
+        activityState: AgentActivityState.WORKING,
+        statusObservedAt: '2026-10-27T12:00:00Z',
+        sourceVerifiedAt: '2026-10-27T12:00:20Z',
+        expiresAt: '2026-10-27T12:01:05Z',
+      }],
+    })]
+    inspect.mockResolvedValueOnce(snapshot).mockRejectedValueOnce(new Error('source unavailable'))
+    const hook = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(hook.rows()[0]?.serviceGroups).toEqual([{
+      sourceId: 'application-service',
+      providerName: 'Codex',
+      servicePid: 800,
+      processName: 'codex',
+      available: true,
+      partial: true,
+      candidateCount: 128,
+      candidateTruncated: true,
+      subscriptionLimit: 8,
+      sessions: [{ sessionId: 'native-chat', displayName: 'Native plan', status: 'working', statusObservedAt: '2026-10-27T12:00:00Z', sourceVerifiedAt: '2026-10-27T12:00:20Z', expiresAt: '2026-10-27T12:01:05Z' }],
+    }])
+    await hook.refresh()
+    expect(hook.rows()[0]).toMatchObject({ status: 'unavailable', serviceGroups: [], processes: [] })
+  })
+
+  it('normalizes absent repeated response fields without inventing unavailable sessions', async () => {
+    const snapshot = response()
+    Object.assign(snapshot, { processes: undefined, serviceGroups: undefined })
+    inspect.mockResolvedValue(snapshot)
+    const hook = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(hook.rows()[0]).toMatchObject({ status: 'available', processes: [], serviceGroups: [] })
   })
 })

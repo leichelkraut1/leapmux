@@ -21,11 +21,14 @@ var ErrAgentNotFound = errors.New("agent not found")
 
 // Manager tracks active agents and routes messages.
 type Manager struct {
-	mu                 sync.RWMutex
-	agents             map[string]*agentRegistration // agentID -> runtime registration
-	cachedOptionGroups map[string]cachedCatalog      // agentID -> last known option groups
-	lifecycleLocks     map[string]*lifecycleEntry    // agentID -> refcounted mutex
-	onExit             ExitHandler
+	nativeServicesMu     sync.Mutex
+	nativeServices       map[leapmuxv1.AgentProvider]NativeServiceObserver
+	nativeServicesClosed bool
+	mu                   sync.RWMutex
+	agents               map[string]*agentRegistration // agentID -> runtime registration
+	cachedOptionGroups   map[string]cachedCatalog      // agentID -> last known option groups
+	lifecycleLocks       map[string]*lifecycleEntry    // agentID -> refcounted mutex
+	onExit               ExitHandler
 	// registry states every provider this manager can start. It is fixed at
 	// construction and never nil, so every read of a provider's registration goes
 	// through the one value the worker was wired with.
@@ -1093,6 +1096,7 @@ func (m *Manager) ListAgentIDs() []string {
 
 // StopAll stops all running agents.
 func (m *Manager) StopAll() {
+	m.closeNativeServices()
 	m.mu.Lock()
 	providers := make([]Agent, 0, len(m.agents))
 	for _, p := range m.agents {

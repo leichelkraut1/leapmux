@@ -33,6 +33,7 @@ import { terminalStatusClassList } from '../shell/terminalStatus'
 import { RowLabelWithStats } from '../tree/gitStatusUtils'
 import * as shared from '../tree/sharedTree.css'
 import { menuTrigger, sidebarActions } from '../tree/sidebarActions.css'
+import { AgentTreeStatus } from './AgentTreeStatus'
 import { bindBranchActions, WORKER_OFFLINE_BRANCH_REASON, WORKER_OFFLINE_NEW_TAB_REASON } from './branchActions'
 import { BranchContextMenu } from './BranchContextMenu'
 import {
@@ -201,6 +202,9 @@ const TabLeaf: Component<{
             {tabDisplayLabel(props.tab)}
           </span>
         </Tooltip>
+      </Show>
+      <Show when={!props.isEditing}>
+        <AgentTreeStatus tab={props.tab} />
       </Show>
       <Show when={props.tab.hasNotification}>
         <NotificationDot testId="sidebar-tab-notification" />

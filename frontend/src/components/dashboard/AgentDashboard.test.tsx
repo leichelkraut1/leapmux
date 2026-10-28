@@ -375,3 +375,48 @@ describe('AgentDashboard', () => {
     expect(screen.queryByText(/No computers available/)).not.toBeInTheDocument()
   })
 })
+
+describe('AgentDashboard native service freshness', () => {
+  it('counts a native session once and expires its working state during a pending request', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-27T12:01:59Z'))
+    render(() => (
+      <AgentDashboard
+        rows={[]}
+        externalWorkers={[{
+          workerId: 'pc',
+          workerName: 'PC',
+          status: 'available',
+          refreshing: true,
+          processes: [{ pid: 100, providerName: 'Codex', processName: 'codex', kind: 'cli', sessions: [{ sessionId: 'native', displayName: 'Old report', status: 'idle', agentReported: true, reportedAt: '2026-10-27T11:00:00Z', reportExpiresAt: '2026-10-27T11:15:00Z' }] }],
+          serviceGroups: [{
+            sourceId: 'service',
+            providerName: 'Codex',
+            servicePid: 800,
+            processName: 'codex',
+            available: true,
+            partial: true,
+            candidateCount: 5,
+            candidateTruncated: false,
+            subscriptionLimit: 8,
+            sessions: [{ sessionId: 'native', displayName: 'Native task', status: 'working', statusObservedAt: '2026-10-27T12:01:00Z', sourceVerifiedAt: '2026-10-27T12:01:15Z', expiresAt: '2026-10-27T12:02:00Z' }],
+          }],
+        }]}
+        onOpenAgent={vi.fn()}
+        onClose={vi.fn()}
+      />
+    ))
+    expect(screen.getByText('Showing 1 of 1 agents')).toBeInTheDocument()
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working1')
+    expect(screen.queryByText('Old report')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Working' }))
+    vi.advanceTimersByTime(1000)
+    expect(screen.getByText('Showing 0 of 1 agents')).toBeInTheDocument()
+    expect(screen.getByTestId('agent-count-working')).toHaveTextContent('Working0')
+    expect(screen.getByTestId('agent-count-idle')).toHaveTextContent('Idle0')
+    expect(screen.getByTestId('agent-count-unavailable')).toHaveTextContent('Unavailable1')
+    fireEvent.click(screen.getByRole('radio', { name: 'All' }))
+    expect(screen.getByText('Native task')).toBeInTheDocument()
+    expect(screen.getByText('Observation expired · Activity unknown')).toBeInTheDocument()
+  })
+})

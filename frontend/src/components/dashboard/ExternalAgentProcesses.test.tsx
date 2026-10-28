@@ -329,3 +329,58 @@ describe('ExternalAgentProcesses', () => {
     expect(onRefresh).toHaveBeenCalledOnce()
   })
 })
+
+describe('ExternalAgentProcesses application services', () => {
+  it('labels the service PID and read-only provenance, bounded coverage, and local expiry', () => {
+    const [now, setNow] = createSignal(Date.parse('2026-10-27T12:01:20Z'))
+    render(() => (
+      <ExternalAgentProcesses
+        nowMs={now()}
+        workers={[{
+          workerId: 'pc',
+          workerName: 'PC',
+          status: 'available',
+          processes: [],
+          serviceGroups: [{
+            sourceId: 'source',
+            providerName: 'Codex',
+            servicePid: 800,
+            processName: 'codex',
+            available: true,
+            partial: true,
+            candidateCount: 128,
+            candidateTruncated: true,
+            subscriptionLimit: 8,
+            sessions: [{ sessionId: 'native', displayName: 'Native plan', status: 'working', statusObservedAt: '2026-10-27T12:01:00Z', sourceVerifiedAt: '2026-10-27T12:01:20Z', expiresAt: '2026-10-27T12:02:05Z' }],
+          }],
+        }]}
+        query=""
+        onRefresh={undefined}
+      />
+    ))
+    const list = screen.getByRole('list', { name: 'External sessions on PC' })
+    expect(within(list).getByText('Codex · Session native · Service PID 800')).toBeInTheDocument()
+    expect(within(list).getByText('Read-only runtime observation · Application service')).toBeInTheDocument()
+    expect(within(list).getByText(/State observed/).querySelector('time')).toHaveAttribute('datetime', '2026-10-27T12:01:00Z')
+    expect(within(list).getByText(/Source verified/).querySelector('time')).toHaveAttribute('datetime', '2026-10-27T12:01:20Z')
+    expect(screen.getByText('Partial coverage · 128 candidate sessions · Subscription limit 8')).toBeInTheDocument()
+    expect(screen.getByText('Candidate list truncated. Other sessions may not appear.')).toBeInTheDocument()
+    expect(within(list).queryByRole('button')).not.toBeInTheDocument()
+    expect(screen.queryByText('No detected agent processes')).not.toBeInTheDocument()
+    setNow(Date.parse('2026-10-27T12:02:05Z'))
+    expect(within(list).getByText('Status unavailable')).toBeInTheDocument()
+    expect(within(list).getByText('Observation expired · Activity unknown')).toBeInTheDocument()
+    expect(within(list).queryByText('Working')).not.toBeInTheDocument()
+  })
+
+  it('distinguishes an unavailable service from an empty successful observation', () => {
+    renderProcesses([{
+      ...workers[0]!,
+      processes: [],
+      serviceGroups: [{ sourceId: 'source', providerName: 'Codex', servicePid: 800, processName: 'codex', available: false, partial: true, candidateCount: 0, candidateTruncated: false, subscriptionLimit: 8, sessions: [] }],
+    }])
+    expect(screen.getByText('Source unavailable · Session activity unknown')).toBeInTheDocument()
+    expect(screen.queryByText('No detected agent processes')).not.toBeInTheDocument()
+    expect(screen.queryByText('Idle')).not.toBeInTheDocument()
+  })
+})
