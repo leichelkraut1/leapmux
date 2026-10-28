@@ -368,9 +368,14 @@ message NativeAgentSession {
   // Opaque provider session identifier; no directory or conversation content.
   string session_id = 1;
   AgentActivityState activity_state = 2;
-  // Optional provider-reported display name, bounded and normalized as plain text.
-  // Empty when the provider has no usable name. Never derived from conversation text.
+  // Optional provider- or agent-supplied display name, bounded and normalized as plain text.
+  // Empty when no usable label was supplied. Never derived from conversation text.
   string display_name = 3;
+  // Explicit agent claim, rather than a provider runtime observation.
+  bool agent_reported = 4;
+  // Original RFC3339 report time. Polling never refreshes these timestamps.
+  string reported_at = 5;
+  string report_expires_at = 6;
 }
 
 message InspectNativeAgentProcessesResponse {

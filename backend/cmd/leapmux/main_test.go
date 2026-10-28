@@ -49,6 +49,10 @@ func testCLIRunners(calls *[]cliCall) cliRunners {
 			record("control", args, false)
 			return nil
 		},
+		runReport: func(args []string, _ io.Writer) error {
+			record("report", args, false)
+			return nil
+		},
 		version: func() string {
 			return "test-version"
 		},
@@ -360,6 +364,7 @@ func TestUsageText_Golden(t *testing.T) {
 		"  dev       Run Hub + Worker for development\n" +
 		"  recover   Offline break-glass recovery (opens the database directly)\n" +
 		"  control   Remotely control LeapMux from a script or another LeapMux agent\n" +
+		"  report    Report this Codex session's activity to the local Worker\n" +
 		"  version   Print version and exit\n" +
 		"\n" +
 		"Common options:\n" +

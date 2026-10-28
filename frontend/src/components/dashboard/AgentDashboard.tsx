@@ -1,7 +1,7 @@
 import type { Component } from 'solid-js'
 import type { DashboardAgent } from '~/stores/agentDashboard'
 import type { DashboardExternalWorker, DashboardStatusFilter, WorkerRegistryStatus } from '~/stores/externalAgentInventory'
-import { createMemo, createSignal, For, Show } from 'solid-js'
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import { Dialog } from '~/components/common/Dialog'
 import { PillGroup } from '~/components/common/PillGroup'
 import { externalAgentSessions, filterExternalAgentWorkers } from '~/stores/externalAgentInventory'
@@ -35,9 +35,15 @@ const STATUS_LABELS: Record<DashboardAgent['status'], string> = {
 export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
   const [query, setQuery] = createSignal('')
   const [filter, setFilter] = createSignal<DashboardStatusFilter>('all')
+  const [now, setNow] = createSignal(Date.now())
+  // Reports must expire even when a Worker refresh is still pending.
+  onMount(() => {
+    const expiryClock = setInterval(() => setNow(Date.now()), 1000)
+    onCleanup(() => clearInterval(expiryClock))
+  })
   const externalWorkers = createMemo(() => (props.registryStatus ?? 'available') === 'available' ? (props.externalWorkers ?? []) : [])
-  const externalSessions = createMemo(() => externalAgentSessions(externalWorkers()))
-  const visibleExternalSessions = createMemo(() => externalAgentSessions(filterExternalAgentWorkers(externalWorkers(), query(), filter())))
+  const externalSessions = createMemo(() => externalAgentSessions(externalWorkers(), now()))
+  const visibleExternalSessions = createMemo(() => externalAgentSessions(filterExternalAgentWorkers(externalWorkers(), query(), filter(), now()), now()))
   const counts = createMemo(() => {
     const result = { working: 0, waiting: 0, idle: 0, unavailable: 0 }
     for (const row of [...props.rows, ...externalSessions()]) {
@@ -63,7 +69,7 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
   return (
     <Dialog title="Agents dashboard" wide tall onClose={props.onClose} data-testid="agent-dashboard">
       <div class={styles.dashboard}>
-        <p class={styles.description}>LeapMux chats and observed native sessions across your computers.</p>
+        <p class={styles.description}>LeapMux chats, observed Claude sessions, and agent-reported Codex chats across your computers.</p>
 
         <section aria-label="Agent status summary">
           <dl class={styles.summary}>
@@ -173,10 +179,10 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
                 </ul>
               </Show>
             </Show>
-            <p class={styles.note}>Unavailable includes offline computers and agents whose status has not arrived.</p>
+            <p class={styles.note}>Unavailable includes offline computers and agents whose status has not arrived, including expired reports.</p>
           </section>
           <Show when={props.externalWorkers}>
-            {workers => <ExternalAgentProcesses workers={workers()} query={query()} statusFilter={filter()} registryStatus={props.registryStatus ?? 'available'} onRefresh={props.onRefreshExternal} />}
+            {workers => <ExternalAgentProcesses workers={workers()} nowMs={now()} query={query()} statusFilter={filter()} registryStatus={props.registryStatus ?? 'available'} onRefresh={props.onRefreshExternal} />}
           </Show>
         </div>
       </div>

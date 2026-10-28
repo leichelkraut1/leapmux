@@ -104,6 +104,13 @@ export function useExternalAgentInventory(
             sessions: process.sessions.map(session => ({
               sessionId: session.sessionId,
               ...(session.displayName ? { displayName: session.displayName } : {}),
+              ...(session.agentReported
+                ? {
+                    agentReported: true,
+                    ...(session.reportedAt ? { reportedAt: session.reportedAt } : {}),
+                    ...(session.reportExpiresAt ? { reportExpiresAt: session.reportExpiresAt } : {}),
+                  }
+                : {}),
               status: sessionStatus(session.activityState),
             })),
           })),

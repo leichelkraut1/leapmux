@@ -1,7 +1,7 @@
 import type { Component } from 'solid-js'
 import type { DashboardExternalProcess, DashboardExternalSession, DashboardExternalWorker, DashboardStatusFilter, WorkerRegistryStatus } from '~/stores/externalAgentInventory'
 import { createMemo, For, Show } from 'solid-js'
-import { filterExternalAgentWorkers } from '~/stores/externalAgentInventory'
+import { externalSessionReportFreshness, filterExternalAgentWorkers, resolveExternalSessionStatus } from '~/stores/externalAgentInventory'
 import * as styles from './AgentDashboard.css'
 
 const KIND_LABELS: Record<DashboardExternalProcess['kind'], string> = {
@@ -29,13 +29,19 @@ export const ExternalAgentProcesses: Component<{
   workers: readonly DashboardExternalWorker[]
   registryStatus?: WorkerRegistryStatus
   query: string
+  nowMs: number
   statusFilter?: DashboardStatusFilter
   onRefresh: (() => void) | undefined
 }> = (props) => {
   const registryStatus = () => props.registryStatus ?? 'available'
   const loading = () => registryStatus() === 'loading'
     || (registryStatus() === 'available' && props.workers.some(worker => worker.status === 'loading' || worker.refreshing))
-  const visibleWorkers = createMemo(() => filterExternalAgentWorkers(props.workers, props.query, props.statusFilter ?? 'all'))
+  const visibleWorkers = createMemo(
+    () => filterExternalAgentWorkers(props.workers, props.query, props.statusFilter ?? 'all', props.nowMs),
+    undefined,
+    // Clock ticks must not recreate unchanged rows and collapse expanded helpers.
+    { equals: (previous, next) => JSON.stringify(previous) === JSON.stringify(next) },
+  )
 
   return (
     <section class={styles.externalSection} aria-label="Outside LeapMux">
@@ -52,8 +58,8 @@ export const ExternalAgentProcesses: Component<{
           </button>
         </Show>
       </div>
-      <p class={styles.note}>Read-only Claude Code session snapshots, including supported sessions in Claude Desktop and VS Code. Status is checked every 15 seconds while this dashboard is open.</p>
-      <p class={styles.note}>Counts and filters include observed sessions. Current Codex Desktop versions do not expose session activity here. Unobserved processes are listed separately with unknown activity; some installations may not appear.</p>
+      <p class={styles.note}>Claude Code activity is observed read-only, including supported sessions in Claude Desktop and VS Code. Codex activity comes only from participating agents and is labeled Agent-reported. Snapshots are checked every 15 seconds while this dashboard is open.</p>
+      <p class={styles.note}>Observed states and fresh agent reports determine Working, Waiting, and Idle. Reports can miss approval waits or interrupted work; expired reports become unknown. Processes without session status are listed separately with unknown activity; some installations may not appear.</p>
       <Show
         when={registryStatus() === 'available'}
         fallback={(
@@ -79,7 +85,7 @@ export const ExternalAgentProcesses: Component<{
                         <Show when={worker.status === 'available' && validObservationTime(worker.observedAt)}>
                           {time => (
                             <span class={styles.secondary}>
-                              Observed at
+                              Checked at
                               {' '}
                               <time dateTime={time()}>{new Date(time()).toLocaleString()}</time>
                             </span>
@@ -101,30 +107,49 @@ export const ExternalAgentProcesses: Component<{
                       </Show>
                       <Show when={worker.status === 'available'}>
                         <Show when={sessions().length > 0}>
-                          <ul class={styles.externalProcessList} aria-label={`Observed sessions on ${worker.workerName}`}>
+                          <ul class={styles.externalProcessList} aria-label={`External sessions on ${worker.workerName}`}>
                             <For each={sessions()}>
-                              {({ process, session }) => (
-                                <li class={styles.externalProcess} data-session-id={session.sessionId}>
-                                  <div class={styles.processIdentity}>
-                                    <strong class={styles.agentTitle}>{session.displayName?.trim() || process.providerName}</strong>
-                                    <span class={styles.secondary}>
-                                      {`${session.displayName?.trim() ? `${process.providerName} · ` : ''}Session ${shortSessionId(session.sessionId)} · PID ${process.pid}`}
-                                    </span>
-                                  </div>
-                                  <div class={styles.processObservation}>
-                                    <span class={`${styles.status} ${styles.statusColor[session.status]}`} data-status={session.status}>
-                                      {STATUS_LABELS[session.status]}
-                                    </span>
-                                    <span class={styles.statusDetail}>Read-only observation</span>
-                                  </div>
-                                </li>
-                              )}
+                              {({ process, session }) => {
+                                const status = () => resolveExternalSessionStatus(session, props.nowMs)
+                                const freshness = () => externalSessionReportFreshness(session, props.nowMs)
+                                return (
+                                  <li class={styles.externalProcess} data-session-id={session.sessionId}>
+                                    <div class={styles.processIdentity}>
+                                      <strong class={styles.agentTitle}>{session.displayName?.trim() || process.providerName}</strong>
+                                      <span class={styles.secondary}>
+                                        {`${session.displayName?.trim() ? `${process.providerName} · ` : ''}Session ${shortSessionId(session.sessionId)} · PID ${process.pid}`}
+                                      </span>
+                                    </div>
+                                    <div class={styles.processObservation}>
+                                      <span class={`${styles.status} ${styles.statusColor[status()]}`} data-status={status()}>
+                                        {STATUS_LABELS[status()]}
+                                      </span>
+                                      <Show when={session.agentReported} fallback={<span class={styles.statusDetail}>Read-only observation</span>}>
+                                        <span class={styles.statusDetail}>
+                                          Agent-reported · Last reported
+                                          {' '}
+                                          <Show when={validObservationTime(session.reportedAt)} fallback="time unavailable">
+                                            {time => <time dateTime={time()}>{new Date(time()).toLocaleString()}</time>}
+                                          </Show>
+                                        </span>
+                                        <span class={styles.statusDetail}>
+                                          <Show when={freshness() === 'fresh'} fallback={freshness() === 'expired' ? 'Report expired · Activity unknown' : 'Report freshness unavailable · Activity unknown'}>
+                                            Fresh report · Expires
+                                            {' '}
+                                            <time dateTime={session.reportExpiresAt}>{new Date(session.reportExpiresAt!).toLocaleString()}</time>
+                                          </Show>
+                                        </span>
+                                      </Show>
+                                    </div>
+                                  </li>
+                                )
+                              }}
                             </For>
                           </ul>
                         </Show>
                         <Show when={unobserved().length > 0}>
                           <details class={styles.unobservedProcesses}>
-                            <summary class={styles.processSummary}>{`Processes without session observations (${unobserved().length})`}</summary>
+                            <summary class={styles.processSummary}>{`Processes without session status (${unobserved().length})`}</summary>
                             <p class={styles.note}>A desktop app can have several helper processes. These are not counted as agents.</p>
                             <ul class={styles.externalProcessList} aria-label={`Detected processes on ${worker.workerName}`}>
                               <For each={unobserved()}>

@@ -24,11 +24,74 @@ const workers: DashboardExternalWorker[] = [
 
 function renderProcesses(items: readonly DashboardExternalWorker[] = workers, query = '') {
   const onRefresh = vi.fn()
-  render(() => <ExternalAgentProcesses workers={items} query={query} onRefresh={onRefresh} />)
+  render(() => <ExternalAgentProcesses nowMs={Date.now()} workers={items} query={query} onRefresh={onRefresh} />)
   return { onRefresh }
 }
 
 describe('ExternalAgentProcesses', () => {
+  it('preserves an expanded helper list across report-clock ticks', () => {
+    const [now, setNow] = createSignal(Date.parse('2026-10-27T12:01:00Z'))
+    render(() => (
+      <ExternalAgentProcesses
+        nowMs={now()}
+        workers={workers}
+        query=""
+        onRefresh={undefined}
+      />
+    ))
+    const details = screen.getAllByText('Processes without session status (1)')[0]!.closest('details')!
+    details.open = true
+    setNow(Date.parse('2026-10-27T12:01:01Z'))
+    expect(details).toBeInTheDocument()
+    expect(details).toHaveAttribute('open')
+  })
+
+  it('labels participating-agent reports separately from provider observations and shows their deadline', () => {
+    const reportedAt = '2026-10-27T12:00:00Z'
+    const reportExpiresAt = '2026-10-27T12:15:00Z'
+    render(() => (
+      <ExternalAgentProcesses
+        nowMs={Date.parse('2026-10-27T12:10:00Z')}
+        workers={[{
+          ...workers[0]!,
+          processes: [{
+            ...workers[0]!.processes[0]!,
+            sessions: [
+              { sessionId: 'observed', status: 'idle' },
+              { sessionId: 'reported', displayName: 'Reported plan', status: 'waiting', agentReported: true, reportedAt, reportExpiresAt },
+            ],
+          }],
+        }]}
+        query=""
+        onRefresh={undefined}
+      />
+    ))
+    const sessions = within(screen.getByRole('list', { name: 'External sessions on Windows PC' }))
+    expect(sessions.getAllByText('Read-only observation')).toHaveLength(1)
+    const reported = sessions.getByText('Reported plan').closest('li')!
+    expect(within(reported).getByText('Waiting on you')).toBeInTheDocument()
+    expect(within(reported).getByText(/Agent-reported · Last reported/).querySelector('time')).toHaveAttribute('datetime', reportedAt)
+    expect(within(reported).getByText(/Fresh report · Expires/).querySelector('time')).toHaveAttribute('datetime', reportExpiresAt)
+    expect(within(reported).queryByText('Read-only observation')).not.toBeInTheDocument()
+    expect(within(reported).queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('keeps reports with missing timestamps visible as unavailable without implying fresh activity', () => {
+    renderProcesses([{
+      ...workers[0]!,
+      processes: [{
+        ...workers[0]!.processes[0]!,
+        sessions: [{ sessionId: 'missing-timestamps', status: 'working', agentReported: true }],
+      }],
+    }])
+    const sessions = within(screen.getByRole('list', { name: 'External sessions on Windows PC' }))
+    expect(sessions.getByText('Status unavailable')).toBeInTheDocument()
+    expect(sessions.getByText(/Agent-reported · Last reported/)).toHaveTextContent('time unavailable')
+    expect(sessions.getByText('Report freshness unavailable · Activity unknown')).toBeInTheDocument()
+    expect(sessions.queryByText('Working')).not.toBeInTheDocument()
+    expect(sessions.queryByText(/Invalid Date/)).not.toBeInTheDocument()
+  })
+
   it('renders the native name as literal text while preserving provider and session identity', () => {
     const name = '<img src=x onerror="alert(1)"> & rollout'
     renderProcesses([{
@@ -38,7 +101,7 @@ describe('ExternalAgentProcesses', () => {
         sessions: [{ sessionId: 'named-id', displayName: name, status: 'working' }],
       }],
     }])
-    const sessions = screen.getByRole('list', { name: 'Observed sessions on Windows PC' })
+    const sessions = screen.getByRole('list', { name: 'External sessions on Windows PC' })
     expect(within(sessions).getByText(name).tagName).toBe('STRONG')
     expect(within(sessions).getByText('Claude · Session named-id · PID 123')).toBeInTheDocument()
     expect(sessions.querySelector('img')).toBeNull()
@@ -57,7 +120,7 @@ describe('ExternalAgentProcesses', () => {
         }],
       }],
     }])
-    const sessions = within(screen.getByRole('list', { name: 'Observed sessions on Windows PC' }))
+    const sessions = within(screen.getByRole('list', { name: 'External sessions on Windows PC' }))
     expect(sessions.getByText('Claude', { exact: true }).tagName).toBe('STRONG')
     expect(sessions.getByText('Session unnamed-id · PID 123')).toBeInTheDocument()
     expect(sessions.getByText('Idle')).toBeInTheDocument()
@@ -76,7 +139,7 @@ describe('ExternalAgentProcesses', () => {
         ],
       }],
     }])
-    const sessions = within(screen.getByRole('list', { name: 'Observed sessions on Windows PC' }))
+    const sessions = within(screen.getByRole('list', { name: 'External sessions on Windows PC' }))
     expect(sessions.getAllByRole('listitem')).toHaveLength(4)
     expect(sessions.getByText('Working')).toBeInTheDocument()
     expect(sessions.getByText('Waiting on you')).toBeInTheDocument()
@@ -84,7 +147,7 @@ describe('ExternalAgentProcesses', () => {
     expect(sessions.getByText('Status unavailable')).toBeInTheDocument()
     expect(sessions.getByText('Session working-sess… · PID 123')).toBeInTheDocument()
     expect(sessions.queryByRole('button')).not.toBeInTheDocument()
-    expect(screen.queryByText(/Processes without session observations \(/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Processes without session status \(/)).not.toBeInTheDocument()
   })
 
   it('combines per-session status and identifier search while hiding unobserved helpers under status filters', () => {
@@ -92,6 +155,7 @@ describe('ExternalAgentProcesses', () => {
     const [query, setQuery] = createSignal('')
     render(() => (
       <ExternalAgentProcesses
+        nowMs={Date.now()}
         workers={[{
           ...workers[0]!,
           processes: [
@@ -107,11 +171,11 @@ describe('ExternalAgentProcesses', () => {
         onRefresh={undefined}
       />
     ))
-    expect(screen.getByText('Processes without session observations (1)').closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('Processes without session status (1)').closest('details')).not.toHaveAttribute('open')
     setFilter('working')
     expect(screen.getByText('Working')).toBeInTheDocument()
     expect(screen.queryByText('Idle')).not.toBeInTheDocument()
-    expect(screen.queryByText('Processes without session observations (1)')).not.toBeInTheDocument()
+    expect(screen.queryByText('Processes without session status (1)')).not.toBeInTheDocument()
     setQuery('two-idle')
     expect(screen.getByText('No matching external sessions, processes, or computers.')).toBeInTheDocument()
     setFilter('idle')
@@ -130,7 +194,7 @@ describe('ExternalAgentProcesses', () => {
       status,
       processes: [{ ...workers[0]!.processes[0]!, sessions: [{ sessionId: 'stale-idle', status: 'idle' }] }],
     }])
-    expect(screen.queryByRole('list', { name: 'Observed sessions on Windows PC' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'External sessions on Windows PC' })).not.toBeInTheDocument()
     expect(screen.queryByText('Idle', { exact: true })).not.toBeInTheDocument()
   })
 
@@ -139,7 +203,7 @@ describe('ExternalAgentProcesses', () => {
     expect(screen.getByRole('region', { name: 'Outside LeapMux' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Windows PC' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Mac Studio' })).toBeInTheDocument()
-    for (const summary of screen.getAllByText('Processes without session observations (1)')) {
+    for (const summary of screen.getAllByText('Processes without session status (1)')) {
       expect(summary.closest('details')).not.toHaveAttribute('open')
       fireEvent.click(summary)
     }
@@ -152,7 +216,7 @@ describe('ExternalAgentProcesses', () => {
     expect(screen.queryByText('Idle', { exact: true })).not.toBeInTheDocument()
     expect(screen.getAllByRole('button')).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'Refresh external processes' })).toBeInTheDocument()
-    expect(screen.getByText(/Observed at/).querySelector('time')).toHaveAttribute('datetime', workers[0]!.observedAt)
+    expect(screen.getByText(/Checked at/).querySelector('time')).toHaveAttribute('datetime', workers[0]!.observedAt)
   })
 
   it('distinguishes an empty observation, a loading check, unavailable data, and an offline computer', () => {
@@ -168,7 +232,7 @@ describe('ExternalAgentProcesses', () => {
     expect(screen.getByText('Update the Worker to support process observations.')).toBeInTheDocument()
     expect(screen.getByText('Computer offline · Session activity unknown')).toBeInTheDocument()
     expect(screen.queryByText('Process detected', { exact: true })).not.toBeInTheDocument()
-    expect(screen.getAllByText(/Observed at/)).toHaveLength(1)
+    expect(screen.getAllByText(/Checked at/)).toHaveLength(1)
   })
 
   it('allows an explicit refresh and disables it until loading completes', () => {
@@ -176,7 +240,7 @@ describe('ExternalAgentProcesses', () => {
       { ...workers[0]!, status: 'loading' },
     ])
     const onRefresh = vi.fn()
-    render(() => <ExternalAgentProcesses workers={liveWorkers()} query="" onRefresh={onRefresh} />)
+    render(() => <ExternalAgentProcesses nowMs={Date.now()} workers={liveWorkers()} query="" onRefresh={onRefresh} />)
     const refresh = screen.getByRole('button', { name: 'Refresh external processes' })
     expect(refresh).toBeDisabled()
     setLiveWorkers(workers)
@@ -227,7 +291,7 @@ describe('ExternalAgentProcesses', () => {
       processes: [{ ...workers[0]!.processes[0]!, kind: 'unknown' }],
     }])
     expect(screen.getByText('Process type unknown · claude.exe · PID 123')).toBeInTheDocument()
-    expect(screen.queryByText(/Observed at/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Checked at/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument()
   })
 
@@ -238,7 +302,7 @@ describe('ExternalAgentProcesses', () => {
   })
 
   it('shows registry loading without suggesting the account has no computers', () => {
-    render(() => <ExternalAgentProcesses workers={workers} registryStatus="loading" query="" onRefresh={vi.fn()} />)
+    render(() => <ExternalAgentProcesses nowMs={Date.now()} workers={workers} registryStatus="loading" query="" onRefresh={vi.fn()} />)
     expect(screen.getByRole('status')).toHaveTextContent('Loading computers…')
     expect(screen.queryByText(/No computers available/)).not.toBeInTheDocument()
     expect(screen.queryByText('Process detected', { exact: true })).not.toBeInTheDocument()
@@ -249,6 +313,7 @@ describe('ExternalAgentProcesses', () => {
     const onRefresh = vi.fn()
     render(() => (
       <ExternalAgentProcesses
+        nowMs={Date.now()}
         workers={[{ ...workers[0]!, status: 'loading' }]}
         registryStatus="unavailable"
         query=""

@@ -4,10 +4,13 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
+	"github.com/leapmux/leapmux/internal/util/timefmt"
 	"github.com/leapmux/leapmux/internal/worker/agent"
+	"github.com/leapmux/leapmux/util/agentreport"
 	"github.com/leapmux/leapmux/util/procutil"
 )
 
@@ -70,6 +73,10 @@ func observeNativeSessions(ctx context.Context, source nativeSessionIdentitySour
 // after querying. Duplicate IDs are discarded, preventing contradictory states
 // from becoming a plausible status. The limit bounds metadata sent to a client.
 func applyNativeSessions(ctx context.Context, source nativeSessionIdentitySource, processes []*leapmuxv1.NativeAgentProcess, before map[int]procutil.ProcessIdentity, observations []agent.NativeSessionObservation) {
+	applyNativeSessionsAt(ctx, source, processes, before, observations, time.Now())
+}
+
+func applyNativeSessionsAt(ctx context.Context, source nativeSessionIdentitySource, processes []*leapmuxv1.NativeAgentProcess, before map[int]procutil.ProcessIdentity, observations []agent.NativeSessionObservation, now time.Time) {
 	live := make(map[int]*leapmuxv1.NativeAgentProcess)
 	for _, process := range processes {
 		pid := int(process.Pid)
@@ -91,6 +98,12 @@ func applyNativeSessions(ctx context.Context, source nativeSessionIdentitySource
 		if process == nil || duplicates[observation.SessionID] != 1 || !nativeSessionID.MatchString(observation.SessionID) {
 			continue
 		}
+		if observation.ProcessStartTime != 0 && observation.ProcessStartTime != before[observation.PID].StartTime {
+			continue
+		}
+		if observation.AgentReported && (observation.ProcessStartTime <= 0 || observation.ReportedAt.IsZero() || observation.ReportedAt.After(now) || now.Sub(observation.ReportedAt) > agentreport.MaxAge) {
+			continue
+		}
 		state := observation.ActivityState
 		switch state {
 		case leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_IDLE,
@@ -99,16 +112,26 @@ func applyNativeSessions(ctx context.Context, source nativeSessionIdentitySource
 		default:
 			state = leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_UNSPECIFIED
 		}
-		process.Sessions = append(process.Sessions, &leapmuxv1.NativeAgentSession{
+		session := &leapmuxv1.NativeAgentSession{
 			SessionId:     observation.SessionID,
 			ActivityState: state,
 			DisplayName:   normalizeNativeSessionDisplayName(observation.DisplayName),
-		})
+			AgentReported: observation.AgentReported,
+		}
+		if observation.AgentReported {
+			expires := observation.ReportedAt.Add(agentreport.FreshFor)
+			session.ReportedAt = timefmt.Format(observation.ReportedAt)
+			session.ReportExpiresAt = timefmt.Format(expires)
+			if !now.Before(expires) {
+				session.ActivityState = leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_UNSPECIFIED
+			}
+		}
+		process.Sessions = append(process.Sessions, session)
 		published++
 	}
 }
 
-// normalizeNativeSessionDisplayName keeps provider labels readable and bounded.
+// normalizeNativeSessionDisplayName keeps supplied labels readable and bounded.
 // Names are untrusted plain text, never markup or a source of inferred content.
 func normalizeNativeSessionDisplayName(name string) string {
 	normalized := strings.Join(strings.FieldsFunc(name, func(char rune) bool {

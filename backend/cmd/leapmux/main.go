@@ -38,6 +38,7 @@ var topLevelCommands = []topLevelCommand{
 	{Name: "dev", Summary: "Run Hub + Worker for development"},
 	{Name: recoverTree.Name, Summary: recoverTree.Summary},
 	{Name: controlTree.Name, Summary: controlTree.Summary},
+	{Name: "report", Summary: reportSummary},
 	{Name: "version", Summary: "Print version and exit"},
 }
 
@@ -81,6 +82,7 @@ type cliRunners struct {
 	runSolo    func([]string, bool) error
 	runRecover func([]string) error
 	runControl func([]string) error
+	runReport  func([]string, io.Writer) error
 	version    func() string
 }
 
@@ -98,6 +100,7 @@ func main() {
 		runSolo:    runSolo,
 		runRecover: runRecover,
 		runControl: runControl,
+		runReport:  runReport,
 		version:    version.Format,
 	}))
 }
@@ -185,6 +188,11 @@ func runCLI(args []string, stdout, stderr io.Writer, runners cliRunners) int {
 			if control.IsEmitted(err) {
 				return 1
 			}
+			return handleRunError(stderr, err)
+		}
+		return 0
+	case "report":
+		if err := runners.runReport(args[1:], stdout); err != nil {
 			return handleRunError(stderr, err)
 		}
 		return 0

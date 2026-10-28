@@ -93,6 +93,7 @@ var codexLocator = launch.Binaries(contracts.CodexExecutableKeys...)
 func Registration() agent.Registration {
 	return agent.Registration{
 		RecognizeNativeProcess: recognizeNativeProcess,
+		ObserveNativeSessions:  observeNativeSessions,
 		Provider:               leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX,
 		Plugin:                 codexProvider{},
 		Start:                  Start,

@@ -49,6 +49,29 @@ afterEach(() => {
 })
 
 describe('useExternalAgentInventory', () => {
+  it('preserves report source and expiry metadata without relabeling a provider observation', async () => {
+    const snapshot = response()
+    snapshot.processes[0]!.sessions = [
+      create(NativeAgentSessionSchema, {
+        sessionId: 'reported',
+        activityState: AgentActivityState.WAITING_FOR_USER,
+        agentReported: true,
+        reportedAt: '2026-10-27T12:00:00Z',
+        reportExpiresAt: '2026-10-27T12:15:00Z',
+      }),
+      create(NativeAgentSessionSchema, { sessionId: 'incomplete-report', activityState: AgentActivityState.IDLE, agentReported: true }),
+      create(NativeAgentSessionSchema, { sessionId: 'observed', activityState: AgentActivityState.IDLE }),
+    ]
+    inspect.mockResolvedValue(snapshot)
+    const hook = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(hook.rows()[0]?.processes[0]?.sessions).toEqual([
+      { sessionId: 'reported', status: 'waiting', agentReported: true, reportedAt: '2026-10-27T12:00:00Z', reportExpiresAt: '2026-10-27T12:15:00Z' },
+      { sessionId: 'incomplete-report', status: 'idle', agentReported: true },
+      { sessionId: 'observed', status: 'idle' },
+    ])
+  })
+
   it('maps session names and statuses independently and keeps absent or unknown activity unavailable', async () => {
     const snapshot = response()
     snapshot.processes[0]!.sessions = [
@@ -73,7 +96,7 @@ describe('useExternalAgentInventory', () => {
   it('retains a successful session snapshot while refreshing then clears it on failure', async () => {
     const snapshot = response()
     snapshot.processes[0]!.sessions = [
-      create(NativeAgentSessionSchema, { sessionId: 'active-session', activityState: AgentActivityState.WORKING }),
+      create(NativeAgentSessionSchema, { sessionId: 'active-session', activityState: AgentActivityState.WORKING, agentReported: true, reportedAt: '2026-10-27T12:00:00Z', reportExpiresAt: '2026-10-27T12:15:00Z' }),
     ]
     const pending = deferred<InspectNativeAgentProcessesResponse>()
     inspect.mockResolvedValueOnce(snapshot).mockReturnValueOnce(pending.promise)

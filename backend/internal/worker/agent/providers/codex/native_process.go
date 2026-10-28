@@ -17,7 +17,8 @@ func recognizeNativeProcess(name, executablePath string) leapmuxv1.NativeAgentPr
 		(strings.Contains(p, "/windowsapps/openai.codex_") && strings.HasSuffix(p, "/app/codex.exe")) {
 		return leapmuxv1.NativeAgentProcessKind_NATIVE_AGENT_PROCESS_KIND_DESKTOP
 	}
-	if strings.HasSuffix(p, "/bin/codex") || strings.HasSuffix(p, "/bin/codex.exe") ||
+	if strings.HasSuffix(p, "/chatgpt.app/contents/resources/codex-cli/codexcli.app/contents/macos/codex") ||
+		strings.HasSuffix(p, "/bin/codex") || strings.HasSuffix(p, "/bin/codex.exe") ||
 		strings.HasSuffix(p, "/codex/codex") || strings.HasSuffix(p, "/codex/codex.exe") ||
 		(strings.Contains(p, "/openai/codex/bin/") && strings.HasSuffix(p, "/codex.exe")) ||
 		(strings.Contains(p, "/extensions/openai.chatgpt-") && strings.Contains(p, "/bin/") && (strings.HasSuffix(p, "/codex.exe") || strings.HasSuffix(p, "/codex"))) {

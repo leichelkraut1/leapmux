@@ -3,9 +3,13 @@ export type DashboardStatusFilter = 'all' | 'working' | 'waiting' | 'idle'
 
 export interface DashboardExternalSession {
   sessionId: string
-  /** Provider-supplied name, normalized and bounded by the Worker. */
+  /** Provider-supplied or agent-reported name, normalized and bounded by the Worker. */
   displayName?: string
   status: 'working' | 'waiting' | 'idle' | 'unknown'
+  /** Participating-agent reports are distinct from provider observations. */
+  agentReported?: boolean
+  reportedAt?: string
+  reportExpiresAt?: string
 }
 
 /** Process presence alone never determines session activity. */
@@ -30,18 +34,42 @@ export interface DashboardExternalWorker {
   statusDetail?: string | undefined
 }
 
+/** The Worker supplies the bounded expiry; no client-side lifetime is inferred. */
+export function externalSessionReportFreshness(
+  session: DashboardExternalSession,
+  nowMs: number,
+): 'fresh' | 'expired' | 'unknown' {
+  const reportedAt = Date.parse(session.reportedAt ?? '')
+  const expiresAt = Date.parse(session.reportExpiresAt ?? '')
+  if (!Number.isFinite(nowMs) || !Number.isFinite(reportedAt) || !Number.isFinite(expiresAt)
+    || reportedAt > nowMs || expiresAt <= reportedAt) {
+    return 'unknown'
+  }
+  return nowMs >= expiresAt ? 'expired' : 'fresh'
+}
+
+export function resolveExternalSessionStatus(
+  session: DashboardExternalSession,
+  nowMs: number,
+): DashboardExternalSession['status'] {
+  return session.agentReported && externalSessionReportFreshness(session, nowMs) !== 'fresh'
+    ? 'unknown'
+    : session.status
+}
+
 /** Count sessions, never native processes or desktop helpers. */
-export function externalAgentSessions(workers: readonly DashboardExternalWorker[]): DashboardExternalSession[] {
+export function externalAgentSessions(workers: readonly DashboardExternalWorker[], nowMs = Date.now()): DashboardExternalSession[] {
   return workers.flatMap(worker => worker.status === 'available'
-    ? worker.processes.flatMap(process => process.sessions)
+    ? worker.processes.flatMap(process => process.sessions.map(session => ({ ...session, status: resolveExternalSessionStatus(session, nowMs) })))
     : [])
 }
 
-/** Apply the same search and status selection to each observed session. */
+/** Apply the same search and resolved status selection to each external session. */
 export function filterExternalAgentWorkers(
   workers: readonly DashboardExternalWorker[],
   query: string,
   status: DashboardStatusFilter,
+  nowMs = Date.now(),
 ): DashboardExternalWorker[] {
   const search = query.trim().toLocaleLowerCase()
   return workers.flatMap((worker) => {
@@ -54,7 +82,7 @@ export function filterExternalAgentWorkers(
       if (process.sessions.length === 0)
         return status === 'all' && processMatches ? [process] : []
       const sessions = process.sessions.filter(session =>
-        (status === 'all' || session.status === status)
+        (status === 'all' || resolveExternalSessionStatus(session, nowMs) === status)
         && (processMatches || [session.sessionId, session.displayName ?? '']
           .some(value => value.toLocaleLowerCase().includes(search))),
       )
