@@ -69,6 +69,8 @@ export const sidebarTitle = style({
 })
 
 export const sidebarContent = style({
+  // Bound leaf rows by the visible pane, even inside the tree's max-content layout.
+  containerType: 'inline-size',
   flex: 1,
   minHeight: 0,
   overflow: 'auto',
