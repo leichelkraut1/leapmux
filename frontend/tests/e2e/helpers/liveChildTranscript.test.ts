@@ -131,6 +131,8 @@ function selectTab(id: string): void {
 
 vi.mock('./ui', async importOriginal => ({
   ...await importOriginal<typeof import('./ui')>(),
+  revealActivityTarget: vi.fn(async () => {}),
+  expandActivityGroups: vi.fn(async () => {}),
   sendMessage: async (_page: Page, prompt: string) => {
     browser.events.push('send')
     return browser.send(prompt)

@@ -11,6 +11,7 @@ import type { MessageCategory } from './messageClassifier'
  * provider no longer picks a key of its own.
  */
 export const MESSAGE_UI_KEY = {
+  ACTIVITY_EXPANDED: 'activity-expanded',
   TOOL_RESULT_EXPANDED: 'tool-result-expanded',
   TOOL_USE_LAYOUT: 'tool-use-layout',
   AGENT_PROMPT: 'agent-prompt',
@@ -42,6 +43,7 @@ export interface MessageUiDefaultContext {
  * compile) rather than silently defaulting to `false` at a scattered call site.
  */
 export const MESSAGE_UI_DEFAULTS: Record<MessageUiKey, (ctx: MessageUiDefaultContext) => boolean> = {
+  [MESSAGE_UI_KEY.ACTIVITY_EXPANDED]: () => false,
   [MESSAGE_UI_KEY.TOOL_RESULT_EXPANDED]: () => false,
   [MESSAGE_UI_KEY.TOOL_USE_LAYOUT]: () => false,
   [MESSAGE_UI_KEY.AGENT_PROMPT]: () => false,

@@ -852,6 +852,26 @@ describe('agent editor panel pending questions', () => {
     }
   })
 
+  it.each([AgentProvider.CLAUDE_CODE, AgentProvider.CODEX])('accepts PLC, office and archive files through the all-files picker for provider %s', async (agentProvider) => {
+    vi.useRealTimers()
+    renderPanel({ agentProvider })
+    const input = screen.getByTestId('file-input')
+    expect(input).not.toHaveAttribute('accept')
+    const bytes = new Uint8Array([0, 255, 1, 128])
+    const files = [
+      new File(['<RSLogix5000Content/>'], 'Control.L5X'),
+      new File([bytes], 'project.ACD', { type: 'application/octet-stream' }),
+      new File([bytes], 'document.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+      new File([bytes], 'bundle.zip', { type: 'application/zip' }),
+      new File(['%PDF'], 'drawing.pdf', { type: 'application/pdf' }),
+    ]
+    await fireEvent.change(input, { target: { files } })
+    await waitFor(() => expect(getAttachments('a1')).toHaveLength(files.length))
+    expect(getAttachments('a1').map(attachment => attachment.filename)).toEqual(files.map(file => file.name))
+    expect(getAttachments('a1')[1]?.data).toEqual(bytes)
+    expect(screen.getAllByText('For tools')).toHaveLength(agentProvider === AgentProvider.CODEX ? 4 : 3)
+  })
+
   it('accepts a file selection while a non-blocking question stays closed', async () => {
     vi.useRealTimers()
     const controlStore = createControlStore()

@@ -7,7 +7,7 @@ import process from 'node:process'
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AgentProvider } from '../../../src/generated/proto/leapmux/v1/agent_pb'
 import {
   AMP_SHELL_WAIT_LIMIT_MS,
@@ -33,6 +33,7 @@ import {
   codewhaleReadMediaToolCall,
   codewhaleToolSearchToolCall,
   codewhaleWorkflowToolCall,
+  codexCompletedEscalatedCommandToolCall,
   codexEscalatedCommandToolCall,
   codexExecToolCall,
   codexWaitAgentToolCall,
@@ -184,6 +185,75 @@ describe('native Codex code-mode result metadata', () => {
       text: (value: unknown) => outputs.push(value),
     })
     expect(outputs).toEqual([JSON.stringify({ output: 'native file\n', exit_code: 0 })])
+  })
+})
+
+describe('codexCompletedEscalatedCommandToolCall', () => {
+  it.each([
+    ['win32', 'cmd.exe'],
+    ['linux', '/bin/sh'],
+    ['darwin', '/bin/sh'],
+  ] as const)('preserves immediate completion through an approved non-login shell on %s', async (platform, shell) => {
+    const outputs: string[] = []
+    const exec = vi.fn().mockResolvedValue({ output: 'fixture bytes', exit_code: 0, wall_time_seconds: 0.1 })
+    const poll = vi.fn()
+    const call = codexCompletedEscalatedCommandToolCall('read-fixture', 'node -e "synthetic"', platform)
+    await runInNewContext(`(async () => { ${call.input} })()`, {
+      tools: { exec_command: exec, write_stdin: poll },
+      text: (value: string) => outputs.push(value),
+    })
+    expect(call).toMatchObject({ id: 'read-fixture', name: 'exec' })
+    expect(exec).toHaveBeenCalledExactlyOnceWith({
+      cmd: 'node -e "synthetic"',
+      shell,
+      login: false,
+      yield_time_ms: 1000,
+      sandbox_permissions: 'require_escalated',
+      justification: 'Read the synthetic attachment fixture for the scripted test.',
+    })
+    expect(poll).not.toHaveBeenCalled()
+    expect(outputs.map(value => JSON.parse(value))).toEqual([{ output: 'fixture bytes', exit_code: 0, wall_time_seconds: 0.1 }])
+  })
+
+  it('collects every chunk and follows only returned session identities until the native command completes', async () => {
+    const outputs: string[] = []
+    const exec = vi.fn().mockResolvedValue({ output: 'WORKER_', session_id: 41 })
+    const poll = vi.fn()
+      .mockResolvedValueOnce({ output: 'FILE_BYTES:', session_id: 42 })
+      .mockResolvedValueOnce({ output: 'YWJj', exit_code: 0, wall_time_seconds: 0.2 })
+    const call = codexCompletedEscalatedCommandToolCall('read-fixture', 'synthetic-command', 'linux')
+    await runInNewContext(`(async () => { ${call.input} })()`, {
+      tools: { exec_command: exec, write_stdin: poll },
+      text: (value: string) => outputs.push(value),
+    })
+    expect(exec).toHaveBeenCalledOnce()
+    expect(poll).toHaveBeenCalledTimes(2)
+    expect(poll).toHaveBeenNthCalledWith(1, { session_id: 41, chars: '', yield_time_ms: 1000 })
+    expect(poll).toHaveBeenNthCalledWith(2, { session_id: 42, chars: '', yield_time_ms: 1000 })
+    expect(outputs.map(value => JSON.parse(value))).toEqual([{ output: 'WORKER_FILE_BYTES:YWJj', exit_code: 0, wall_time_seconds: 0.2 }])
+  })
+
+  it('fails after bounded polls instead of accepting partial output from a still-running command', async () => {
+    const output = vi.fn()
+    const exec = vi.fn().mockResolvedValue({ output: 'partial', session_id: 41 })
+    const poll = vi.fn().mockResolvedValue({ output: '', session_id: 41 })
+    const call = codexCompletedEscalatedCommandToolCall('stalled-fixture', 'synthetic-command', 'win32')
+    await expect(runInNewContext(`(async () => { ${call.input} })()`, {
+      tools: { exec_command: exec, write_stdin: poll },
+      text: output,
+    })).rejects.toThrow('did not complete within its bounded session polls')
+    expect(poll).toHaveBeenCalledTimes(6)
+    expect(output).not.toHaveBeenCalled()
+  })
+
+  it('retains a completed nonzero exit instead of hiding a failed fixture read', async () => {
+    const outputs: string[] = []
+    const call = codexCompletedEscalatedCommandToolCall('failed-fixture', 'synthetic-command', 'linux')
+    await runInNewContext(`(async () => { ${call.input} })()`, {
+      tools: { exec_command: async () => ({ output: 'read failed', exit_code: 7 }) },
+      text: (value: string) => outputs.push(value),
+    })
+    expect(outputs.map(value => JSON.parse(value))).toEqual([{ output: 'read failed', exit_code: 7 }])
   })
 })
 

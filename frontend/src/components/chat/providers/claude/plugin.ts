@@ -19,6 +19,7 @@ const CLAUDE_AUTOCOMPACT_BUFFER_PCT = 16.5
 
 const claudeCodePlugin: ProviderPlugin = {
   transcript: {
+    foldActivity: true,
     compactionStart: claudeCompactionStart,
     outputFilePaths: claudeOutputFilePaths,
     classify: classifyClaudeCodeMessage,
@@ -41,7 +42,8 @@ const claudeCodePlugin: ProviderPlugin = {
       text: true,
       image: true,
       pdf: true,
-      binary: false,
+      binary: true,
+      fileBackedKinds: ['binary'],
     },
     planMode: buildPlanMode('permissionMode', CLAUDE_MODE.Plan, CLAUDE_DEFAULT_MODE),
     // The trigger's mode segment shows the permission mode (which is also Claude's

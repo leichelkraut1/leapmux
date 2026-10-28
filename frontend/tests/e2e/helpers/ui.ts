@@ -282,6 +282,31 @@ export async function sendMessage(page: Page, text: string, entry: MessageEntry 
  */
 const VISIBLE = ':visible'
 
+/** Locate activity disclosures outside the hidden height-measurement copies. */
+export function activityGroupToggles(page: Page): Locator {
+  return page.locator('[data-testid="activity-group-toggle"]:visible')
+}
+
+/** Open the currently mounted activity groups when a test inspects their inner tool rows. */
+export async function expandActivityGroups(page: Page): Promise<void> {
+  const closed = page.locator('[data-testid="activity-group-toggle"][aria-expanded="false"]:visible')
+  const count = await closed.count()
+  for (let index = 0; index < count; index++) {
+    // Opening a tall group can virtualize another initially mounted header away.
+    if (await closed.count() === 0)
+      break
+    await closed.first().click()
+  }
+}
+
+/** Open mounted activity as history hydrates, until the specific inner row is visible. */
+export async function revealActivityTarget(page: Page, target: Locator): Promise<void> {
+  await expect.poll(async () => {
+    await expandActivityGroups(page)
+    return target.isVisible().catch(() => false)
+  }, { message: 'the requested activity row becomes visible after opening its disclosure' }).toBe(true)
+}
+
 /**
  * CSS selector for agent bubbles without a visibility filter.
  * Use it only below an already visible element or as a relative has filter.

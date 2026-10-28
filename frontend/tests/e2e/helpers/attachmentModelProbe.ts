@@ -149,7 +149,7 @@ function currentUserTurn(rows: unknown): Array<[number, Record<string, unknown>]
 }
 
 /** Read actual text from the current user input. History, tool results, and content metadata cannot prove a file. */
-function currentUserTextParts(request: MockModelRequestRecord): string[] {
+export function currentUserTextParts(request: MockModelRequestRecord): string[] {
   return attachmentRequestReader(request).textParts(request)
 }
 

@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"sync"
 
@@ -38,6 +40,9 @@ type Manager struct {
 	// directories. PrepareAgentDirs sets it once, before anything can start an
 	// agent, and startAgentWith hands it to each start through Options.
 	agentDirs *agentdir.Dirs
+	// attachmentRoot holds durable uploads rather than process-scoped files.
+	// PrepareAgentDirs sets it before any agent can start.
+	attachmentRoot string
 
 	// startupSlots caps how many BACKGROUND agent startups run at once: one
 	// token is held from just before the provider's start func spawns the
@@ -135,6 +140,13 @@ func (m *Manager) PrepareAgentDirs(ctx context.Context, dataDir string) error {
 	dirs, err := agentdir.Start(ctx, agentdir.Config{DataDir: dataDir, Specs: m.registry.AgentDirSpecs()})
 	if err != nil {
 		return fmt.Errorf("prepare the agent directories: %w", err)
+	}
+	if dataDir != "" {
+		absolute, err := filepath.Abs(dataDir)
+		if err != nil {
+			return fmt.Errorf("prepare the attachment directory: %w", err)
+		}
+		m.attachmentRoot = filepath.Join(absolute, "attachments")
 	}
 	m.agentDirs = dirs
 	return nil
@@ -329,6 +341,12 @@ func (m *Manager) startAgentWith(ctx context.Context, opts Options, sink Provide
 	// own: a test that starts a provider through the manager does.
 	if opts.AgentDirs == nil {
 		opts.AgentDirs = m.agentDirs
+	}
+	if opts.AttachmentDir == "" && m.attachmentRoot != "" {
+		// Never interpret an agent ID as a filesystem path. The stable key also
+		// keeps a resumed chat on its original upload directory.
+		key := fmt.Sprintf("%x", sha256.Sum256([]byte(opts.AgentID)))
+		opts.AttachmentDir = filepath.Join(m.attachmentRoot, key)
 	}
 	m.mu.Unlock()
 

@@ -8,6 +8,12 @@ import { __resetProviderRegistryForTest, __resetResolvedMessageMemoForTest, plug
 import '.'
 
 describe('pluginFor', () => {
+  it('opts only Codex and Claude into activity folding', () => {
+    expect(ALL_PROVIDERS.filter(provider => pluginFor(provider)?.transcript.foldActivity))
+      .toEqual(expect.arrayContaining([AgentProvider.CODEX, AgentProvider.CLAUDE_CODE]))
+    expect(ALL_PROVIDERS.filter(provider => pluginFor(provider)?.transcript.foldActivity)).toHaveLength(2)
+  })
+
   it('resolves a registered provider to its plugin (same instance as providerFor)', () => {
     const plugin = pluginFor(AgentProvider.CLAUDE_CODE)
     expect(plugin).toBeDefined()

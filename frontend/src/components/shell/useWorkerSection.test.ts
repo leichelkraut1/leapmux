@@ -1,5 +1,5 @@
 /// <reference types="vitest/globals" />
-import { createComponent, createRoot } from 'solid-js'
+import { createComponent, createRoot, createSignal } from 'solid-js'
 import { render } from 'solid-js/web'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HubControlEvent } from '~/generated/proto/leapmux/v1/channel_pb'
@@ -266,6 +266,51 @@ describe('useWorkerSection', () => {
       expect(s.workers().map(w => w.id)).toEqual(['first', 'last'])
       expect(mockListWorkers).toHaveBeenNthCalledWith(1, { page: { cursor: '' } }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
       expect(mockListWorkers).toHaveBeenNthCalledWith(2, { page: { cursor: 'page-two' } }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+      dispose()
+    })
+  })
+
+  it('retains an available registry during manual and pushed refreshes without a loading transition', async () => {
+    await createRoot(async (dispose) => {
+      const s = mount()
+      await untilTrue(() => s.registryStatus() === 'available')
+      const original = s.workers()[0]
+      const manual = deferred<{ workers: ReturnType<typeof worker>[] }>()
+      mockListWorkers.mockReturnValueOnce(manual.promise)
+      const refresh = s.refreshWorkers()
+      expect(s.registryStatus()).toBe('available')
+      expect(s.workers()[0]).toBe(original)
+      manual.resolve({ workers: [worker('w1')] })
+      await refresh
+      expect(s.workers()[0]).toBe(original)
+
+      const pushed = deferred<{ workers: ReturnType<typeof worker>[] }>()
+      mockListWorkers.mockReturnValueOnce(pushed.promise)
+      invokeHubControl({ events: [HubControlEvent.WORKERS_CHANGED] })
+      expect(s.registryStatus()).toBe('available')
+      expect(s.workers()[0]).toBe(original)
+      pushed.reject(new Error('connection unavailable'))
+      await untilTrue(() => s.registryStatus() === 'unavailable')
+      expect(s.workers()[0]).toBe(original)
+      expect(mockListWorkers).toHaveBeenCalledTimes(3)
+      dispose()
+    })
+  })
+
+  it('clears the retained registry when the authenticated account changes', async () => {
+    await createRoot(async (dispose) => {
+      const [userId, setUserId] = createSignal('u1')
+      const s = mount(userId)
+      await untilTrue(() => s.registryStatus() === 'available')
+      const nextUser = deferred<{ workers: ReturnType<typeof worker>[] }>()
+      mockListWorkers.mockReturnValueOnce(nextUser.promise)
+      setUserId('u2')
+      expect(s.registryStatus()).toBe('loading')
+      expect(s.workers()).toEqual([])
+      nextUser.resolve({ workers: [worker('other-account')] })
+      await untilTrue(() => s.registryStatus() === 'available')
+      expect(s.workers().map(w => w.id)).toEqual(['other-account'])
+      expect(mockListWorkers).toHaveBeenCalledTimes(2)
       dispose()
     })
   })

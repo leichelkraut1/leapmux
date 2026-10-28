@@ -11,7 +11,7 @@ import { runNativeToolTurn } from './nativeToolExecution'
 import { nativeToolRowId } from './nativeToolRowId'
 import { codeExecutionToolCall } from './providerToolCalls'
 import { uniqueMarker } from './shellArguments'
-import { assistantBubbles, toolCallRow } from './ui'
+import { assistantBubbles, revealActivityTarget, toolCallRow } from './ui'
 
 /**
  * Open a new agent of `context.provider` through {@link openNativeAgent}. Apply the provider's working directory rule.
@@ -94,6 +94,7 @@ export async function exerciseNativeCodeExecution(
     await options.nativeProof?.(request, callId, script.expected, script.failed)
     const rowId = await nativeToolRowId(context, callId)
     const bubble = toolCallRow(context.page, rowId)
+    await revealActivityTarget(context.page, bubble)
     await expect(bubble).toHaveCount(1)
     await expect(bubble).toHaveAttribute('data-tool-status', script.failed ? 'failed' : 'completed')
     await options.prepareResultView?.(rowId, false)
@@ -101,6 +102,7 @@ export async function exerciseNativeCodeExecution(
     await options.browserProof?.(rowId, script.expected, script.failed)
     await expect(assistantBubbles(context.page).filter({ hasText: `The native ${script.label} script ended.` }).first()).toBeVisible()
     await context.page.reload()
+    await revealActivityTarget(context.page, bubble)
     await expect(bubble).toHaveCount(1)
     await expect(bubble).toHaveAttribute('data-tool-status', script.failed ? 'failed' : 'completed')
     await options.prepareResultView?.(rowId, true)

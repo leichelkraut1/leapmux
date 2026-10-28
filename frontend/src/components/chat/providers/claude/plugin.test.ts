@@ -171,7 +171,8 @@ describe('claude plugin capabilities', () => {
       text: true,
       image: true,
       pdf: true,
-      binary: false,
+      binary: true,
+      fileBackedKinds: ['binary'],
     })
   })
 

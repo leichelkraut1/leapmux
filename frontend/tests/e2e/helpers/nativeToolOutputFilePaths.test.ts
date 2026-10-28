@@ -74,6 +74,7 @@ vi.mock('@playwright/test', async (importOriginal) => {
 })
 
 vi.mock('./ui', () => ({
+  revealActivityTarget: vi.fn(async () => {}),
   toolCallRow: (_page: unknown, callId: string) => ({ ...resultRow.fake('row'), callId }),
   openWorkspace: vi.fn(async () => {}),
   readAttachedWithArgument: vi.fn(async () => true),

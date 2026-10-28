@@ -10,7 +10,7 @@ import { assertPrivateNativePath } from '../helpers/nativePrivatePath'
 import { nativeToolResult } from '../helpers/nativeToolResult'
 import { newProviderWorkingDir } from '../helpers/providerWorkingDir'
 import { getGlobalState } from '../helpers/server'
-import { messageBubbles, openWorkspace } from '../helpers/ui'
+import { messageBubbles, openWorkspace, revealActivityTarget } from '../helpers/ui'
 import { openProviderAgent } from '../helpers/workspace'
 import { CODEX_AGENT, nativeContext } from './scenarios'
 
@@ -40,6 +40,7 @@ codexTest('executes the native MCP echo tool and preserves its argument refusal'
       const receipt = readMcpServerReceipt(receiptLog)
       expect(receipt.toolResults.at(-1)).toMatchObject({ tool: 'echo', text: marker, isError: !valid })
       expect(receipt.elicitationRequests).toEqual([])
+      await revealActivityTarget(page, messageBubbles(page).filter({ hasText: marker }).first())
       await expect(messageBubbles(page).filter({ hasText: marker }).first()).toBeVisible()
     }
   }, async () => writeFileSync(serverPath, originalScript))

@@ -17,7 +17,7 @@ import { nativeToolRowId } from './nativeToolRowId'
 import { bashToolCall, readToolCall, spawnSubagentToolCall } from './providerToolCalls'
 import { uniqueMarker } from './shellArguments'
 import { expectNoRegistryRows, openChildTabFromRow, requireRegistryRow } from './subagentRegistry'
-import { assistantBubbles, messageContents, sendMessage, tabById, toolCallRow, toolRows, userBubbles } from './ui'
+import { assistantBubbles, expandActivityGroups, messageContents, revealActivityTarget, sendMessage, tabById, toolCallRow, toolRows, userBubbles } from './ui'
 
 /** The final child answer when the spec supplies no native final response. */
 const DEFAULT_CHILD_ANSWER = 'CHILD_LIVE_DONE'
@@ -173,6 +173,7 @@ export async function exerciseLiveChildTranscript(context: LiveChildContext, spe
     if (heldWords !== '')
       await expect(assistantBubbles(page).filter({ hasText: heldWords })).toHaveCount(0)
     if (read) {
+      await revealActivityTarget(page, toolRows(page).filter({ hasText: basename(read.filePath) }).first())
       await expect(toolRows(page).filter({ hasText: basename(read.filePath) }).first()).toBeVisible()
       if (spec.toolProof && 'read' in spec.toolProof && spec.toolProof.read.expandResult) {
         const rowId = await nativeToolRowId(context, LIVE_CHILD_READ_CALL_ID)
@@ -180,10 +181,12 @@ export async function exerciseLiveChildTranscript(context: LiveChildContext, spe
       }
       await expect(messageContents(page).filter({ hasText: read.marker }).first()).toBeVisible()
       await tabById(page, parentId).click()
+      await expandActivityGroups(page)
       await expect(messageContents(page).filter({ hasText: read.marker })).toHaveCount(0)
       await tabById(page, childId).click()
     }
     else if (spec.toolProof && 'shell' in spec.toolProof) {
+      await revealActivityTarget(page, toolRows(page).filter({ hasText: spec.toolProof.shell.command }).first())
       await expect(toolRows(page).filter({ hasText: spec.toolProof.shell.command }).first()).toBeVisible()
     }
     await modelScript.releaseGate(gate)
@@ -258,6 +261,7 @@ export async function expectChildToolOutputDeferred(
   await withCleanup(async () => {
     expect(nativeToolResult(await child.heldRequest(), options.readCallId), 'the native Read result reached the model of the child').toContain(options.marker)
     await openChildTabFromRow(page, child.row)
+    await expandActivityGroups(page)
     await expect(messageContents(page).filter({ hasText: options.marker })).toHaveCount(0)
     await expect(toolRows(page).filter({ hasText: options.fileName })).toHaveCount(0)
     await expectStoredMessagesLack(context, child.childId, options.marker)
@@ -266,7 +270,9 @@ export async function expectChildToolOutputDeferred(
   if (!options.restoredAfterCompletion)
     return
   await tabById(page, child.childId).click()
+  await revealActivityTarget(page, messageContents(page).filter({ hasText: options.marker }).first())
   await expect(messageContents(page).filter({ hasText: options.marker }).first()).toBeVisible()
   await page.reload()
+  await revealActivityTarget(page, messageContents(page).filter({ hasText: options.marker }).first())
   await expect(messageContents(page).filter({ hasText: options.marker }).first()).toBeVisible()
 }

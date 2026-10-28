@@ -137,6 +137,66 @@ describe('useExternalAgentInventory', () => {
     expect(hook.rows()[0]?.status).toBe('unavailable')
   })
 
+  it('does not extend an unreachable computer snapshot when registry changes restart its request', async () => {
+    const snapshot = response()
+    snapshot.processes[0]!.sessions = [
+      create(NativeAgentSessionSchema, { sessionId: 'previously-working', activityState: AgentActivityState.WORKING }),
+    ]
+    const pending = deferred<InspectNativeAgentProcessesResponse>()
+    inspect.mockResolvedValueOnce(snapshot).mockReturnValue(pending.promise)
+    const hook = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    const refresh = hook.refresh()
+    await vi.advanceTimersByTimeAsync(5_000)
+    hook.setWorkers([{ workerId: 'one', workerName: 'Renamed PC', online: true }])
+    await vi.advanceTimersByTimeAsync(5_000)
+    hook.setWorkers([
+      { workerId: 'one', workerName: 'Renamed PC', online: true },
+      { workerId: 'offline', workerName: 'Other PC', online: false },
+    ])
+    await vi.advanceTimersByTimeAsync(4_999)
+    expect(hook.rows()[0]).toMatchObject({ status: 'available', refreshing: true })
+    expect(hook.rows()[0]?.processes[0]?.sessions[0]?.status).toBe('working')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(hook.rows()[0]).toMatchObject({ status: 'unavailable', refreshing: false, processes: [] })
+    expect(hook.rows()[0]?.observedAt).toBeUndefined()
+    pending.resolve(snapshot)
+    await refresh
+    await vi.advanceTimersByTimeAsync(0)
+    expect(hook.rows()[0]?.status).toBe('unavailable')
+    // Expiry of the retained snapshot does not permanently disable retry.
+    await hook.refresh()
+    expect(hook.rows()[0]).toMatchObject({ status: 'available', refreshing: false })
+  })
+
+  it('retains existing computer snapshots during registry additions and renames without accepting obsolete replies', async () => {
+    const obsolete = deferred<InspectNativeAgentProcessesResponse>()
+    const current = deferred<InspectNativeAgentProcessesResponse>()
+    const added = deferred<InspectNativeAgentProcessesResponse>()
+    inspect.mockResolvedValueOnce(response(100)).mockReturnValueOnce(obsolete.promise)
+    const hook = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    const oldRefresh = hook.refresh()
+    const oldSignal = inspect.mock.calls[1]![1]!.signal!
+    inspect.mockImplementation(id => id === 'one' ? current.promise : added.promise)
+    hook.setWorkers([
+      { workerId: 'one', workerName: 'Renamed PC', online: true },
+      { workerId: 'two', workerName: 'New PC', online: true },
+    ])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(oldSignal.aborted).toBe(true)
+    expect(hook.rows()[0]).toMatchObject({ workerName: 'Renamed PC', status: 'available', refreshing: true, processes: [{ pid: 100 }] })
+    expect(hook.rows()[1]).toMatchObject({ workerId: 'two', status: 'loading', processes: [] })
+    obsolete.resolve(response(999))
+    await oldRefresh
+    expect(hook.rows()[0]?.processes[0]?.pid).toBe(100)
+    current.resolve(response(200))
+    added.resolve(response(300))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(hook.rows().map(row => row.processes[0]?.pid)).toEqual([200, 300])
+    expect(hook.rows().every(row => row.status === 'available' && !row.refreshing)).toBe(true)
+  })
+
   it('clears a retained snapshot immediately when the computer identity changes', async () => {
     const pending = deferred<InspectNativeAgentProcessesResponse>()
     inspect.mockResolvedValueOnce(response()).mockReturnValue(pending.promise)

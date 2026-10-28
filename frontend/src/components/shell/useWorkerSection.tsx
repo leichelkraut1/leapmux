@@ -3,7 +3,7 @@ import type { KeyPinConfirmState } from './AppShellDialogs'
 import type { Worker } from '~/generated/proto/leapmux/v1/worker_pb'
 import type { DialogState } from '~/hooks/createDialogState'
 import type { WorkerRegistryStatus } from '~/stores/externalAgentInventory'
-import { batch, createEffect, createSignal, onCleanup, Show } from 'solid-js'
+import { batch, createEffect, createSignal, on, onCleanup, Show, untrack } from 'solid-js'
 import { workerClient } from '~/api/clients'
 import { channelManager, setConfirmKeyPin } from '~/api/workerRpc'
 import { AddTunnelDialog } from '~/components/workers/AddTunnelDialog'
@@ -70,6 +70,7 @@ export function useWorkerSection(opts: UseWorkerSectionOpts): WorkerSection {
   // remount every worker row on each refresh / WORKERS_CHANGED push.
   const workerIdentity = createIdentityCache<Worker>({ keyOf: w => w.id })
 
+  let registryUserId: string | undefined
   let registryRequest: AbortController | undefined
   let disposed = false
   onCleanup(() => {
@@ -81,8 +82,21 @@ export function useWorkerSection(opts: UseWorkerSectionOpts): WorkerSection {
     if (disposed)
       return
     registryRequest?.abort()
-    setRegistryStatus('loading')
-    if (!opts.getUserId())
+    const userId = opts.getUserId()
+    if (registryUserId !== userId) {
+      registryUserId = userId
+      workerIdentity.clear()
+      batch(() => {
+        setRegistryStatus('loading')
+        setWorkers([])
+      })
+    }
+    else if (registryStatus() !== 'available') {
+      setRegistryStatus('loading')
+    }
+    // Keep a successful same-user registry visible while it refreshes. Marking
+    // it loading would unmount the dashboard and cancel its observations.
+    if (!userId)
       return
     const request = new AbortController()
     registryRequest = request
@@ -125,10 +139,9 @@ export function useWorkerSection(opts: UseWorkerSectionOpts): WorkerSection {
   }
 
   // Fetch when the authenticated user is known.
-  createEffect(() => {
-    opts.getUserId() // track
+  createEffect(on(opts.getUserId, () => {
     void fetchWorkers()
-  })
+  }))
 
   // Re-fetch when the Hub sends a WorkersChanged control frame.
   //
@@ -141,7 +154,7 @@ export function useWorkerSection(opts: UseWorkerSectionOpts): WorkerSection {
   // a `fetchWorkerInfo` per online worker for each stale mount.
   onCleanup(channelManager.onHubControl((frame) => {
     if (frame.events.includes(HubControlEvent.WORKERS_CHANGED))
-      void fetchWorkers()
+      untrack(() => { void fetchWorkers() })
   }))
 
   // Register the E2EE channel callback (a module-level singleton in workerRpc).

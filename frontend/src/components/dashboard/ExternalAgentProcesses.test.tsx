@@ -46,6 +46,93 @@ describe('ExternalAgentProcesses', () => {
     expect(details).toHaveAttribute('open')
   })
 
+  it('keeps expanded computers and session rows mounted while refreshed snapshots update in place', () => {
+    const initial: DashboardExternalWorker = {
+      ...workers[0]!,
+      processes: [
+        { ...workers[0]!.processes[0]!, sessions: [{ sessionId: 'same-session', displayName: 'Claude plan', status: 'idle' }] },
+        { pid: 789, providerName: 'Claude', processName: 'helper', kind: 'unknown', sessions: [] },
+      ],
+      serviceGroups: [{
+        sourceId: 'codex-service',
+        providerName: 'Codex',
+        servicePid: 800,
+        processName: 'codex',
+        available: true,
+        partial: true,
+        candidateCount: 2,
+        candidateTruncated: false,
+        subscriptionLimit: 8,
+        sessions: [{ sessionId: 'same-session', displayName: 'Codex plan', status: 'working', statusObservedAt: '2026-10-27T12:30:00Z', sourceVerifiedAt: '2026-10-27T12:30:00Z', expiresAt: '2026-10-27T12:30:45Z' }],
+      }],
+    }
+    const [liveWorkers, setLiveWorkers] = createSignal<readonly DashboardExternalWorker[]>([initial, workers[1]!])
+    const [now, setNow] = createSignal(Date.parse('2026-10-27T12:30:00Z'))
+    const onRefresh = vi.fn(() => setLiveWorkers(current => current.map(worker => ({ ...worker, refreshing: true }))))
+    render(() => <ExternalAgentProcesses nowMs={now()} workers={liveWorkers()} query="" onRefresh={onRefresh} />)
+    const computer = screen.getByRole('heading', { name: 'Windows PC' }).closest('li')!
+    const details = within(computer).getByText('Processes without session status (1)').closest('details')!
+    const claudeSession = within(computer).getByText('Claude plan').closest('li')!
+    const codexSession = within(computer).getByText('Codex plan').closest('li')!
+    const source = within(computer).getByText('Codex application service').parentElement!
+    const helper = within(details).getByText('Process type unknown · helper · PID 789').closest('li')!
+    details.open = true
+    const refresh = screen.getByRole('button', { name: 'Refresh external processes' })
+    fireEvent.click(refresh)
+    expect(onRefresh).toHaveBeenCalledOnce()
+    expect(refresh).toBeDisabled()
+    expect(computer).toHaveAttribute('aria-busy', 'true')
+    expect(details).toBeInTheDocument()
+    expect(details).toHaveAttribute('open')
+    expect(claudeSession).toHaveTextContent('Idle')
+    expect(codexSession).toHaveTextContent('Working')
+    expect(screen.queryByText('Checking sessions and processes…')).not.toBeInTheDocument()
+
+    const updated: DashboardExternalWorker = {
+      ...initial,
+      workerName: 'Renamed PC',
+      observedAt: '2026-10-27T12:30:15Z',
+      refreshing: false,
+      processes: [
+        { ...initial.processes[0]!, sessions: [{ sessionId: 'same-session', displayName: 'Updated Claude plan', status: 'waiting' }] },
+        { ...initial.processes[1]!, processName: 'renamed-helper' },
+        { pid: 790, providerName: 'Claude', processName: 'new-helper', kind: 'unknown', sessions: [] },
+      ],
+      serviceGroups: [{
+        ...initial.serviceGroups![0]!,
+        candidateCount: 3,
+        sessions: [{ ...initial.serviceGroups![0]!.sessions[0]!, displayName: 'Updated Codex plan', sourceVerifiedAt: '2026-10-27T12:30:15Z', expiresAt: '2026-10-27T12:31:00Z' }],
+      }],
+    }
+    // A completed poll returns newly deserialized rows and may reorder computers.
+    setNow(Date.parse('2026-10-27T12:30:15Z'))
+    setLiveWorkers([{ ...workers[1]! }, updated])
+    expect(screen.getByRole('heading', { name: 'Renamed PC' }).closest('li')).toBe(computer)
+    expect(within(computer).getByText('Processes without session status (2)').closest('details')).toBe(details)
+    expect(details).toHaveAttribute('open')
+    expect(within(computer).getByText('Updated Claude plan').closest('li')).toBe(claudeSession)
+    expect(claudeSession).toHaveTextContent('Waiting on you')
+    expect(within(computer).getByText('Updated Codex plan').closest('li')).toBe(codexSession)
+    expect(within(computer).getByText('Codex application service').parentElement).toBe(source)
+    expect(source).toHaveTextContent('3 candidate sessions')
+    expect(within(details).getByText('Process type unknown · renamed-helper · PID 789').closest('li')).toBe(helper)
+    expect(within(computer).getByText(/Checked at/).querySelector('time')).toHaveAttribute('datetime', updated.observedAt)
+    expect(refresh).toBeEnabled()
+
+    // Another background refresh does not freeze stale activity to keep the DOM.
+    setLiveWorkers(current => current.map(worker => ({ ...worker, refreshing: true })))
+    setNow(Date.parse('2026-10-27T12:31:00Z'))
+    expect(codexSession).toBeInTheDocument()
+    expect(codexSession).toHaveTextContent('Observation expired · Activity unknown')
+    expect(codexSession).not.toHaveTextContent('Working')
+    expect(details).toHaveAttribute('open')
+    setLiveWorkers([{ ...updated, status: 'offline', refreshing: false, processes: [], serviceGroups: [] }])
+    expect(computer).toHaveTextContent('Computer offline · Session activity unknown')
+    expect(claudeSession).not.toBeInTheDocument()
+    expect(codexSession).not.toBeInTheDocument()
+    expect(details).not.toBeInTheDocument()
+  })
+
   it('labels participating-agent reports separately from provider observations and shows their deadline', () => {
     const reportedAt = '2026-10-27T12:00:00Z'
     const reportExpiresAt = '2026-10-27T12:15:00Z'

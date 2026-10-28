@@ -1,8 +1,8 @@
 // The native audio input path is not integrated.
 // See https://github.com/leapmux/leapmux/issues/498.
 import { codexTest } from '../codex-fixtures'
-import { exerciseAttachmentRefusal } from '../helpers/attachmentModelProbe'
+import { exerciseWorkerFileAttachment } from '../helpers/workerFileAttachment'
 
-codexTest('refuses binary attachments and excludes their actual bytes from the next native request', async ({ native }) => {
-  await exerciseAttachmentRefusal(native, { kind: 'binary', fileName: 'codex-refused.bin' })
+codexTest('makes a binary attachment available as an exact worker file for tools', async ({ native }) => {
+  await exerciseWorkerFileAttachment(native, { kind: 'binary', fileName: 'codex-project.ACD' })
 })

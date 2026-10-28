@@ -193,6 +193,7 @@ func Start(ctx context.Context, opts agent.Options, sink agent.ProviderServices)
 		sessionID:              sessionArgs[1],
 		effort:                 opts.Effort(),
 		workingDir:             opts.WorkingDir,
+		attachmentDir:          opts.AttachmentDir,
 		homeDir:                opts.HomeDir,
 		sink:                   agent.NewModelProgressResetSink(sink),
 		thirdPartyFromSettings: thirdPartyFromSettings,

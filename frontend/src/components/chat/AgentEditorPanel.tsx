@@ -833,7 +833,11 @@ export const AgentEditorPanel: Component<AgentEditorPanelProps> = (props) => {
           onPreempt={item => fireQueueRpc(props.onPreemptQueueItem?.(item))}
         />
         <Show when={!ctrl.activeControlRequest()}>
-          <AttachmentStrip attachments={attachments} onRemove={removeAttachment} />
+          <AttachmentStrip
+            attachments={attachments}
+            capabilities={att.capabilities()}
+            onRemove={removeAttachment}
+          />
         </Show>
         <input
           ref={fileInputRef}

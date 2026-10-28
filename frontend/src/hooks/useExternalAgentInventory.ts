@@ -51,6 +51,9 @@ export function useExternalAgentInventory(
   let generation = 0
   let pending = false
   let controllers: AbortController[] = []
+  // Registry changes may restart a request, but must not renew the lifetime of
+  // its retained snapshot (including providers without per-session expiry).
+  const observationDeadlines = new Map<string, number>()
   const cancel = () => {
     generation++
     for (const controller of controllers)
@@ -71,14 +74,23 @@ export function useExternalAgentInventory(
     cancel()
     const run = generation
     pending = true
+    const onlineIds = new Set(current.filter(worker => worker.online).map(worker => worker.workerId))
+    for (const workerId of observationDeadlines.keys()) {
+      if (!onlineIds.has(workerId))
+        observationDeadlines.delete(workerId)
+    }
+    for (const workerId of onlineIds) {
+      if (!observationDeadlines.has(workerId))
+        observationDeadlines.set(workerId, Date.now() + REQUEST_TIMEOUT_MS)
+    }
     setRows((previous) => {
       const byId = new Map(previous.map(row => [row.workerId, row]))
       return current.map((worker): DashboardExternalWorker => {
         const snapshot = byId.get(worker.workerId)
-        // Source changes clear rows before reaching here. Preserve only a
-        // successful snapshot during this request's bounded timeout.
+        // Preserve a successful snapshot for this same computer during the
+        // bounded request, including registry additions and display-name edits.
         if (worker.online && snapshot?.status === 'available')
-          return { ...snapshot, refreshing: true }
+          return { ...snapshot, workerName: worker.workerName, refreshing: true }
         return {
           workerId: worker.workerId,
           workerName: worker.workerName,
@@ -90,7 +102,8 @@ export function useExternalAgentInventory(
     await Promise.all(current.filter(w => w.online).map(async (worker) => {
       const controller = new AbortController()
       controllers.push(controller)
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+      const remaining = Math.max(0, observationDeadlines.get(worker.workerId)! - Date.now())
+      const timeout = setTimeout(() => controller.abort(), remaining)
       let rejectAborted: (() => void) | undefined
       let observation: Partial<DashboardExternalWorker>
       try {
@@ -151,6 +164,7 @@ export function useExternalAgentInventory(
       // invalidates replies already in flight, even if the transport ignored abort.
       if (generation !== run)
         return
+      observationDeadlines.delete(worker.workerId)
       setRows(previous => previous.map(row => row.workerId === worker.workerId ? { ...row, ...observation } : row))
     }))
     if (generation === run) {
@@ -159,10 +173,15 @@ export function useExternalAgentInventory(
     }
   }
 
-  createEffect(on(source, () => {
+  createEffect(on(source, (current) => {
     cancel()
-    setRows([])
-    void refresh()
+    if (current === null) {
+      observationDeadlines.clear()
+      setRows([])
+    }
+    else {
+      void refresh()
+    }
   }))
   const interval = setInterval(() => {
     void refresh()
@@ -170,6 +189,7 @@ export function useExternalAgentInventory(
   onCleanup(() => {
     clearInterval(interval)
     cancel()
+    observationDeadlines.clear()
   })
   return { rows, refresh }
 }

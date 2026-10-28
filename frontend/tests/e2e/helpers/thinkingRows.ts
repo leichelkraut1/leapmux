@@ -4,7 +4,7 @@ import type { NativeScenarioContext } from './nativeScenario'
 import { expect } from '@playwright/test'
 import { nativeTextStep } from './nativeScenario'
 import { uniqueMarker } from './shellArguments'
-import { bandRows, expectRowsInOrder, sendMessage, waitForAgentIdle } from './ui'
+import { bandRows, expectRowsInOrder, revealActivityTarget, sendMessage, waitForAgentIdle } from './ui'
 
 /**
  * Where the thought row of a turn sits, relative to the answer row of the same turn.
@@ -52,6 +52,7 @@ export function thoughtRowTexts(turn: Pick<ThinkingTurn, 'reasoning' | 'answer'>
  * text in its own row.
  */
 async function expectSeparateThoughtRow(page: Page, turn: ThinkingTurn, order: ThoughtRowOrder): Promise<void> {
+  await revealActivityTarget(page, bandRows(page, 'thought').filter({ hasText: turn.reasoning }).first())
   await expect(bandRows(page, 'thought').filter({ hasText: turn.reasoning }).first()).toBeVisible()
   await expect(bandRows(page, 'text').filter({ hasText: turn.answer }).first()).toBeVisible()
   // A text row is in view, so a zero count of the text rows that hold the reasoning reads real rows.

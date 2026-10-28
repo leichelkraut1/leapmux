@@ -39,6 +39,8 @@ export interface AttachmentCapabilities {
   image: boolean
   pdf: boolean
   binary: boolean
+  /** Accepted kinds supplied as Worker files for tools, not native model blocks. */
+  fileBackedKinds?: readonly ('pdf' | 'binary')[]
 }
 
 export interface StartupOption {
@@ -143,6 +145,9 @@ export interface ControlExtractionInput {
  * linked messages and native notifications only some protocols carry.
  */
 export interface ProviderTranscriptCapability {
+  /** Opt in to collapsed consecutive tool/reasoning activity in the transcript. */
+  foldActivity?: boolean
+
   /**
    * Combine separate supplemental data with the provider payload for display only.
    *

@@ -137,3 +137,59 @@ func TestStartAgentHandsNoDirectoriesWhenTheWorkerPreparedNone(t *testing.T) {
 	_, err := none.New(context.Background(), agentdir.Spec{Prefix: "test"})
 	require.ErrorContains(t, err, "prepared no agent directories")
 }
+
+// Durable uploads are not process-scoped agent directories. A resumed chat
+// gets the same safe path, and the startup sweep must leave its bytes intact.
+func TestAttachmentDirectoriesRemainStableAcrossWorkerRestarts(t *testing.T) {
+	isolateAgentDirBases(t)
+	dataDir := t.TempDir()
+	newManager := func() *agent.Manager {
+		m := agent.NewManager(testRegistry, nil)
+		require.NoError(t, m.PrepareAgentDirs(t.Context(), dataDir))
+		return m
+	}
+	capture := func(m *agent.Manager, opts agent.Options) string {
+		var seen string
+		_, err := m.StartAgentWith(t.Context(), opts, agenttest.Nop(),
+			func(_ context.Context, supplied agent.Options, _ agent.ProviderServices) (agent.Agent, error) {
+				seen = supplied.AttachmentDir
+				return nil, errTestStart
+			})
+		require.ErrorIs(t, err, errTestStart)
+		return seen
+	}
+	first := newManager()
+	id := "../../outside/chat:one"
+	directory := capture(first, agent.Options{AgentID: id})
+	require.Equal(t, filepath.Join(dataDir, "attachments"), filepath.Dir(directory))
+	require.Len(t, filepath.Base(directory), 64)
+	require.NotEqual(t, directory, capture(first, agent.Options{AgentID: "another-chat"}))
+	require.NoError(t, os.MkdirAll(directory, 0o700))
+	uploaded := filepath.Join(directory, "uploaded.bin")
+	expected := []byte{0, 0xff, 0x80, 1}
+	require.NoError(t, os.WriteFile(uploaded, expected, 0o600))
+	resumed := capture(newManager(), agent.Options{AgentID: id, ResumeSessionID: "resumed"})
+	require.Equal(t, directory, resumed)
+	actual, err := os.ReadFile(filepath.Join(resumed, "uploaded.bin"))
+	require.NoError(t, err)
+	assert.Equal(t, expected, actual)
+}
+
+func TestAttachmentDirectoryRequiresWorkerPreparationOrExplicitCallerPath(t *testing.T) {
+	t.Parallel()
+	m := agent.NewManager(testRegistry, nil)
+	own := filepath.Join(t.TempDir(), "own")
+	for _, tc := range []struct{ id, supplied, want string }{
+		{"unprepared", "", ""},
+		{"explicit", own, own},
+	} {
+		var seen string
+		_, err := m.StartAgentWith(t.Context(), agent.Options{AgentID: tc.id, AttachmentDir: tc.supplied}, agenttest.Nop(),
+			func(_ context.Context, opts agent.Options, _ agent.ProviderServices) (agent.Agent, error) {
+				seen = opts.AttachmentDir
+				return nil, errTestStart
+			})
+		require.ErrorIs(t, err, errTestStart)
+		assert.Equal(t, tc.want, seen)
+	}
+}
