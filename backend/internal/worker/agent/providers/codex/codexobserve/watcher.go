@@ -345,11 +345,9 @@ func (w *Watcher) run(ctx context.Context, done chan struct{}) {
 					continue
 				}
 				delete(state.pending, f.RequestID)
-				if f.Method != pending.method || !now.Before(pending.deadline) {
-					return
-				}
 				if pending.method == "initialize" {
-					if f.ResultType != "success" || !uuidPattern.MatchString(f.ClientID) || f.HandledBy != f.ClientID {
+					if f.Method != pending.method || !now.Before(pending.deadline) ||
+						f.ResultType != "success" || !uuidPattern.MatchString(f.ClientID) || f.HandledBy != f.ClientID {
 						return
 					}
 					if w.deps.verify(ctx, conn, peer) != nil {
@@ -360,7 +358,20 @@ func (w *Watcher) run(ctx context.Context, done chan struct{}) {
 					if !w.refresh(ctx, conn, state, path) {
 						return
 					}
-				} else if f.ResultType == "success" && uuidPattern.MatchString(f.HandledBy) && f.HandledBy != state.clientID {
+				} else if !now.Before(pending.deadline) || f.ResultType == "error" {
+					// Router errors such as no-client-found omit method and owner.
+					// The pending request identifies the candidate; a miss or late
+					// reply invalidates only that candidate, never another live chat.
+					if existing := state.followed[pending.candidate.ID]; existing != nil {
+						existing.invalidate(now)
+						_ = sendFollowing(conn, state.clientID, existing.owner, pending.candidate.ID, false)
+						delete(state.followed, pending.candidate.ID)
+					}
+				} else {
+					if f.Method != pending.method || f.ResultType != "success" ||
+						!uuidPattern.MatchString(f.HandledBy) || f.HandledBy == state.clientID {
+						return
+					}
 					if pending.owner != "" && pending.owner != f.HandledBy {
 						return
 					}
@@ -381,11 +392,6 @@ func (w *Watcher) run(ctx context.Context, done chan struct{}) {
 							return
 						}
 					}
-				} else if existing := state.followed[pending.candidate.ID]; existing != nil {
-					existing.invalidate(now)
-					// A lost owner must not remain loaded merely because the dashboard exists.
-					_ = sendFollowing(conn, state.clientID, existing.owner, pending.candidate.ID, false)
-					delete(state.followed, pending.candidate.ID)
 				}
 			case "broadcast":
 				switch f.Method {

@@ -284,3 +284,166 @@ func TestSnapshotRecoveryCannotRegressPastSeenOwnerRevision(t *testing.T) {
 	require.NoError(t, state.acceptState(recovered, now.Add(6*time.Second)))
 	assert.True(t, follow.valid)
 }
+
+func startResponseTestWatcher(t *testing.T, candidates []candidate) (*Watcher, net.Conn, *atomic.Int64, map[string]any) {
+	t.Helper()
+	client, server := net.Pipe()
+	clock := &atomic.Int64{}
+	clock.Store(time.Date(2026, 10, 28, 1, 0, 0, 0, time.UTC).UnixNano())
+	watcher := newWatcher(dependencies{
+		now:   func() time.Time { return time.Unix(0, clock.Load()) },
+		tick:  func() (<-chan time.Time, func()) { return make(chan time.Time), func() {} },
+		paths: func() (string, string, error) { return "home", "metadata", nil },
+		connect: func(context.Context, string) (net.Conn, PeerIdentity, error) {
+			return client, PeerIdentity{PID: 42, ProcessStartTime: 123, ExecutableName: "ChatGPT.exe", SourceID: "source"}, nil
+		},
+		verify: func(context.Context, net.Conn, PeerIdentity) error { return nil },
+		candidates: func(context.Context, string) (candidateSet, error) {
+			return candidateSet{Candidates: candidates}, nil
+		},
+	})
+	t.Cleanup(func() {
+		assert.NoError(t, server.Close())
+		assert.NoError(t, watcher.Close())
+	})
+	assert.Empty(t, watcher.Inspect(context.Background()))
+	initialize, err := readTestMessage(server)
+	require.NoError(t, err)
+	require.Equal(t, "initialize", initialize["method"])
+	return watcher, server, clock, initialize
+}
+
+func responseTestBarrier(t *testing.T, server net.Conn) {
+	t.Helper()
+	id := newID()
+	require.NoError(t, writeFrame(server, map[string]any{"type": "client-discovery-request", "requestId": id}))
+	response, err := readTestMessage(server)
+	require.NoError(t, err)
+	require.Equal(t, "client-discovery-response", response["type"])
+	require.Equal(t, id, response["requestId"])
+	require.Equal(t, map[string]any{"canHandle": false}, response["response"])
+}
+
+func requireResponseTestStopped(t *testing.T, watcher *Watcher) {
+	t.Helper()
+	watcher.mu.Lock()
+	done := watcher.done
+	watcher.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("invalid response did not stop the watcher")
+	}
+}
+
+func TestWatcherKeepsWorkingChatWhenOtherCandidatesAreMissingOrExpired(t *testing.T) {
+	const inactive = "44444444-4444-4444-8444-444444444444"
+	const expired = "55555555-5555-4555-8555-555555555555"
+	watcher, server, clock, initialize := startResponseTestWatcher(t, []candidate{
+		{ID: inactive}, {ID: testThread, Name: "Working chat"}, {ID: expired},
+	})
+	require.NoError(t, replyToTestRequest(server, initialize, testClient, map[string]any{"clientId": testClient}))
+	requests := make(map[string]map[string]any)
+	// Refresh writes every discovery before processing responses; read the batch
+	// before sending responses so this fixture also works with an unbuffered pipe.
+	for range 3 {
+		request, err := readTestMessage(server)
+		require.NoError(t, err)
+		require.Equal(t, "thread-owner-discovery", request["method"])
+		params, ok := request["params"].(map[string]any)
+		require.True(t, ok)
+		id, ok := params["conversationId"].(string)
+		require.True(t, ok)
+		requests[id] = request
+	}
+	require.Len(t, requests, 3)
+	// Exact router response shape: negative discovery has neither method nor
+	// handledByClientId. The error body remains discarded by the parser.
+	require.NoError(t, writeFrame(server, map[string]any{
+		"type": "response", "requestId": requests[inactive]["requestId"],
+		"resultType": "error", "error": "no-client-found",
+	}))
+	require.NoError(t, replyToTestRequest(server, requests[testThread], testOwner, map[string]any{}))
+	follow, err := readTestMessage(server)
+	require.NoError(t, err)
+	require.Equal(t, "thread-stream-following-changed", follow["method"])
+	require.Equal(t, map[string]any{"hostId": "local", "conversationId": testThread, "following": true}, follow["params"])
+	_, err = io.Copy(server, framedText(snapshotText(`{"type":"active","activeFlags":[]}`)))
+	require.NoError(t, err)
+	responseTestBarrier(t, server)
+	before := watcher.Inspect(context.Background())
+	require.Len(t, before, 1)
+	require.True(t, before[0].Available)
+	require.Len(t, before[0].Sessions, 1)
+	assert.Equal(t, testThread, before[0].Sessions[0].SessionID)
+	assert.Equal(t, leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WORKING, before[0].Sessions[0].ActivityState)
+
+	// A successful reply arriving after its candidate deadline but before the
+	// next timer tick must not terminate or refresh the unrelated Working chat.
+	clock.Add(int64(requestFor + time.Millisecond))
+	require.NoError(t, replyToTestRequest(server, requests[expired], testOwner, map[string]any{}))
+	responseTestBarrier(t, server)
+	after := watcher.Inspect(context.Background())
+	require.Len(t, after, 1)
+	require.True(t, after[0].Available)
+	require.Len(t, after[0].Sessions, 1)
+	assert.Equal(t, before[0].Sessions, after[0].Sessions)
+
+	closed := make(chan error, 1)
+	go func() { closed <- watcher.Close() }()
+	unfollow, err := readTestMessage(server)
+	require.NoError(t, err)
+	require.Equal(t, "thread-stream-following-changed", unfollow["method"])
+	require.Equal(t, map[string]any{"hostId": "local", "conversationId": testThread, "following": false}, unfollow["params"])
+	require.NoError(t, <-closed)
+}
+
+func TestWatcherStillRejectsInvalidInitialization(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		method     string
+		owner      string
+		resultType string
+		expired    bool
+	}{
+		{name: "methodless error", resultType: "error"},
+		{name: "wrong method", method: "thread-owner-discovery", owner: testClient, resultType: "success"},
+		{name: "wrong owner", method: "initialize", owner: testOwner, resultType: "success"},
+		{name: "expired", method: "initialize", owner: testClient, resultType: "success", expired: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			watcher, server, clock, initialize := startResponseTestWatcher(t, nil)
+			if test.expired {
+				clock.Add(int64(requestFor))
+			}
+			require.NoError(t, writeFrame(server, map[string]any{
+				"type": "response", "requestId": initialize["requestId"], "method": test.method,
+				"resultType": test.resultType, "handledByClientId": test.owner,
+				"result": map[string]any{"clientId": testClient},
+			}))
+			requireResponseTestStopped(t, watcher)
+		})
+	}
+}
+
+func TestWatcherStillRejectsInvalidSuccessfulDiscovery(t *testing.T) {
+	for _, test := range []struct{ name, method, owner string }{
+		{name: "missing method", owner: testOwner},
+		{name: "wrong method", method: "initialize", owner: testOwner},
+		{name: "missing owner", method: "thread-owner-discovery"},
+		{name: "invalid owner", method: "thread-owner-discovery", owner: "not-an-owner"},
+		{name: "self owner", method: "thread-owner-discovery", owner: testClient},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			watcher, server, _, initialize := startResponseTestWatcher(t, []candidate{{ID: testThread}})
+			require.NoError(t, replyToTestRequest(server, initialize, testClient, map[string]any{"clientId": testClient}))
+			discover, err := readTestMessage(server)
+			require.NoError(t, err)
+			require.NoError(t, writeFrame(server, map[string]any{
+				"type": "response", "requestId": discover["requestId"], "method": test.method,
+				"resultType": "success", "handledByClientId": test.owner, "result": map[string]any{},
+			}))
+			requireResponseTestStopped(t, watcher)
+		})
+	}
+}
