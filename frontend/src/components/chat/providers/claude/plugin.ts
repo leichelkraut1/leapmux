@@ -8,6 +8,7 @@ import { claudeCompactionBoundary, claudeCompactionStart, claudeNotificationEntr
 import { claudeOutputFilePaths } from './extractors/outputFilePaths'
 import { claudeResultDivider } from './extractors/resultDivider'
 import { claudeExtractRow } from './extractors/row'
+import { projectClaudeNativeConversation } from './nativeConversation'
 import { claudeControls } from './pluginControls'
 import { claudeRateLimitsFromMessage } from './rateLimits'
 import { claudeContextUsageFromMessage } from './sessionMetadata'
@@ -19,6 +20,7 @@ const CLAUDE_AUTOCOMPACT_BUFFER_PCT = 16.5
 
 const claudeCodePlugin: ProviderPlugin = {
   transcript: {
+    projectNativeConversation: projectClaudeNativeConversation,
     foldActivity: true,
     compactionStart: claudeCompactionStart,
     outputFilePaths: claudeOutputFilePaths,

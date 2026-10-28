@@ -1,4 +1,5 @@
 import type { Component } from 'solid-js'
+import type { NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { DashboardAgent } from '~/stores/agentDashboard'
 import type { DashboardExternalWorker, DashboardStatusFilter, WorkerRegistryStatus } from '~/stores/externalAgentInventory'
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
@@ -14,6 +15,7 @@ export interface AgentDashboardProps {
   registryStatus?: WorkerRegistryStatus
   onRefreshExternal?: () => void
   onOpenAgent: (row: DashboardAgent) => void
+  onOpenExternalSession?: (conversation: NativeConversationRef) => void
   onClose: () => void
 }
 
@@ -182,7 +184,7 @@ export const AgentDashboard: Component<AgentDashboardProps> = (props) => {
             <p class={styles.note}>Unavailable includes offline computers and agents whose status has not arrived, including expired observations and reports.</p>
           </section>
           <Show when={props.externalWorkers}>
-            {workers => <ExternalAgentProcesses workers={workers()} nowMs={now()} query={query()} statusFilter={filter()} registryStatus={props.registryStatus ?? 'available'} onRefresh={props.onRefreshExternal} />}
+            {workers => <ExternalAgentProcesses workers={workers()} nowMs={now()} query={query()} statusFilter={filter()} registryStatus={props.registryStatus ?? 'available'} onRefresh={props.onRefreshExternal} onOpenSession={props.onOpenExternalSession} />}
           </Show>
         </div>
       </div>

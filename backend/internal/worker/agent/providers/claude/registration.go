@@ -60,6 +60,7 @@ func Registration() agent.Registration {
 	return agent.Registration{
 		ObserveNativeSessions:  observeNativeSessions,
 		RecognizeNativeProcess: recognizeNativeProcess,
+		ReadNativeConversation: readClaudeNativeConversation,
 		Provider:               leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE,
 		Plugin:                 claudeProvider{},
 		Start:                  Start,

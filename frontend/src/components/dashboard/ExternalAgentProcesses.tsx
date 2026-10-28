@@ -1,6 +1,8 @@
 import type { Component } from 'solid-js'
+import type { NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { DashboardExternalProcess, DashboardExternalSession, DashboardExternalSessionRow, DashboardExternalWorker, DashboardStatusFilter, WorkerRegistryStatus } from '~/stores/externalAgentInventory'
 import { createMemo, For, Show } from 'solid-js'
+import { pluginFor } from '~/components/chat/providers/registry'
 import { externalSessionObservationFreshness, externalSessionReportFreshness, externalWorkerSessionRows, filterExternalAgentWorkers, resolveExternalSessionStatus } from '~/stores/externalAgentInventory'
 import { srOnly } from '~/styles/shared.css'
 import * as styles from './AgentDashboard.css'
@@ -29,6 +31,7 @@ function shortSessionId(id: string): string {
 const ExternalSession: Component<{
   row: DashboardExternalSessionRow
   nowMs: number
+  onOpen?: (() => void) | undefined
 }> = (props) => {
   const session = () => props.row.session
   const status = () => resolveExternalSessionStatus(session(), props.nowMs)
@@ -41,6 +44,13 @@ const ExternalSession: Component<{
         <span class={styles.secondary}>
           {`${session().displayName?.trim() ? `${props.row.providerName} · ` : ''}Session ${shortSessionId(session().sessionId)} · ${props.row.source === 'service' ? 'Service PID' : 'PID'} ${props.row.pid}`}
         </span>
+        <Show when={props.onOpen}>
+          {open => (
+            <button type="button" aria-label={`Open read-only chat: ${session().displayName?.trim() || props.row.providerName}`} onClick={() => open()()}>
+              Open chat
+            </button>
+          )}
+        </Show>
       </div>
       <div class={styles.processObservation}>
         <span class={`${styles.status} ${styles.statusColor[status()]}`} data-status={status()}>
@@ -103,10 +113,11 @@ const ExternalWorker: Component<{
   nowMs: number
   query: string
   statusFilter: DashboardStatusFilter
+  onOpenSession?: ((conversation: NativeConversationRef) => void) | undefined
 }> = (props) => {
   const sessionsById = createMemo(() => new Map(
     externalWorkerSessionRows(props.worker, props.nowMs)
-      .map(row => [JSON.stringify([row.providerName, row.session.sessionId]), row]),
+      .map(row => [JSON.stringify([row.agentProvider ?? row.providerName, row.session.sessionId]), row]),
   ))
   const groupsById = createMemo(() => new Map((props.worker.serviceGroups ?? []).map(group => [group.sourceId, group])))
   const processesById = createMemo(() => new Map(props.worker.processes.filter(process => process.sessions.length === 0).map(process => [process.pid, process])))
@@ -144,7 +155,15 @@ const ExternalWorker: Component<{
             <For each={[...sessionsById().keys()]}>
               {sessionId => (
                 <Show when={sessionsById().get(sessionId)}>
-                  {row => <ExternalSession row={row()} nowMs={props.nowMs} />}
+                  {row => (
+                    <ExternalSession
+                      row={row()}
+                      nowMs={props.nowMs}
+                      onOpen={row().agentProvider !== undefined && pluginFor(row().agentProvider!)?.transcript.projectNativeConversation && props.onOpenSession
+                        ? () => props.onOpenSession?.({ workerId: props.worker.workerId, workerName: props.worker.workerName, agentProvider: row().agentProvider!, sessionId: row().session.sessionId, ...(row().session.displayName ? { displayName: row().session.displayName } : {}) })
+                        : undefined}
+                    />
+                  )}
                 </Show>
               )}
             </For>
@@ -218,6 +237,7 @@ export const ExternalAgentProcesses: Component<{
   nowMs: number
   statusFilter?: DashboardStatusFilter
   onRefresh: (() => void) | undefined
+  onOpenSession?: ((conversation: NativeConversationRef) => void) | undefined
 }> = (props) => {
   const registryStatus = () => props.registryStatus ?? 'available'
   const loading = () => registryStatus() === 'loading'
@@ -269,6 +289,7 @@ export const ExternalAgentProcesses: Component<{
                         nowMs={props.nowMs}
                         query={props.query}
                         statusFilter={props.statusFilter ?? 'all'}
+                        onOpenSession={props.onOpenSession}
                       />
                     )}
                   </Show>

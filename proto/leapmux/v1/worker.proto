@@ -344,6 +344,42 @@ message GetWorkerSystemInfoResponse {
 // Worker's process tree. It never attaches to or resumes a native session.
 message InspectNativeAgentProcessesRequest {}
 
+// Explicit owner-only history read over the encrypted Worker channel. Paths,
+// process IDs, launch arguments and provider configuration are never accepted.
+message ReadNativeConversationRequest {
+  AgentProvider agent_provider = 1;
+  string session_id = 2;
+  string cursor = 3;
+  // latest (the initial page), before (older history), or after (live tail).
+  string direction = 4;
+  int32 limit = 5;
+}
+
+message NativeConversationRecord {
+  string id = 1;
+  int64 seq = 2;
+  // Unmodified native record. A provider-owned frontend adapter projects it.
+  bytes native_json = 3;
+}
+
+message ReadNativeConversationResponse {
+  string format = 1;
+  string session_id = 2;
+  // Stable across appends; a replacement/truncation requires resetting pages.
+  string revision = 3;
+  string display_name = 4;
+  string working_dir = 5;
+  string older_cursor = 6;
+  string newer_cursor = 7;
+  string observed_at = 8;
+  repeated NativeConversationRecord records = 9;
+  bool has_older = 10;
+  bool has_newer = 11;
+  bool reset_required = 12;
+  // Explicit bounded coverage warning, without OS error details or file data.
+  string partial_reason = 13;
+}
+
 // Classification describes an executable, not whether a chat is working.
 // UNKNOWN means a provider's name matched but CLI versus desktop is ambiguous.
 enum NativeAgentProcessKind {

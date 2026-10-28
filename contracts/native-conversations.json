@@ -1,0 +1,12 @@
+{
+  "_readme": "Read-only external conversation paging vocabulary shared by provider readers and browser projections. Formats identify unchanged native source envelopes; they never claim that stored JSONL is an app-server event stream. Directions select complete-record pages. These values grant no resume, input, approval, or other provider control.",
+  "formats": {
+    "CodexRolloutJSONL": "codex-rollout-jsonl-v1",
+    "ClaudeJSONL": "claude-jsonl-v1"
+  },
+  "directions": {
+    "Latest": "latest",
+    "Before": "before",
+    "After": "after"
+  }
+}

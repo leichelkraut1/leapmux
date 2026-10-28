@@ -364,6 +364,13 @@ var ownerGuardedProbes = func() []ownerGuardedProbe {
 		ownerGuardedProbe{"InspectNativeAgentProcesses", "InspectNativeAgentProcesses", func() proto.Message {
 			return &leapmuxv1.InspectNativeAgentProcessesRequest{}
 		}},
+		ownerGuardedProbe{"ReadNativeConversation", "ReadNativeConversation", func() proto.Message {
+			return &leapmuxv1.ReadNativeConversationRequest{
+				AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX,
+				SessionId:     "00000000-0000-0000-0000-000000000001",
+				Direction:     "latest",
+			}
+		}},
 		ownerGuardedProbe{"ListAgentSessions", "ListAgentSessions", func() proto.Message {
 			return &leapmuxv1.ListAgentSessionsRequest{
 				AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE,

@@ -36,6 +36,7 @@ import { codexChangeKind } from './fileChange'
 import { codexGeneratedImage, codexItemPath, codexViewedImage } from './image'
 import { extractItem } from './item'
 import { codexMcpFromItem } from './mcp'
+import { codexNativeHistoryFunctionCall } from './nativeHistory'
 import { codexPlanItemMarkdown, codexTurnPlanParams, codexTurnPlanTodos } from './plan'
 import { codexQuestionAnswerRow } from './questionAnswer'
 import { codexWebSearchActionFromItem } from './webSearch'
@@ -48,6 +49,9 @@ import { codexWebSearchActionFromItem } from './webSearch'
  */
 export function codexExtractRow(input: RowExtractionInput): ChatRow | null {
   const { category, resolved: parsed, span } = input
+  const nativeFunction = category.kind === 'tool_use' ? codexNativeHistoryFunctionCall(parsed, span ?? { request: undefined, result: undefined, role: 'other', visibleRows: { request: false, result: false } }) : null
+  if (nativeFunction)
+    return toolCallRow(nativeFunction.call, nativeFunction.role, span?.visibleRows ?? { request: false, result: false })
   switch (category.kind) {
     case 'assistant_text': {
       // The same reader the classifier used, so the two layers state one answer:

@@ -95,6 +95,7 @@ func Registration() agent.Registration {
 		RecognizeNativeProcess:   recognizeNativeProcess,
 		ObserveNativeSessions:    observeNativeSessions,
 		NewNativeServiceObserver: newNativeServiceObserver,
+		ReadNativeConversation:   readNativeConversation,
 		Provider:                 leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX,
 		Plugin:                   codexProvider{},
 		Start:                    Start,

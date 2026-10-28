@@ -772,7 +772,22 @@ describe('validateCodingAgentMatrix', () => {
           counts[cell.support] += 1
       }
       // A deliberate change of a verdict changes these numbers. Update them with the checklist.
-      expect(counts).toEqual({ 'supported': 1156, 'agent-limit': 419, 'leapmux-limit': 15 })
+      // The attachment release promoted these three audited cells before this
+      // read-only viewer change; keep the exact aggregate in sync with them.
+      expect(counts).toEqual({ 'supported': 1159, 'agent-limit': 417, 'leapmux-limit': 14 })
+      for (const [feature, provider] of [
+        ['pdf-attachments', 'codex'],
+        ['other-binary-attachments', 'claude-code'],
+        ['other-binary-attachments', 'codex'],
+      ]) {
+        expect(checklist.cells[feature][provider]).toMatchObject({
+          support: 'supported',
+          audit: 'source-verified',
+          testStatus: 'passed',
+          verified: true,
+          spec: `frontend/tests/e2e/${provider}/${feature}.spec.ts`,
+        })
+      }
       expect(checklist.cells['agent-questions']['codebuddy-code']).toMatchObject({
         support: 'supported',
         audit: 'source-verified',

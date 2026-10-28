@@ -7,6 +7,7 @@ import { classifyCodexMessage } from './classification'
 import { codexCompactionBoundary, codexCompactionStart, codexNotificationEntry } from './extractors/notification'
 import { codexResultDivider } from './extractors/resultDivider'
 import { codexExtractRow } from './extractors/row'
+import { projectCodexNativeConversation } from './nativeConversation'
 import { codexControls } from './pluginControls'
 import { resolveCodexMessage } from './resolveMessage'
 import { codexContextUsageFromNotification } from './sessionMetadata'
@@ -14,6 +15,7 @@ import { codexRelatedMessages, codexSpanRole } from './spanRole'
 
 const codexPlugin: ProviderPlugin = {
   transcript: {
+    projectNativeConversation: projectCodexNativeConversation,
     foldActivity: true,
     compactionStart: codexCompactionStart,
     resolveMessage: resolveCodexMessage,
