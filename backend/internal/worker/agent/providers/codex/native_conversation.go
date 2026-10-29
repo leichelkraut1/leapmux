@@ -116,6 +116,18 @@ func readCodexNativeConversationAt(ctx context.Context, query agent.NativeConver
 	if readErr != nil || count != 1 || id != query.SessionID {
 		return refuse("native_session_not_found")
 	}
+	// Codex's Windows index uses verbatim local-drive paths while the native
+	// session metadata can use ordinary drive paths. Normalize only that spelling
+	// before the existing scope/owner/link and identity checks.
+	var validPath bool
+	rollout, validPath = codexNativeConversationPath(rollout)
+	if !validPath {
+		return refuse("native_session_path_unverified")
+	}
+	cwd, validPath = codexNativeConversationPath(cwd)
+	if !validPath {
+		return refuse("native_session_path_unverified")
+	}
 	if !filepath.IsAbs(rollout) || !filepath.IsAbs(cwd) || filepath.Clean(rollout) != rollout {
 		return refuse("native_session_path_unverified")
 	}
@@ -142,8 +154,11 @@ func readCodexNativeConversationAt(ctx context.Context, query agent.NativeConver
 		var payload map[string]json.RawMessage
 		var nativeID, nativeCWD string
 		if json.Unmarshal(envelope["payload"], &payload) != nil || json.Unmarshal(payload["id"], &nativeID) != nil ||
-			nativeID != query.SessionID || json.Unmarshal(payload["cwd"], &nativeCWD) != nil ||
-			!filepath.IsAbs(nativeCWD) || filepath.Clean(nativeCWD) != filepath.Clean(cwd) {
+			nativeID != query.SessionID || json.Unmarshal(payload["cwd"], &nativeCWD) != nil {
+			return false, sessionstore.ErrNativeConversationIdentity
+		}
+		nativeCWD, validPath := codexNativeConversationPath(nativeCWD)
+		if !validPath || !filepath.IsAbs(nativeCWD) || filepath.Clean(nativeCWD) != filepath.Clean(cwd) {
 			return false, sessionstore.ErrNativeConversationIdentity
 		}
 		return true, nil

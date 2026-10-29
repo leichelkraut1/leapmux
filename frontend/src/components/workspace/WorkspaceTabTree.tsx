@@ -2,6 +2,7 @@ import type { Accessor, Component } from 'solid-js'
 import type { BranchRefActions } from './branchActions'
 import type { RepoCheckout } from './repoCheckouts'
 import type { BranchGroup, BranchRef, RepoGroup, TabNode, WorkerProjectionEntry } from './workspaceTabTree.model'
+import type { TabContextMenuProps } from '~/components/common/TabContextMenu'
 import type { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import type { WorkerInfo } from '~/lib/workerInfoCache'
 import type { createRepoGitStore } from '~/stores/repoGit.store'
@@ -10,7 +11,6 @@ import ChevronRight from 'lucide-solid/icons/chevron-right'
 import FolderGit from 'lucide-solid/icons/folder-git'
 import X from 'lucide-solid/icons/x'
 import { createMemo, createSignal, on, Show, useContext } from 'solid-js'
-import { DragHandle } from '~/components/common/DragHandle'
 import { createContextMenuAnchor } from '~/components/common/DropdownMenu'
 import { IconButton, IconButtonState } from '~/components/common/IconButton'
 import { NotificationDot } from '~/components/common/NotificationDot'
@@ -18,11 +18,8 @@ import { TabContextMenu } from '~/components/common/TabContextMenu'
 import { TabTypeIcon } from '~/components/common/TabTypeIcon'
 import { Tooltip } from '~/components/common/Tooltip'
 import { WorkingTreeIcon, workingTreeKindLabel, WorkingTreeRows } from '~/components/common/WorkingTree'
-import { SIDEBAR_TAB_PREFIX } from '~/components/shell/TabDragContext'
 import { PREFIX_TAB_TREE, sessionStorageGet, sessionStorageSet } from '~/lib/browserStorage'
 import { createStableContext } from '~/lib/createStableContext'
-import { attachDragActivators } from '~/lib/dragActivators'
-import { createGuardedDraggableRow } from '~/lib/dragRow'
 import { createKeyedRows, createKeyLookup, createStableKeys, KeyedFor } from '~/lib/keyedRows'
 import { shallowEqualArrays } from '~/lib/shallowEqual'
 import { diffStatsFromRepo } from '~/stores/repoGit'
@@ -83,7 +80,6 @@ export const RolledUpNotificationDot: Component<{
 
 const TabLeaf: Component<{
   tab: Tab
-  workspaceId: string
   depth: number
   isActive: boolean
   isEditing: boolean
@@ -92,6 +88,7 @@ const TabLeaf: Component<{
   onDblClick: () => void
   /** Start the inline rename from the row's context menu. Undefined hides the item. */
   onRename?: () => void
+  move?: TabContextMenuProps['move']
   onClose?: () => void
   isClosing?: boolean
   canClose: boolean
@@ -101,49 +98,14 @@ const TabLeaf: Component<{
 }> = (props) => {
   // The row element, for its right-click / long-press menu.
   const [rowEl, setRowEl] = createContextMenuAnchor()
-  /* eslint-disable solid/reactivity -- stable identifier for the draggable row */
-  const dragRow = createGuardedDraggableRow(
-    `${SIDEBAR_TAB_PREFIX}${props.workspaceId}:${props.tab.type}:${props.tab.id}`,
-    // `title` is a GETTER, not a snapshot. solid-dnd stores this object by
-    // reference and `TabDragContext`'s overlay renderer reads it when a drag
-    // starts, which can be long after the row mounted -- and the row now
-    // survives every metadata-only change, which is the whole point of the live
-    // lookup. A captured string would show the drag overlay the title the tab
-    // held at mount: "Agent" for one whose real title arrived from hydration a
-    // moment later, while the row beneath the cursor reads correctly.
-    //
-    // `type` stays a plain value: it is part of the draggable's own id above, so
-    // a tab whose type changed would be a different row entirely.
-    {
-      get title() {
-        return tabDisplayLabel(props.tab)
-      },
-      type: props.tab.type,
-    },
-    'y',
-  )
-  /* eslint-enable solid/reactivity */
-  // Mouse-only activation on the row body; the grip carries the raw handlers,
-  // so touch drags start there and nowhere else.
-  attachDragActivators(() => rowEl(), dragRow.bodyActivators, { touch: 'block' })
-
   return (
     <div
-      ref={(el) => {
-        setRowEl(el)
-        // Node registration only — activation lives on the guarded body and
-        // the grip; the transform arrives through the style prop below.
-        dragRow.ref(el)
-      }}
-      class={`${shared.node} ${css.leafNode} ${props.isActive ? css.leafActive : ''} ${dragRow.isActiveDraggable ? css.leafDragging : ''}`}
+      ref={setRowEl}
+      class={`${shared.node} ${css.leafNode} ${props.isActive ? css.leafActive : ''}`}
       style={{
         'padding-left': `${4 + props.depth * 16}px`,
-        ...dragRow.style(),
       }}
-      onClick={() => {
-        if (!dragRow.isActiveDraggable)
-          props.onClick()
-      }}
+      onClick={() => props.onClick()}
       onDblClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -197,6 +159,7 @@ const TabLeaf: Component<{
         <Tooltip text={tabTooltipText(props.tab)} showWhen={tabTooltipShowWhen(props.tab)}>
           <span
             class={css.tabLabel}
+            data-testid="tab-tree-leaf-label"
             classList={terminalStatusClassList(isTerminalTab(props.tab) ? props.tab.status : undefined)}
           >
             {tabDisplayLabel(props.tab)}
@@ -216,7 +179,6 @@ const TabLeaf: Component<{
           {...terminalProgressBarProps(props.tab)}
         />
       </Show>
-      <DragHandle activators={dragRow.gripActivators} testId="sidebar-tab-drag-handle" />
       <Show when={props.canClose}>
         <div class={`${sidebarActions} ${css.leafActions}`}>
           <IconButton
@@ -243,6 +205,7 @@ const TabLeaf: Component<{
         contextMenuFor={rowEl}
         data-testid="tab-tree-leaf-menu"
         {...(props.onRename !== undefined ? { onRename: props.onRename } : {})}
+        {...(props.move !== undefined ? { move: props.move } : {})}
         {...(props.canClose && props.onClose !== undefined ? { onClose: props.onClose } : {})}
         {...(props.isClosing !== undefined ? { isClosing: props.isClosing } : {})}
       />
@@ -363,10 +326,20 @@ const TabLeafSlot: Component<{ tab: Tab, depth: number }> = (props) => {
     const isClosing = sel.tabItemOps()?.closingKeys?.has(tabKey(props.tab))
     return isClosing !== undefined ? { isClosing } : {}
   }
+  const moveProps = () => {
+    const ops = sel.tabItemOps()
+    if (sel.archived() || !ops?.onMove)
+      return {}
+    return {
+      move: {
+        targets: ops.moveTargets?.(props.tab) ?? [],
+        onSelect: (workspaceId: string) => ops.onMove?.(props.tab, workspaceId),
+      },
+    }
+  }
   return (
     <TabLeaf
       tab={props.tab}
-      workspaceId={sel.workspaceId()}
       depth={props.depth}
       isActive={tabKey(props.tab) === sel.activeTabKey()}
       isEditing={edit.editingTabKey() === tabKey(props.tab)}
@@ -374,6 +347,7 @@ const TabLeafSlot: Component<{ tab: Tab, depth: number }> = (props) => {
       onClick={() => sel.onTabClick(props.tab.type, props.tab.id)}
       onDblClick={() => edit.startEditing(props.tab)}
       {...(edit.canRename(props.tab) ? { onRename: () => edit.startEditing(props.tab) } : {})}
+      {...moveProps()}
       onClose={() => sel.tabItemOps()?.onClose?.(props.tab)}
       {...isClosingProps()}
       canClose={sel.canClose()}

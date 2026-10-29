@@ -1,8 +1,17 @@
+import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
 import { test } from './fixtures'
 import { createWorkspaceViaAPI } from './helpers/api'
 import { withExtraClients } from './helpers/multiClient'
-import { gotoWorkspace, tiles, waitForLayoutSave, workspaceRow } from './helpers/ui'
+import { clickRowMenuItem, expandWorkspaceRow, expectAgentTabCount, gotoWorkspace, sidebarLeafIds, sidebarLeaves, sidebarSectionHeader, tiles, visibleOnly, waitForLayoutSave, waitForWorkspaceReady, workspaceRow } from './helpers/ui'
+import { createWorkspaceWithAgentsViaAPI } from './helpers/workspace'
+import { moveSidebarTabToWorkspace } from './helpers/workspaceMoveMenu'
+
+async function clickSectionMenuItem(page: Page, slug: string, itemName: string): Promise<void> {
+  const trigger = visibleOnly(page.getByTestId(`sidebar-section-menu-${slug}`)).first()
+  const item = page.getByTestId(`sidebar-section-menu-${slug}-popover`).getByRole('menuitem', { name: itemName, exact: true })
+  await clickRowMenuItem(null, trigger, item)
+}
 
 /**
  * Cross-workspace tab move convergence and workspace isolation.
@@ -14,15 +23,13 @@ import { gotoWorkspace, tiles, waitForLayoutSave, workspaceRow } from './helpers
  * only subscribers see `EntityMaterialized`. Both views update
  * without flickering through a "no workspace" intermediate state.
  *
- * The sidebar drag-to-workspace gesture's CRDT contract — a single
+ * The explicit Move to workspace menu's CRDT contract — a single
  * `SetTabRegister(tile_id=newTileInW2)` + `SetTabRegister(position)`
  * batch instead of tombstone-then-re-add — is exercised at the unit
  * level in `src/stores/tab.store.crdt.test.ts`
  * (`moveTabToWorkspace emits a single batch with tile_id + position`).
- * The full UI gesture E2E currently depends on per-workspace worker-
- * provider availability that the dev fixture only populates after an
- * agent is already open — covered here by the projection-isolation
- * smoke below.
+ * The menu flow below uses actual opened agents and independent clients
+ * viewing the source and destination, then reloads the destination.
  *
  * This spec covers:
  *
@@ -33,6 +40,37 @@ import { gotoWorkspace, tiles, waitForLayoutSave, workspaceRow } from './helpers
  */
 
 test.describe('Cross-workspace projection isolation', () => {
+  test('a menu move converges across source and destination clients and survives reload', async ({ browser, leapmuxServer }, testInfo) => {
+    const { workspaceId: source, agentIds: [sourceAgent] } = await createWorkspaceWithAgentsViaAPI(leapmuxServer, 'Menu source')
+    const { workspaceId: target, agentIds: [targetAgent] } = await createWorkspaceWithAgentsViaAPI(leapmuxServer, 'Menu target')
+    if (!sourceAgent || !targetAgent)
+      throw new Error('Both workspaces need their opened agent.')
+    await withExtraClients(browser, leapmuxServer, 2, async ([pageA, pageB]) => {
+      await Promise.all([
+        gotoWorkspace(pageA, leapmuxServer.adminToken, source),
+        gotoWorkspace(pageB, leapmuxServer.adminToken, target),
+      ])
+      await expandWorkspaceRow(pageA, source)
+      await expect.poll(() => sidebarLeafIds(pageA, source)).toEqual([sourceAgent])
+      await expect.poll(() => sidebarLeafIds(pageB, target)).toEqual([targetAgent])
+
+      const saved = waitForLayoutSave(pageA)
+      await moveSidebarTabToWorkspace(pageA, sidebarLeaves(pageA, source).first(), target, testInfo.outputPath('move-to-workspace-menu.png'))
+      await saved
+      await expandWorkspaceRow(pageA, target)
+      await expect.poll(() => sidebarLeafIds(pageA, target)).toEqual([targetAgent, sourceAgent])
+      await expect.poll(() => sidebarLeafIds(pageA, source)).toEqual([])
+      await expect.poll(() => sidebarLeafIds(pageB, target)).toEqual([targetAgent, sourceAgent])
+      await expectAgentTabCount(pageB, 2)
+
+      await pageB.reload()
+      await waitForWorkspaceReady(pageB)
+      await expect.poll(() => sidebarLeafIds(pageB, target)).toEqual([targetAgent, sourceAgent])
+      await expandWorkspaceRow(pageB, source)
+      await expect.poll(() => sidebarLeafIds(pageB, source)).toEqual([])
+    })
+  })
+
   test('a layout edit in W1 does not reach a client viewing W2', async ({ browser, leapmuxServer }) => {
     const { hubUrl, adminToken } = leapmuxServer
     // The suite reset deletes these workspaces, and the marker below, before the next test.
@@ -76,5 +114,30 @@ test.describe('Cross-workspace projection isolation', () => {
     const newWsTitle = 'sibling-via-userevents-stream'
     const newWsId = await createWorkspaceViaAPI(hubUrl, adminToken, newWsTitle)
     await expect(workspaceRow(page, newWsId)).toContainText(newWsTitle)
+  })
+
+  test('a workspace still moves to a section through its right-click menu', async ({ page, emptyWorkspace, leapmuxServer }) => {
+    const workspaceId = emptyWorkspace.workspaceId
+    await gotoWorkspace(page, leapmuxServer.adminToken, workspaceId)
+    await clickSectionMenuItem(page, 'workspaces_in_progress', 'New section...')
+    const dialog = visibleOnly(page.getByTestId('section-name-dialog')).first()
+    await dialog.getByTestId('title-input').fill('Moved workspaces')
+    await dialog.getByRole('button', { name: 'Create', exact: true }).click()
+    const custom = sidebarSectionHeader(page, 'workspaces_custom')
+    await expect(custom).toContainText('Moved workspaces')
+
+    await workspaceRow(page, workspaceId).click({ button: 'right' })
+    await workspaceRow(page, workspaceId).getByTestId('workspace-move-to').click()
+    const destinations = visibleOnly(page.getByTestId('workspace-move-to-popover')).first()
+    await destinations.getByRole('menuitem', { name: 'Moved workspaces', exact: true }).click()
+    await expect(custom.locator('..').getByTestId(`workspace-item-${workspaceId}`)).toBeVisible()
+
+    await page.reload()
+    await waitForWorkspaceReady(page)
+    await expect(custom.locator('..').getByTestId(`workspace-item-${workspaceId}`)).toBeVisible()
+    await clickSectionMenuItem(page, 'workspaces_custom', 'Delete section...')
+    await page.locator('dialog:visible').getByRole('button', { name: 'Delete', exact: true }).click()
+    await page.locator('dialog:visible').getByRole('button', { name: 'Confirm?', exact: true }).click()
+    await expect(custom).toHaveCount(0)
   })
 })

@@ -17,6 +17,7 @@ import type { ChangeBranchMode } from '~/hooks/useGitModeState'
 import type { DashboardAgent } from '~/stores/agentDashboard'
 import type { GoalAction, GoalSurface } from '~/stores/chatGoal'
 import type { SavedViewportScroll } from '~/stores/chatTypes'
+import type { Tab } from '~/stores/tab.types'
 import type { TabView } from '~/stores/tabView'
 import { useLocation, useSearchParams } from '@solidjs/router'
 import { createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount, Show, untrack } from 'solid-js'
@@ -1202,6 +1203,11 @@ export const AppShell: Component = () => {
     focusTile,
   })
 
+  const canMoveSidebarTab = (tab: Tab) => sectionStore.state.loaded
+    && isWorkspaceMutatableById(tab.workspaceId)
+    && !(tab.type === TabType.AGENT && tab.parentAgentId)
+    && !tabOps.closingTabKeys().has(tabKey(tab))
+
   // Active agent to-dos for the right sidebar section. "Active" is
   // derived from the active tab — if the user is looking at an AGENT
   // tab, that's the active agent. Todos are owned by the root agent, so a
@@ -1681,6 +1687,17 @@ export const AppShell: Component = () => {
     tabItemOps: {
       onClose: tabOps.handleTabClose,
       onRename: (tab, title) => renameTab({ view: tabView, metadata: tabMetadata }, tab, title),
+      moveTargets: tab => canMoveSidebarTab(tab)
+        ? workspaceStore.state.workspaces
+            .filter(target => target.id !== tab.workspaceId && isWorkspaceMutatableById(target.id))
+            .map(target => ({ id: target.id, label: target.title || 'Untitled' }))
+        : [],
+      onMove: (tab, targetWorkspaceId) => {
+        const current = tabView.get(tabKey(tab))
+        if (!current || !canMoveSidebarTab(current) || !isWorkspaceMutatableById(targetWorkspaceId))
+          return
+        handleCrossWorkspaceMove(targetWorkspaceId, tabKey(current), current.workspaceId)
+      },
       get closingKeys() { return tabOps.closingTabKeys() },
     },
     // Tile order for sidebar leaf ordering. No active/inactive fork: every
