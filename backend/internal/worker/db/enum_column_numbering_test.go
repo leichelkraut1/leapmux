@@ -22,6 +22,11 @@ import (
 // The hub store checks its schema with the same method.
 const workerMigration = "migrations/00001_initial.sql"
 
+// workerMigrations is every migration, in the order goose applies them. The
+// schema-wide checks read all of them, so a table a later migration adds is
+// held to the same rules as one in 00001.
+const workerMigrations = "migrations/*.sql"
+
 type integerEnumColumn struct {
 	label, update, read string
 	minimum, maximum    int64
@@ -563,15 +568,21 @@ func TestNoWorkerQueryStoresEnumWords(t *testing.T) {
 // cannot be satisfied by a comment that merely DISCUSSES the constraint.
 func statementsOfMigration(t *testing.T) string {
 	t.Helper()
-	data, err := os.ReadFile(workerMigration)
+	files, err := filepath.Glob(workerMigrations)
 	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	slices.Sort(files)
 	var b strings.Builder
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "--") {
-			continue
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		require.NoError(t, err)
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "--") {
+				continue
+			}
+			b.WriteString(line)
+			b.WriteString("\n")
 		}
-		b.WriteString(line)
-		b.WriteString("\n")
 	}
 	return b.String()
 }
