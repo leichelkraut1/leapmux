@@ -52,7 +52,7 @@ func TestClaudeNativeConversationRejectsConflictingIdentity(t *testing.T) {
 		change func(map[string]any, string)
 	}{
 		{"session", func(r map[string]any, _ string) { r["sessionId"] = "different-session" }},
-		{"cwd", func(r map[string]any, cwd string) { r["cwd"] = filepath.Join(cwd, "different") }},
+		{"relative-cwd", func(r map[string]any, _ string) { r["cwd"] = "relative/generated" }},
 		{"sidechain", func(r map[string]any, _ string) { r["isSidechain"] = true }},
 		{"malformed-identity", func(r map[string]any, _ string) { r["sessionId"] = 7 }},
 	} {
@@ -68,6 +68,72 @@ func TestClaudeNativeConversationRejectsConflictingIdentity(t *testing.T) {
 			nativeClaudeFixture(t, root, cwd, "generated", first, string(raw))
 			_, err = readClaudeNativeConversationAt(context.Background(), root, agent.NativeConversationQuery{SessionID: "generated", Limit: 1})
 			require.Error(t, err, "a matching earlier header must not admit later conflicting records")
+		})
+	}
+}
+
+func TestClaudeNativeConversationAllowsCwdChangesInTheBoundSession(t *testing.T) {
+	t.Parallel()
+	root, original, changed := t.TempDir(), t.TempDir(), t.TempDir()
+	const session = "generated-cwd-change"
+	first := claudeUserRecord(original, session, "generated original directory")
+	second := claudeUserRecord(changed, session, "generated changed directory")
+	path := nativeClaudeFixture(t, root, original, session, first, second)
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+	latest, err := readClaudeNativeConversationAt(context.Background(), root, agent.NativeConversationQuery{SessionID: session, Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, latest.Records, 1)
+	assert.Equal(t, second, string(latest.Records[0].NativeJSON))
+	assert.Equal(t, original, latest.WorkingDir, "the native project stays bound to its original identity-bearing cwd")
+	require.True(t, latest.HasOlder)
+	older, err := readClaudeNativeConversationAt(context.Background(), root, agent.NativeConversationQuery{
+		SessionID: session, Cursor: latest.OlderCursor, Direction: contracts.NativeConversationDirectionBefore, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, older.Records, 1)
+	assert.Equal(t, first, string(older.Records[0].NativeJSON))
+	assert.Equal(t, original, older.WorkingDir)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	require.NoError(t, err)
+	third := claudeUserRecord(original, session, "generated return to original directory")
+	_, err = file.WriteString(third + "\n")
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+	more, err := readClaudeNativeConversationAt(context.Background(), root, agent.NativeConversationQuery{
+		SessionID: session, Cursor: latest.NewerCursor, Direction: contracts.NativeConversationDirectionAfter,
+	})
+	require.NoError(t, err)
+	require.Len(t, more.Records, 1)
+	assert.Equal(t, third, string(more.Records[0].NativeJSON))
+	assert.Equal(t, latest.Revision, more.Revision)
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, append(append([]byte(nil), before...), []byte(third+"\n")...), after, "reader must leave the native file unchanged")
+}
+
+func TestClaudeNativeConversationRequiresAnIdentityBoundProject(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		prefix string
+	}{
+		{"foreign-initial-cwd", ""},
+		{"unbound-metadata-cannot-authorize-foreign-cwd", `{"type":"system","cwd":%s}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root, original, foreign := t.TempDir(), t.TempDir(), t.TempDir()
+			const session = "generated-origin-binding"
+			var records []string
+			if tc.prefix != "" {
+				encoded, err := json.Marshal(original)
+				require.NoError(t, err)
+				records = append(records, strings.ReplaceAll(tc.prefix, "%s", string(encoded)))
+			}
+			records = append(records, claudeUserRecord(foreign, session, "generated foreign original"))
+			nativeClaudeFixture(t, root, original, session, records...)
+			_, err := readClaudeNativeConversationAt(context.Background(), root, agent.NativeConversationQuery{SessionID: session})
+			require.Error(t, err)
 		})
 	}
 }

@@ -57,21 +57,24 @@ func readClaudeNativeConversationAt(ctx context.Context, root string, q agent.Na
 				return false, errClaudeConversationIdentity
 			}
 			if record.Cwd != "" {
-				if !filepath.IsAbs(record.Cwd) || (cwd != "" && !sessionstore.SameDir(cwd, record.Cwd)) {
+				if !filepath.IsAbs(record.Cwd) {
 					return false, errClaudeConversationIdentity
 				}
-				// The mangling is lossy, so retain and compare the exact recorded
-				// cwd too; a directory name by itself is never session identity.
-				mangled := mangleClaudePath(filepath.Clean(record.Cwd))
-				projectName := project
-				if runtime.GOOS == "windows" {
-					projectName, mangled = strings.ToLower(projectName), strings.ToLower(mangled)
+				if cwd == "" && record.SessionID == q.SessionID {
+					// Bind the original project to an identity-bearing record. Claude
+					// can subsequently change cwd while keeping this same session file.
+					// Later cwd values are metadata, never filesystem read targets.
+					mangled := mangleClaudePath(filepath.Clean(record.Cwd))
+					projectName := project
+					if runtime.GOOS == "windows" {
+						projectName, mangled = strings.ToLower(projectName), strings.ToLower(mangled)
+					}
+					if (len(mangled) <= claudeMangleMaxLength && projectName != mangled) ||
+						(len(mangled) > claudeMangleMaxLength && !strings.HasPrefix(projectName, mangled[:claudeMangleMaxLength]+"-")) {
+						return false, errClaudeConversationIdentity
+					}
+					cwd = record.Cwd
 				}
-				if (len(mangled) <= claudeMangleMaxLength && projectName != mangled) ||
-					(len(mangled) > claudeMangleMaxLength && !strings.HasPrefix(projectName, mangled[:claudeMangleMaxLength]+"-")) {
-					return false, errClaudeConversationIdentity
-				}
-				cwd = record.Cwd
 			}
 			titles.take(record)
 			return record.SessionID == q.SessionID, nil
