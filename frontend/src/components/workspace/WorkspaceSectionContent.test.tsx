@@ -1,7 +1,8 @@
 import type { JSX } from 'solid-js'
 import type { Tab } from '~/stores/tab.types'
 import { create } from '@bufbuild/protobuf'
-import { render, screen, within } from '@solidjs/testing-library'
+import { fireEvent, render, screen, within } from '@solidjs/testing-library'
+import { createDroppable, createSortable, SortableProvider } from '@thisbeyond/solid-dnd'
 import { createSignal } from 'solid-js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TabType, WorkspaceSchema } from '~/generated/proto/leapmux/v1/workspace_pb'
@@ -11,18 +12,18 @@ import { resetExpandedWorkspacesForTests, setWorkspacesExpanded } from './expand
 import { WorkspaceSectionContent } from './WorkspaceSectionContent'
 
 vi.mock('@thisbeyond/solid-dnd', () => ({
-  createDroppable: () => Object.assign((_el: HTMLElement) => {}, {
+  createDroppable: vi.fn(() => Object.assign((_el: HTMLElement) => {}, {
     isActiveDroppable: false,
     ref: undefined,
-  }),
-  createSortable: () => ({
+  })),
+  createSortable: vi.fn(() => ({
     ref: () => {},
     dragActivators: {},
     isActiveDraggable: false,
     transform: { x: 0, y: 0 },
-  }),
+  })),
   maybeTransformStyle: () => ({}),
-  SortableProvider: (props: { children: JSX.Element }) => <>{props.children}</>,
+  SortableProvider: vi.fn((props: { children: JSX.Element }) => <>{props.children}</>),
 }))
 
 vi.mock('./WorkspaceContextMenu', () => ({
@@ -81,16 +82,22 @@ function renderContent(options: RenderOptions = {}) {
 }
 
 describe('WorkspaceSectionContent', () => {
-  it('keeps the chevron at the indent edge and puts the drag grip after the title', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders plain workspace rows without registering drag or drop targets', () => {
     renderContent()
 
     const row = screen.getByTestId('workspace-item-ws-1')
     const chevron = within(row).getByTestId('workspace-chevron-ws-1')
     const title = within(row).getByText('Workspace One')
-    const grip = within(row).getByTestId('workspace-drag-handle')
 
     expect(chevron.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
-    expect(title.compareDocumentPosition(grip) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(within(row).queryByTestId('workspace-drag-handle')).not.toBeInTheDocument()
+    expect(createDroppable).not.toHaveBeenCalled()
+    expect(createSortable).not.toHaveBeenCalled()
+    expect(SortableProvider).not.toHaveBeenCalled()
   })
 
   it('selects the workspace through a click on its title, which carries the title test id', () => {
@@ -103,16 +110,31 @@ describe('WorkspaceSectionContent', () => {
     expect(onSelect).toHaveBeenCalledExactlyOnceWith('ws-1')
   })
 
-  it('keeps the drag grip after the rename input', () => {
-    renderContent({ renamingWorkspaceId: 'ws-1' })
+  it('selects normally after a pointer gesture over the title', () => {
+    const onSelect = vi.fn()
+    renderContent({ onSelect })
+
+    const title = within(screen.getByTestId('workspace-item-ws-1')).getByTestId('workspace-title')
+    fireEvent.pointerDown(title, { pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, clientY: 10 })
+    fireEvent.pointerMove(title, { pointerId: 1, pointerType: 'mouse', buttons: 1, clientY: 40 })
+    fireEvent.pointerUp(title, { pointerId: 1, pointerType: 'mouse', button: 0, clientY: 40 })
+    title.click()
+
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith('ws-1')
+  })
+
+  it('keeps the rename input selectable without a drag grip or row selection', () => {
+    const onSelect = vi.fn()
+    renderContent({ renamingWorkspaceId: 'ws-1', onSelect })
 
     const row = screen.getByTestId('workspace-item-ws-1')
     const chevron = within(row).getByTestId('workspace-chevron-ws-1')
     const input = within(row).getByRole('textbox')
-    const grip = within(row).getByTestId('workspace-drag-handle')
 
     expect(chevron.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
-    expect(input.compareDocumentPosition(grip) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(within(row).queryByTestId('workspace-drag-handle')).not.toBeInTheDocument()
+    input.click()
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })
 

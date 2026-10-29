@@ -5,6 +5,7 @@ import type { SectionActions } from './sectionUtils'
 import type { SidebarElementsOpts } from './SidebarElements'
 import type { TabContext } from './tabContext'
 import type { CliPathStatus } from '~/api/platformBridge'
+import type { NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { SetGoalState } from '~/components/shell/AppShellDialogs'
 import type { BranchRefActions } from '~/components/workspace/branchActions'
 import type { WorkspaceStartActions, WorkspaceStartAt } from '~/components/workspace/workspaceStartActions'
@@ -16,17 +17,20 @@ import type { ChangeBranchMode } from '~/hooks/useGitModeState'
 import type { DashboardAgent } from '~/stores/agentDashboard'
 import type { GoalAction, GoalSurface } from '~/stores/chatGoal'
 import type { SavedViewportScroll } from '~/stores/chatTypes'
+import type { Tab } from '~/stores/tab.types'
 import type { TabView } from '~/stores/tabView'
 import { useLocation, useSearchParams } from '@solidjs/router'
-import { createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount, Show } from 'solid-js'
+import { createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount, Show, untrack } from 'solid-js'
 import { getRuntimeState, isTauriApp, platformBridge } from '~/api/platformBridge'
 import { apiLoadingTimeoutMs, workspaceBootstrapTimeoutMs } from '~/api/transport'
 import { setExpectedUserId } from '~/api/workerRpc'
 import { createAgentComposerActionStateStore } from '~/components/chat/agentComposerActionState'
+import { nativeConversationFromParams, nativeConversationKey, nativeConversationRouteProvider } from '~/components/chat/nativeConversation'
 import { pluginFor } from '~/components/chat/providers/registry'
 import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
 import { BootSplash } from '~/components/common/BootSplash'
 import { AgentDashboard } from '~/components/dashboard/AgentDashboard'
+import { NativeAgentTranscriptViewer } from '~/components/dashboard/NativeAgentTranscriptViewer'
 import { CliPathDialog } from '~/components/desktop/CliPathDialog'
 import { isWorkspaceMutatable } from '~/components/shell/sectionUtils'
 import { focusedTerminalId, setTerminalScreenSink, writeToFocusedTerminal } from '~/components/terminal/TerminalView'
@@ -1200,6 +1204,11 @@ export const AppShell: Component = () => {
     focusTile,
   })
 
+  const canMoveSidebarTab = (tab: Tab) => sectionStore.state.loaded
+    && isWorkspaceMutatableById(tab.workspaceId)
+    && !(tab.type === TabType.AGENT && tab.parentAgentId)
+    && !tabOps.closingTabKeys().has(tabKey(tab))
+
   // Active agent to-dos for the right sidebar section. "Active" is
   // derived from the active tab — if the user is looking at an AGENT
   // tab, that's the active agent. Todos are owned by the root agent, so a
@@ -1577,7 +1586,31 @@ export const AppShell: Component = () => {
   const dashboardRowsById = createMemo(() => new Map(dashboardRows().map(row => [row.agentId, row])))
   const agentTreeStatus = (agentId: string) => dashboardRowsById().get(agentId)?.status ?? 'unknown'
 
-  const closeAgentDashboard = () => setSearchParams({ dashboard: undefined }, { replace: true })
+  const [nativeConversation, setNativeConversation] = createSignal<NativeConversationRef>()
+  const linkedNativeConversation = createMemo(() => nativeConversationFromParams(searchParams, workerSection.workers().map(worker => ({ workerId: worker.id, workerName: workerSection.workerInfoFn(worker.id)?.name || worker.id }))))
+  createEffect(on(() => {
+    const linked = linkedNativeConversation()
+    return linked ? nativeConversationKey(linked) : undefined
+  }, (key) => {
+    const current = untrack(nativeConversation)
+    if (key !== (current ? nativeConversationKey(current) : undefined))
+      setNativeConversation(linkedNativeConversation())
+  }))
+  const closeNativeConversation = () => {
+    setNativeConversation(undefined)
+    setSearchParams({ externalWorker: undefined, externalProvider: undefined, externalSession: undefined }, { replace: true })
+  }
+  const openNativeConversation = (conversation: NativeConversationRef) => {
+    const provider = nativeConversationRouteProvider(conversation.agentProvider)
+    if (!provider)
+      return
+    setNativeConversation(conversation)
+    setSearchParams({ externalWorker: conversation.workerId, externalProvider: provider, externalSession: conversation.sessionId }, { replace: true })
+  }
+  const closeAgentDashboard = () => {
+    setNativeConversation(undefined)
+    setSearchParams({ dashboard: undefined, externalWorker: undefined, externalProvider: undefined, externalSession: undefined }, { replace: true })
+  }
   const openDashboardAgent = (row: DashboardAgent) => {
     // Resolve again on click: a live row may have moved or closed while shown.
     const tab = tabView.getAgentTab(row.agentId)
@@ -1655,6 +1688,17 @@ export const AppShell: Component = () => {
     tabItemOps: {
       onClose: tabOps.handleTabClose,
       onRename: (tab, title) => renameTab({ view: tabView, metadata: tabMetadata }, tab, title),
+      moveTargets: tab => canMoveSidebarTab(tab)
+        ? workspaceStore.state.workspaces
+            .filter(target => target.id !== tab.workspaceId && isWorkspaceMutatableById(target.id))
+            .map(target => ({ id: target.id, label: target.title || 'Untitled' }))
+        : [],
+      onMove: (tab, targetWorkspaceId) => {
+        const current = tabView.get(tabKey(tab))
+        if (!current || !canMoveSidebarTab(current) || !isWorkspaceMutatableById(targetWorkspaceId))
+          return
+        handleCrossWorkspaceMove(targetWorkspaceId, tabKey(current), current.workspaceId)
+      },
       get closingKeys() { return tabOps.closingTabKeys() },
     },
     // Tile order for sidebar leaf ordering. No active/inactive fork: every
@@ -1917,6 +1961,7 @@ export const AppShell: Component = () => {
                 void externalInventory.refresh()
             }}
             onOpenAgent={openDashboardAgent}
+            onOpenExternalSession={openNativeConversation}
             onClose={closeAgentDashboard}
           />
         </Show>
@@ -1934,6 +1979,17 @@ export const AppShell: Component = () => {
           selectTab={tabOps.handleTabSelect}
           selectWorkspace={id => handleSelectWorkspace(id)}
         />
+
+        <Show when={nativeConversation()} keyed>
+          {conversation => (
+            <NativeAgentTranscriptViewer
+              conversation={conversation}
+              workerName={workerSection.workerInfoFn(conversation.workerId)?.name || conversation.workerName}
+              online={workerSection.workers().some(worker => worker.id === conversation.workerId && worker.online)}
+              onClose={closeNativeConversation}
+            />
+          )}
+        </Show>
 
         <workerSection.Dialogs />
 

@@ -218,5 +218,7 @@ export type GitTabFields = Pick<BaseTab, 'gitToplevel'>
 export interface TabItemOps {
   onClose?: (tab: Tab) => void
   onRename?: (tab: Tab, title: string) => void
+  moveTargets?: (tab: Tab) => readonly { id: string, label: string }[]
+  onMove?: (tab: Tab, targetWorkspaceId: string) => void
   closingKeys?: Set<string>
 }

@@ -2,7 +2,10 @@ import type { DashboardExternalWorker } from '~/stores/externalAgentInventory'
 import { cleanup, fireEvent, render, screen, within } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import { ExternalAgentProcesses } from './ExternalAgentProcesses'
+import '~/components/chat/providers/claude/plugin'
+import '~/components/chat/providers/codex/plugin'
 
 afterEach(cleanup)
 
@@ -29,6 +32,25 @@ function renderProcesses(items: readonly DashboardExternalWorker[] = workers, qu
 }
 
 describe('ExternalAgentProcesses', () => {
+  it('opens the exact native provider/session/computer while preserving the dashboard row during refresh', () => {
+    const sessionId = '11111111-2222-3333-4444-555555555555'
+    const initial: DashboardExternalWorker = { ...workers[0]!, processes: [
+      { ...workers[0]!.processes[0]!, providerName: 'Shared display label', agentProvider: AgentProvider.CLAUDE_CODE, sessions: [{ sessionId, displayName: 'Claude fixture', status: 'idle' }] },
+      { ...workers[0]!.processes[0]!, pid: 124, providerName: 'Shared display label', agentProvider: AgentProvider.CODEX, sessions: [{ sessionId, displayName: 'Codex fixture', status: 'working' }] },
+    ] }
+    const [items, setItems] = createSignal<readonly DashboardExternalWorker[]>([initial])
+    const open = vi.fn()
+    render(() => <ExternalAgentProcesses workers={items()} nowMs={Date.now()} query="" onRefresh={undefined} onOpenSession={open} />)
+    const button = screen.getByRole('button', { name: 'Open read-only chat: Codex fixture' })
+    fireEvent.click(button)
+    expect(open).toHaveBeenLastCalledWith({ workerId: initial.workerId, workerName: initial.workerName, agentProvider: AgentProvider.CODEX, sessionId, displayName: 'Codex fixture' })
+    setItems([{ ...initial, refreshing: true }])
+    expect(screen.getByRole('button', { name: 'Open read-only chat: Codex fixture' })).toBe(button)
+    expect(screen.getByRole('button', { name: 'Open read-only chat: Claude fixture' })).toBeInTheDocument()
+    setItems([{ ...initial, status: 'offline', processes: [] }])
+    expect(screen.queryByRole('button', { name: /Open read-only chat/ })).not.toBeInTheDocument()
+  })
+
   it('preserves an expanded helper list across report-clock ticks', () => {
     const [now, setNow] = createSignal(Date.parse('2026-10-27T12:01:00Z'))
     render(() => (

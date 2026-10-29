@@ -125,6 +125,7 @@ export function useExternalAgentInventory(
           totalCount: response.totalCount,
           processes: (response.processes ?? []).map(process => ({
             pid: process.pid,
+            agentProvider: process.agentProvider,
             processName: process.executableName,
             providerName: agentProviderLabel(process.agentProvider),
             kind: process.kind === NativeAgentProcessKind.CLI ? 'cli' : process.kind === NativeAgentProcessKind.DESKTOP ? 'desktop' : 'unknown',
@@ -132,6 +133,7 @@ export function useExternalAgentInventory(
           })),
           serviceGroups: (response.serviceGroups ?? []).map(group => ({
             sourceId: group.sourceId,
+            agentProvider: group.agentProvider,
             providerName: agentProviderLabel(group.agentProvider),
             servicePid: group.servicePid,
             processName: group.executableName,

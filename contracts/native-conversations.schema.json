@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "native-conversations.schema.json",
+  "title": "read-only native conversation vocabulary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_readme", "formats", "directions"],
+  "properties": {
+    "_readme": { "type": "string", "minLength": 1 },
+    "formats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CodexRolloutJSONL", "ClaudeJSONL"],
+      "properties": {
+        "CodexRolloutJSONL": { "const": "codex-rollout-jsonl-v1" },
+        "ClaudeJSONL": { "const": "claude-jsonl-v1" }
+      }
+    },
+    "directions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["Latest", "Before", "After"],
+      "properties": {
+        "Latest": { "const": "latest" },
+        "Before": { "const": "before" },
+        "After": { "const": "after" }
+      }
+    }
+  }
+}

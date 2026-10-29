@@ -1,3 +1,5 @@
+import type { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
+
 export type WorkerRegistryStatus = 'loading' | 'available' | 'unavailable'
 export type DashboardStatusFilter = 'all' | 'working' | 'waiting' | 'idle'
 
@@ -20,6 +22,7 @@ export interface DashboardExternalSession {
 /** Process presence alone never determines session activity. */
 export interface DashboardExternalProcess {
   pid: number
+  agentProvider?: AgentProvider | undefined
   providerName: string
   processName: string
   kind: 'cli' | 'desktop' | 'unknown'
@@ -29,6 +32,7 @@ export interface DashboardExternalProcess {
 /** An application service can observe many sessions; its PID is not an agent PID. */
 export interface DashboardExternalServiceGroup {
   sourceId: string
+  agentProvider?: AgentProvider | undefined
   providerName: string
   servicePid: number
   processName: string
@@ -104,32 +108,34 @@ export function projectExternalWorker(worker: DashboardExternalWorker, nowMs: nu
     sessions: group.sessions.map(session => ({ ...session, runtimeObserved: true, sourceAvailable: group.available })),
   }))
   const selected = new Map<string, DashboardExternalSession>()
-  const key = (provider: string, session: DashboardExternalSession) => JSON.stringify([provider, session.sessionId])
+  const key = (source: { providerName: string, agentProvider?: AgentProvider | undefined }, session: DashboardExternalSession) =>
+    JSON.stringify([source.agentProvider ?? source.providerName, session.sessionId])
   for (const source of [...groups, ...worker.processes]) {
     for (const session of source.sessions) {
-      const id = key(source.providerName, session)
+      const id = key(source, session)
       const previous = selected.get(id)
       if (!previous || sessionRank(session, nowMs) < sessionRank(previous, nowMs))
         selected.set(id, session)
     }
   }
-  const keep = (provider: string, session: DashboardExternalSession) => selected.get(key(provider, session)) === session
+  const keep = (source: { providerName: string, agentProvider?: AgentProvider | undefined }, session: DashboardExternalSession) => selected.get(key(source, session)) === session
   const servicePids = new Set(groups.map(group => group.servicePid))
   return {
     ...worker,
     observedProcessCount: worker.observedProcessCount ?? worker.processes.length,
     processes: worker.processes.flatMap((process) => {
-      const sessions = process.sessions.filter(session => keep(process.providerName, session))
+      const sessions = process.sessions.filter(session => keep(process, session))
       if ((process.sessions.length > 0 && sessions.length === 0) || (sessions.length === 0 && servicePids.has(process.pid)))
         return []
       return [{ ...process, sessions }]
     }),
-    serviceGroups: groups.map(group => ({ ...group, sessions: group.sessions.filter(session => keep(group.providerName, session)) })),
+    serviceGroups: groups.map(group => ({ ...group, sessions: group.sessions.filter(session => keep(group, session)) })),
   }
 }
 
 export interface DashboardExternalSessionRow {
   session: DashboardExternalSession
+  agentProvider?: AgentProvider | undefined
   providerName: string
   pid: number
   source: 'process' | 'service'
@@ -140,8 +146,8 @@ export function externalWorkerSessionRows(worker: DashboardExternalWorker, nowMs
     return []
   const projected = projectExternalWorker(worker, nowMs)
   return [
-    ...projected.processes.flatMap(process => process.sessions.map(session => ({ session, providerName: process.providerName, pid: process.pid, source: 'process' as const }))),
-    ...(projected.serviceGroups ?? []).flatMap(group => group.sessions.map(session => ({ session, providerName: group.providerName, pid: group.servicePid, source: 'service' as const }))),
+    ...projected.processes.flatMap(process => process.sessions.map(session => ({ session, agentProvider: process.agentProvider, providerName: process.providerName, pid: process.pid, source: 'process' as const }))),
+    ...(projected.serviceGroups ?? []).flatMap(group => group.sessions.map(session => ({ session, agentProvider: group.agentProvider, providerName: group.providerName, pid: group.servicePid, source: 'service' as const }))),
   ]
 }
 

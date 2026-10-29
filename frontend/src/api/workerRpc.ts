@@ -8,7 +8,9 @@
 
 import type { MessageInitShape, MessageShape } from '@bufbuild/protobuf'
 import type { GenMessage } from '@bufbuild/protobuf/codegenv2'
+import type { NATIVE_CONVERSATION_DIRECTION } from '~/generated/contracts/native-conversations'
 import type {
+  AgentProvider,
   ApproveAutoReviewDenialResponse,
   BeginQueuedAgentInputEditResponse,
   CancelQueuedAgentInputEditResponse,
@@ -73,6 +75,7 @@ import type {
 import type {
   GetWorkerSystemInfoResponse,
   InspectNativeAgentProcessesResponse,
+  ReadNativeConversationResponse,
 } from '~/generated/proto/leapmux/v1/worker_pb'
 import type {
   GetTabPayloadResponse,
@@ -231,6 +234,8 @@ import {
   GetWorkerSystemInfoResponseSchema,
   InspectNativeAgentProcessesRequestSchema,
   InspectNativeAgentProcessesResponseSchema,
+  ReadNativeConversationRequestSchema,
+  ReadNativeConversationResponseSchema,
 } from '~/generated/proto/leapmux/v1/worker_pb'
 import {
   GetTabPayloadRequestSchema,
@@ -448,6 +453,21 @@ export function inspectNativeAgentProcesses(
   opts?: { signal?: AbortSignal },
 ): Promise<InspectNativeAgentProcessesResponse> {
   return callWorker(workerId, 'InspectNativeAgentProcesses', InspectNativeAgentProcessesRequestSchema, InspectNativeAgentProcessesResponseSchema, {}, opts)
+}
+
+/** Explicit owner-only history read. Never starts, resumes or controls a chat. */
+export function readNativeConversation(
+  workerId: string,
+  req: {
+    agentProvider: AgentProvider
+    sessionId: string
+    cursor?: string
+    direction?: (typeof NATIVE_CONVERSATION_DIRECTION)[keyof typeof NATIVE_CONVERSATION_DIRECTION]
+    limit?: number
+  },
+  opts?: { signal?: AbortSignal },
+): Promise<ReadNativeConversationResponse> {
+  return callWorker(workerId, 'ReadNativeConversation', ReadNativeConversationRequestSchema, ReadNativeConversationResponseSchema, req, opts)
 }
 
 export function getWorkerSystemInfo(workerId: string): Promise<GetWorkerSystemInfoResponse> {

@@ -1,7 +1,8 @@
 import type { Component } from 'solid-js'
 import type { ContextMenuTargetProps } from '~/components/common/DropdownMenu'
-import { Show } from 'solid-js'
+import { For, Show } from 'solid-js'
 import { DropdownMenu } from '~/components/common/DropdownMenu'
+import { SubMenu } from '~/components/common/SubMenu'
 import { dangerMenuItem } from '~/styles/shared.css'
 
 /**
@@ -24,6 +25,10 @@ export interface TabContextMenuProps extends ContextMenuTargetProps {
   /** A close is already in flight. The item stays visible, so the row's menu does not reshape mid-click. */
   'isClosing'?: boolean
   'pop'?: TabPopAction
+  'move'?: {
+    targets: readonly { id: string, label: string }[]
+    onSelect: (workspaceId: string) => void
+  }
   'data-testid'?: string
 }
 
@@ -31,12 +36,8 @@ export interface TabContextMenuProps extends ContextMenuTargetProps {
  * The right-click / long-press menu for a tab, shared by the sidebar's tab leaf
  * and the tile tab bar's tab.
  *
- * Every item is an action the row ALREADY performs through some other input --
- * double-click to rename, the hover X or a middle click to close -- promoted to a
- * place a finger and a secondary button can reach. Nothing new is invented here:
- * "close others", "close to the right", "duplicate" and "pin" have no
- * implementation anywhere in the app, and adding them is a different piece of work
- * from making the existing actions reachable.
+ * The surface supplies the available rename, close, floating-window and
+ * workspace destinations. Moving a sidebar tab is an explicit menu choice.
  *
  * Neither tab row gets a kebab. Both already spend their one hover-revealed action
  * slot on the close X, and a second button beside it would widen every row and
@@ -46,7 +47,8 @@ export interface TabContextMenuProps extends ContextMenuTargetProps {
  * a right-click that falls through to the browser's own.
  */
 export const TabContextMenu: Component<TabContextMenuProps> = (props) => {
-  const hasAnyItem = () => Boolean(props.onRename || props.onClose || props.pop)
+  const hasMove = () => Boolean(props.move?.targets.length)
+  const hasAnyItem = () => Boolean(props.onRename || props.onClose || props.pop || hasMove())
 
   return (
     <Show when={hasAnyItem()}>
@@ -68,9 +70,21 @@ export const TabContextMenu: Component<TabContextMenuProps> = (props) => {
           )}
         </Show>
 
+        <Show when={hasMove()}>
+          <SubMenu label="Move to workspace" data-testid="tab-menu-move" popoverTestId="tab-menu-move-popover">
+            <For each={props.move?.targets ?? []}>
+              {target => (
+                <button role="menuitem" data-testid="tab-menu-move-target" data-workspace-id={target.id} onClick={() => props.move?.onSelect(target.id)}>
+                  {target.label}
+                </button>
+              )}
+            </For>
+          </SubMenu>
+        </Show>
+
         <Show when={props.onClose}>
           {/* Only when something precedes it, so a Close-only menu has no leading rule. */}
-          <Show when={props.onRename || props.pop}>
+          <Show when={props.onRename || props.pop || hasMove()}>
             <hr />
           </Show>
           <button

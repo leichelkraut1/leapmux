@@ -7,6 +7,7 @@ import { isNotificationThreadWrapper } from '../../messageUtils'
 import { notificationClassifierFor } from '../../notificationClassification'
 import { codexRawExecRole } from './extractors/execute'
 import { extractItem } from './extractors/item'
+import { codexNativeHistoryFunctionRole } from './extractors/nativeHistory'
 import { codexNotificationEntry } from './extractors/notification'
 import { codexPlanItemMarkdown, codexTurnPlanParams, codexTurnPlanTodos } from './extractors/plan'
 import { codexReasoningHasText } from './extractors/row'
@@ -123,6 +124,8 @@ export function classifyCodexMessage(input: ClassificationInput): MessageCategor
 
   const type = pickString(parent, 'type')
   const method = pickString(parent, 'method')
+  if (codexNativeHistoryFunctionRole(parent))
+    return { kind: 'tool_use' }
 
   // Native exec has no typed app-server item. Keep its supported raw rows before mirror suppression.
   const executionRole = codexRawExecRole(parent)

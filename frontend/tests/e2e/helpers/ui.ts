@@ -2170,11 +2170,7 @@ export function sidebarLeaves(page: Page, workspaceId: string): Locator {
  */
 export async function sidebarLeafLabels(page: Page, workspaceId: string): Promise<string[]> {
   return sidebarLeaves(page, workspaceId).evaluateAll(leaves =>
-    leaves.map((leaf) => {
-      const clone = leaf.cloneNode(true) as HTMLElement
-      clone.querySelectorAll('button, svg').forEach(n => n.remove())
-      return (clone.textContent ?? '').trim()
-    }),
+    leaves.map(leaf => (leaf.querySelector('[data-testid="tab-tree-leaf-label"]')?.textContent ?? '').trim()),
   )
 }
 

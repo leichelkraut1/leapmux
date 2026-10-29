@@ -50,6 +50,21 @@ afterEach(() => {
 })
 
 describe('useExternalAgentInventory', () => {
+  it('retains native provider enums independently of display labels for explicit chat reads', async () => {
+    const snapshot = response()
+    snapshot.processes[0]!.sessions = [create(NativeAgentSessionSchema, { sessionId: 'process-session' })]
+    snapshot.serviceGroups = [create(NativeAgentServiceGroupSchema, {
+      sourceId: 'generated-source',
+      agentProvider: AgentProvider.CLAUDE_CODE,
+      sessions: [create(NativeAgentSessionSchema, { sessionId: 'service-session' })],
+    })]
+    inspect.mockResolvedValue(snapshot)
+    const hook = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(hook.rows()[0]?.processes[0]?.agentProvider).toBe(AgentProvider.CODEX)
+    expect(hook.rows()[0]?.serviceGroups?.[0]?.agentProvider).toBe(AgentProvider.CLAUDE_CODE)
+  })
+
   it('preserves report source and expiry metadata without relabeling a provider observation', async () => {
     const snapshot = response()
     snapshot.processes[0]!.sessions = [
@@ -341,6 +356,7 @@ describe('useExternalAgentInventory service groups', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(hook.rows()[0]?.serviceGroups).toEqual([{
       sourceId: 'application-service',
+      agentProvider: AgentProvider.CODEX,
       providerName: 'Codex',
       servicePid: 800,
       processName: 'codex',

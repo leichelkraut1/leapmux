@@ -31,6 +31,21 @@ beforeEach(() => {
   vi.useRealTimers()
 })
 
+describe('readNativeConversation', () => {
+  it('routes only the explicit history read to the selected encrypted worker', async () => {
+    const { readNativeConversation } = await import('./workerRpc')
+    const { AgentProvider } = await import('~/generated/proto/leapmux/v1/agent_pb')
+    const result = { sessionId: 'generated-session', records: [] }
+    callWorkerMock.mockResolvedValueOnce(result)
+    const controller = new AbortController()
+    const request = { agentProvider: AgentProvider.CODEX, sessionId: 'generated-session', direction: 'after' as const, cursor: 'opaque-cursor' }
+
+    await expect(readNativeConversation('selected-computer', request, { signal: controller.signal })).resolves.toBe(result)
+    expect(callWorkerMock).toHaveBeenCalledTimes(1)
+    expect(callWorkerMock).toHaveBeenCalledWith('selected-computer', 'ReadNativeConversation', expect.anything(), expect.anything(), request, { signal: controller.signal })
+  })
+})
+
 describe('callWorker retries an Unavailable reply', () => {
   // The worker declares Unavailable as "the caller should retry": an
   // incomplete provider scan, a subagent registry that is not loaded, and
