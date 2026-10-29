@@ -302,6 +302,7 @@ leapmux control auth login --hub https://hub.example.com   # authorize first
 | `tab` | `list`, `get`, `open`, `close`, `rename`, `move` |
 | `worker` | `list`, `get`; subgroup `pins`: `list`, `show`, `remove` |
 | `agent` | `send`, `interrupt`, `get`, `providers`, `messages`, `set`, `send-control-response` |
+| `workflow` | `context`, `delegate`, `send`, `review`, `request-approval`, `complete`, `report`, `progress` — only inside a workflow agent; see [Workflows](/docs/using/workflows/#how-agents-take-part) |
 | `tile` | `list`, `split`, `close`, `make-grid`, `remove-grid`, `set-ratios`, `set-grid-ratios` |
 | `layout` | `get`, `set` |
 | `file` | `list`, `read`, `stat` |
@@ -338,6 +339,7 @@ The Worker reads:
 | `LEAPMUX_WORKER_ENCRYPTION_MODE` | worker `encryption_mode` | `post-quantum` |
 | `LEAPMUX_WORKER_LOG_LEVEL` | worker `log_level` | `info` |
 | `LEAPMUX_WORKER_AGENT_STARTUP_CONCURRENCY` | worker `agent_startup_concurrency` | `4` |
+| `LEAPMUX_WORKER_CAPABILITIES` | extra [workflow placement](/docs/using/workflows/#choosing-computers) capabilities, comma-separated (read directly, not a config key) | `gpu,ios-simulator` |
 
 The prefix strip lowercases the remainder but does **not** translate `_` into `.`, so nested storage keys such as `storage.type` and `storage.postgres.dsn` cannot be set cleanly via env vars — use the YAML config file or the dedicated `-storage-*` flags instead. See [Configuration](/docs/admin/configuration/) for the full list and precedence rules (defaults < config file < env vars < explicitly-set CLI flags).
 
@@ -356,6 +358,10 @@ The prefix strip lowercases the remainder but does **not** translate `_` into `.
 | `LEAPMUX_CONTROL_TERMINAL_ID` | spawned terminals | The terminal you are inside (default for `--tab-id` on `terminal ...`). In a Quake panel it is the only id set — a panel gets no `_TAB_ID` / `_TAB_TYPE`. |
 | `LEAPMUX_CONTROL_WORKING_DIR` | spawned agents | Working directory at spawn |
 | `LEAPMUX_CONTROL_AGENT_PROVIDER` | spawned agents | Agent provider (agents only) |
+| `LEAPMUX_WORKFLOW_RUN_ID` | workflow agents | The workflow run the agent belongs to |
+| `LEAPMUX_WORKFLOW_ROLE` | workflow agents | The agent's role key |
+| `LEAPMUX_WORKFLOW_COORDINATOR_WORKER_ID` | workflow agents | The computer that coordinates the run |
+| `LEAPMUX_WORKFLOW_TOKEN` | workflow agents | The agent's credential for its run |
 
 The `LEAPMUX_CONTROL_*` variables other than `_CONFIG_DIR` are injected automatically by the Worker into the agents and terminals it spawns; you do not set them by hand. See [Control CLI](/docs/using/control-cli/) for how they drive entity-ID resolution.
 

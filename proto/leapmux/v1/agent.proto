@@ -169,6 +169,27 @@ message OpenAgentRequest {
   // title it sent. An empty `title` is auto-generated regardless -- the worker
   // picked that one itself.
   bool title_auto_generated = 14;
+
+  // Set when the agent participates in a workflow run. The worker records it,
+  // and confines the agent's control socket to that run only when the
+  // binding asks (see WorkflowBinding.confine).
+  WorkflowBinding workflow = 15;
+}
+
+// WorkflowBinding rides OpenAgentRequest when the agent belongs to a workflow
+// run (workflow.proto). The hosting worker records it and hands the agent its
+// credential through LEAPMUX_WORKFLOW_* environment variables. It lives here,
+// beside its only carrier, because workflow.proto imports this file for
+// AgentProvider.
+message WorkflowBinding {
+  string run_id = 1;
+  string slot_id = 2;
+  string role_key = 3;
+  string coordinator_worker_id = 4;
+  string token = 5;
+  // The run's template set confine_agents: the agent's control socket then
+  // reaches only the workflow participant methods on the coordinator.
+  bool confine = 6;
 }
 
 message OpenAgentResponse {

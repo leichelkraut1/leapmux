@@ -97,6 +97,20 @@ var controlTree = cmdGroup{
 			},
 		},
 		{
+			Name:    "workflow",
+			Summary: "Take part in a workflow run (only inside a workflow agent)",
+			Commands: []cmdLeaf{
+				{Name: "context", Summary: "Show the run: team, tasks, approvals", Run: controlRun(cmdcontrol.RunWorkflowContext)},
+				{Name: "delegate", Summary: "Lead: delegate a task to a role, or release a planned one", Run: controlRun(cmdcontrol.RunWorkflowDelegate)},
+				{Name: "send", Summary: "Lead: send a follow-up to a task's agent", Run: controlRun(cmdcontrol.RunWorkflowSend)},
+				{Name: "review", Summary: "Lead: accept a submitted result or send it back", Run: controlRun(cmdcontrol.RunWorkflowReview)},
+				{Name: "request-approval", Summary: "Lead: ask the user to approve a sensitive operation", Run: controlRun(cmdcontrol.RunWorkflowRequestApproval)},
+				{Name: "complete", Summary: "Lead: finish the run", Run: controlRun(cmdcontrol.RunWorkflowComplete)},
+				{Name: "report", Summary: "Report a task's structured result", Run: controlRun(cmdcontrol.RunWorkflowReport)},
+				{Name: "progress", Summary: "Record a progress note on a task", Run: controlRun(cmdcontrol.RunWorkflowProgress)},
+			},
+		},
+		{
 			Name:    "tile",
 			Summary: "Tile-tree mutations within a workspace layout",
 			Commands: []cmdLeaf{

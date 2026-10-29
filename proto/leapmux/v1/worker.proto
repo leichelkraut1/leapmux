@@ -338,6 +338,10 @@ message GetWorkerSystemInfoResponse {
   string commit_hash = 6; // Optional short git commit ID injected at build time
   string build_time = 7;  // Optional build timestamp injected at build time
   string branch = 8;      // Optional git ref (branch or tag) injected at build time; empty for detached HEAD
+  // What workflow placement can require of this computer: "os:<goos>",
+  // "arch:<goarch>", detected tools ("git", "xcode"), and every entry of
+  // LEAPMUX_WORKER_CAPABILITIES (comma-separated). Sorted, deduplicated.
+  repeated string capabilities = 9;
 }
 
 // InspectNativeAgentProcesses observes same-OS-user processes outside this

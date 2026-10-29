@@ -109,6 +109,10 @@ type spawnCommon struct {
 	TabType       leapmuxv1.TabType
 	WorkingDir    string
 	AgentProvider string
+	// Workflow is the run the spawn belongs to. Its credential rides the env
+	// vars; the router is confined to the run only when the binding says so
+	// (see Router.Confine).
+	Workflow *leapmuxv1.WorkflowBinding
 }
 
 func (f *Factory) spawn(socketKind SocketKind, sc spawnCommon) ([]string, func(), error) {
@@ -128,6 +132,7 @@ func (f *Factory) spawn(socketKind SocketKind, sc spawnCommon) ([]string, func()
 		TabType:       sc.TabType,
 		WorkingDir:    sc.WorkingDir,
 		AgentProvider: sc.AgentProvider,
+		Workflow:      sc.Workflow,
 	}
 	// Derived from the socket KIND rather than carried as another spawnCommon
 	// field, because SocketID already IS the spawned entity's own id -- so for
@@ -137,6 +142,12 @@ func (f *Factory) spawn(socketKind SocketKind, sc spawnCommon) ([]string, func()
 		tokenInfo.TerminalID = sc.SocketID
 	}
 	router := f.newRouter(sc.UserID)
+	if sc.Workflow.GetConfine() {
+		router.Confine = &WorkflowConfinement{
+			CoordinatorWorkerID: sc.Workflow.GetCoordinatorWorkerId(),
+			Methods:             service.WorkflowParticipantMethods,
+		}
+	}
 	srv, err := Listen(Options{
 		SocketURL: socketURL,
 		Token:     token,
@@ -163,6 +174,7 @@ func (f *Factory) AgentSpawning(info service.AgentSpawnInfo) ([]string, func(), 
 		TabType:       leapmuxv1.TabType_TAB_TYPE_AGENT,
 		WorkingDir:    info.WorkingDir,
 		AgentProvider: info.AgentProvider,
+		Workflow:      info.Workflow,
 	})
 }
 

@@ -77,6 +77,12 @@ describe('UserMenuItems', () => {
     expect(setSearchParams).toHaveBeenCalledWith({ dashboard: 'agents' })
   })
 
+  it('opens the workflows dialog on its runs tab', () => {
+    render(() => <UserMenuItems />)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Workflows' }))
+    expect(setSearchParams).toHaveBeenCalledWith({ workflows: 'runs' })
+  })
+
   it('always offers About and Preferences', () => {
     render(() => <UserMenuItems />)
     expect(screen.getByRole('menuitem', { name: /About/ })).toBeInTheDocument()

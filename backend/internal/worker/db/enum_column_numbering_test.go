@@ -57,6 +57,13 @@ func integerEnumColumns() []integerEnumColumn {
 		{"agent_todos.status", "UPDATE agent_todos SET status = ?", "SELECT typeof(status), status FROM agent_todos", 1, 5, nil},
 		{"agent_background_tasks.kind", "UPDATE agent_background_tasks SET kind = ?", "SELECT typeof(kind), kind FROM agent_background_tasks", 1, 3, nil},
 		{"agent_background_tasks.status", "UPDATE agent_background_tasks SET status = ?", "SELECT typeof(status), status FROM agent_background_tasks", 1, 8, nil},
+		{"workflow_runs.status", "UPDATE workflow_runs SET status = ?", "SELECT typeof(status), status FROM workflow_runs", 1, int64(leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_COMPLETED), nil},
+		{"workflow_run_agents.status", "UPDATE workflow_run_agents SET status = ?", "SELECT typeof(status), status FROM workflow_run_agents", 1, int64(leapmuxv1.WorkflowAgentStatus_WORKFLOW_AGENT_STATUS_CLOSED), nil},
+		{"workflow_tasks.status", "UPDATE workflow_tasks SET status = ?", "SELECT typeof(status), status FROM workflow_tasks", 1, int64(leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_CANCELLED), nil},
+		{"workflow_tasks.approval", "UPDATE workflow_tasks SET approval = ?", "SELECT typeof(approval), approval FROM workflow_tasks", 1, int64(leapmuxv1.WorkflowApprovalGate_WORKFLOW_APPROVAL_GATE_BEFORE_COMPLETE), nil},
+		{"workflow_approvals.kind", "UPDATE workflow_approvals SET kind = ?", "SELECT typeof(kind), kind FROM workflow_approvals", 1, int64(leapmuxv1.WorkflowApprovalKind_WORKFLOW_APPROVAL_KIND_OPERATION), nil},
+		{"workflow_approvals.status", "UPDATE workflow_approvals SET status = ?", "SELECT typeof(status), status FROM workflow_approvals", 1, int64(leapmuxv1.WorkflowApprovalStatus_WORKFLOW_APPROVAL_STATUS_CANCELLED), nil},
+		{"workflow_events.kind", "UPDATE workflow_events SET kind = ?", "SELECT typeof(kind), kind FROM workflow_events", 1, int64(leapmuxv1.WorkflowEventKind_WORKFLOW_EVENT_KIND_USER), nil},
 	}
 }
 
@@ -77,6 +84,11 @@ func integerEnumStore(t *testing.T) *sql.DB {
 		"INSERT INTO auto_review_approval_payloads (delivery_id, message_id) VALUES ('enum-review', 'enum-message')",
 		"INSERT INTO agent_todos (agent_id, row_key, seq, content, status) VALUES ('enum-owner', 'enum-todo', 1, 'todo', 1)",
 		"INSERT INTO agent_background_tasks (owner_agent_id, row_key, seq, kind, status) VALUES ('enum-owner', 'enum-task', 1, 1, 1)",
+		"INSERT INTO workflow_runs (id, user_id, name, template, status, objective, working_dir, workspace_id, created_at_ms, updated_at_ms) VALUES ('enum-run', 'u', 'r', X'', 1, 'o', '/w', 'ws', 1, 1)",
+		"INSERT INTO workflow_run_agents (slot_id, run_id, role_key, worker_id, status, token, created_at_ms, updated_at_ms) VALUES ('enum-slot', 'enum-run', 'lead', 'w', 1, 'enum-token', 1, 1)",
+		"INSERT INTO workflow_tasks (id, run_id, seq, role_key, title, status, approval, max_attempts, created_at_ms, updated_at_ms) VALUES ('enum-wf-task', 'enum-run', 1, 'builder', 't', 1, 1, 1, 1, 1)",
+		"INSERT INTO workflow_approvals (id, run_id, kind, status, title, created_at_ms) VALUES ('enum-approval', 'enum-run', 1, 1, 't', 1)",
+		"INSERT INTO workflow_events (run_id, kind, message, at_ms) VALUES ('enum-run', 1, 'm', 1)",
 	} {
 		_, err := store.ExecContext(t.Context(), statement)
 		require.NoError(t, err)
@@ -354,10 +366,58 @@ func TestEnumColumnChecksMatchTheirProtoRanges(t *testing.T) {
 			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.AgentInputState_name),
 		},
 		{
+			// Two enums, one CHECK text: agent_todos.status and
+			// workflow_run_agents.status both end at 5.
 			column:       "agent_todos.status",
 			check:        "CHECK (status BETWEEN 1 AND 5)",
+			columns:      2,
 			lastAccepted: int32(leapmuxv1.TodoStatus_TODO_STATUS_BLOCKED),
 			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TodoStatus_name),
+		},
+		{
+			column:       "workflow_run_agents.status",
+			check:        "CHECK (status BETWEEN 1 AND 5)",
+			columns:      2,
+			lastAccepted: int32(leapmuxv1.WorkflowAgentStatus_WORKFLOW_AGENT_STATUS_CLOSED),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.WorkflowAgentStatus_name),
+		},
+		{
+			// Shares its CHECK text with agent_background_tasks.status.
+			column:       "workflow_runs.status",
+			check:        "CHECK (status BETWEEN 1 AND 8)",
+			columns:      2,
+			lastAccepted: int32(leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_COMPLETED),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.WorkflowRunStatus_name),
+		},
+		{
+			column:       "workflow_tasks.status",
+			check:        "CHECK (status BETWEEN 1 AND 10)",
+			lastAccepted: int32(leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_CANCELLED),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.WorkflowTaskStatus_name),
+		},
+		{
+			column:       "workflow_tasks.approval",
+			check:        "CHECK (approval BETWEEN 1 AND 3)",
+			lastAccepted: int32(leapmuxv1.WorkflowApprovalGate_WORKFLOW_APPROVAL_GATE_BEFORE_COMPLETE),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.WorkflowApprovalGate_name),
+		},
+		{
+			column:       "workflow_approvals.kind",
+			check:        "CHECK (kind BETWEEN 1 AND 5)",
+			lastAccepted: int32(leapmuxv1.WorkflowApprovalKind_WORKFLOW_APPROVAL_KIND_OPERATION),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.WorkflowApprovalKind_name),
+		},
+		{
+			column:       "workflow_approvals.status",
+			check:        "CHECK (status BETWEEN 1 AND 4)",
+			lastAccepted: int32(leapmuxv1.WorkflowApprovalStatus_WORKFLOW_APPROVAL_STATUS_CANCELLED),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.WorkflowApprovalStatus_name),
+		},
+		{
+			column:       "workflow_events.kind",
+			check:        "CHECK (kind BETWEEN 1 AND 10)",
+			lastAccepted: int32(leapmuxv1.WorkflowEventKind_WORKFLOW_EVENT_KIND_USER),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.WorkflowEventKind_name),
 		},
 		{
 			column:       "agent_background_tasks.kind",
@@ -368,6 +428,7 @@ func TestEnumColumnChecksMatchTheirProtoRanges(t *testing.T) {
 		{
 			column:       "agent_background_tasks.status",
 			check:        "CHECK (status BETWEEN 1 AND 8)",
+			columns:      2,
 			lastAccepted: int32(leapmuxv1.BackgroundTaskStatus_BACKGROUND_TASK_STATUS_ENDED_WITH_UNKNOWN_OUTCOME),
 			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.BackgroundTaskStatus_name),
 		},

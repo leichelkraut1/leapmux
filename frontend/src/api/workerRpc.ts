@@ -80,6 +80,25 @@ import type {
   RevokeTabPayloadResponse,
 } from '~/generated/proto/leapmux/v1/worker_private_pb'
 import type {
+  AttachWorkflowLeadResponse,
+  ControlWorkflowRunResponse,
+  ControlWorkflowTaskResponse,
+  CreateWorkflowRunResponse,
+  DecideWorkflowApprovalResponse,
+  DeleteAgentProfileResponse,
+  DeleteWorkflowTemplateResponse,
+  ExportWorkflowTemplateResponse,
+  GetWorkflowRunResponse,
+  ImportWorkflowTemplateResponse,
+  InstallExampleWorkflowResponse,
+  ListWorkflowLibraryResponse,
+  ListWorkflowRunsResponse,
+  SaveAgentProfileResponse,
+  SaveWorkflowTemplateResponse,
+  SendWorkflowAgentMessageResponse,
+  UpdateWorkflowRoleResponse,
+} from '~/generated/proto/leapmux/v1/workflow_pb'
+import type {
   CleanupWorkspaceResponse,
   WatchEventsResponse,
 } from '~/generated/proto/leapmux/v1/workspace_pb'
@@ -221,6 +240,42 @@ import {
   RevokeTabPayloadRequestSchema,
   RevokeTabPayloadResponseSchema,
 } from '~/generated/proto/leapmux/v1/worker_private_pb'
+import {
+  AttachWorkflowLeadRequestSchema,
+  AttachWorkflowLeadResponseSchema,
+  ControlWorkflowRunRequestSchema,
+  ControlWorkflowRunResponseSchema,
+  ControlWorkflowTaskRequestSchema,
+  ControlWorkflowTaskResponseSchema,
+  CreateWorkflowRunRequestSchema,
+  CreateWorkflowRunResponseSchema,
+  DecideWorkflowApprovalRequestSchema,
+  DecideWorkflowApprovalResponseSchema,
+  DeleteAgentProfileRequestSchema,
+  DeleteAgentProfileResponseSchema,
+  DeleteWorkflowTemplateRequestSchema,
+  DeleteWorkflowTemplateResponseSchema,
+  ExportWorkflowTemplateRequestSchema,
+  ExportWorkflowTemplateResponseSchema,
+  GetWorkflowRunRequestSchema,
+  GetWorkflowRunResponseSchema,
+  ImportWorkflowTemplateRequestSchema,
+  ImportWorkflowTemplateResponseSchema,
+  InstallExampleWorkflowRequestSchema,
+  InstallExampleWorkflowResponseSchema,
+  ListWorkflowLibraryRequestSchema,
+  ListWorkflowLibraryResponseSchema,
+  ListWorkflowRunsRequestSchema,
+  ListWorkflowRunsResponseSchema,
+  SaveAgentProfileRequestSchema,
+  SaveAgentProfileResponseSchema,
+  SaveWorkflowTemplateRequestSchema,
+  SaveWorkflowTemplateResponseSchema,
+  SendWorkflowAgentMessageRequestSchema,
+  SendWorkflowAgentMessageResponseSchema,
+  UpdateWorkflowRoleRequestSchema,
+  UpdateWorkflowRoleResponseSchema,
+} from '~/generated/proto/leapmux/v1/workflow_pb'
 import {
   CleanupWorkspaceRequestSchema,
   CleanupWorkspaceResponseSchema,
@@ -719,6 +774,79 @@ export function createBranch(workerId: string, req: MessageInitShape<typeof Crea
 
 export function deleteBranch(workerId: string, req: MessageInitShape<typeof DeleteBranchRequestSchema>): Promise<DeleteBranchResponse> {
   return callWorker(workerId, 'DeleteBranch', DeleteBranchRequestSchema, DeleteBranchResponseSchema, req)
+}
+
+// ---------------------------------------------------------------------------
+// Workflows (workflow.proto). The library lives on the worker the user picks;
+// a run lives on its coordinator, the worker hosting its Lead.
+// ---------------------------------------------------------------------------
+
+export function listWorkflowLibrary(workerId: string, req: MessageInitShape<typeof ListWorkflowLibraryRequestSchema>): Promise<ListWorkflowLibraryResponse> {
+  return callWorker(workerId, 'ListWorkflowLibrary', ListWorkflowLibraryRequestSchema, ListWorkflowLibraryResponseSchema, req)
+}
+
+export function saveAgentProfile(workerId: string, req: MessageInitShape<typeof SaveAgentProfileRequestSchema>): Promise<SaveAgentProfileResponse> {
+  return callWorker(workerId, 'SaveAgentProfile', SaveAgentProfileRequestSchema, SaveAgentProfileResponseSchema, req)
+}
+
+export function deleteAgentProfile(workerId: string, req: MessageInitShape<typeof DeleteAgentProfileRequestSchema>): Promise<DeleteAgentProfileResponse> {
+  return callWorker(workerId, 'DeleteAgentProfile', DeleteAgentProfileRequestSchema, DeleteAgentProfileResponseSchema, req)
+}
+
+export function saveWorkflowTemplate(workerId: string, req: MessageInitShape<typeof SaveWorkflowTemplateRequestSchema>): Promise<SaveWorkflowTemplateResponse> {
+  return callWorker(workerId, 'SaveWorkflowTemplate', SaveWorkflowTemplateRequestSchema, SaveWorkflowTemplateResponseSchema, req)
+}
+
+export function deleteWorkflowTemplate(workerId: string, req: MessageInitShape<typeof DeleteWorkflowTemplateRequestSchema>): Promise<DeleteWorkflowTemplateResponse> {
+  return callWorker(workerId, 'DeleteWorkflowTemplate', DeleteWorkflowTemplateRequestSchema, DeleteWorkflowTemplateResponseSchema, req)
+}
+
+export function exportWorkflowTemplate(workerId: string, req: MessageInitShape<typeof ExportWorkflowTemplateRequestSchema>): Promise<ExportWorkflowTemplateResponse> {
+  return callWorker(workerId, 'ExportWorkflowTemplate', ExportWorkflowTemplateRequestSchema, ExportWorkflowTemplateResponseSchema, req)
+}
+
+export function importWorkflowTemplate(workerId: string, req: MessageInitShape<typeof ImportWorkflowTemplateRequestSchema>): Promise<ImportWorkflowTemplateResponse> {
+  return callWorker(workerId, 'ImportWorkflowTemplate', ImportWorkflowTemplateRequestSchema, ImportWorkflowTemplateResponseSchema, req)
+}
+
+export function installExampleWorkflow(workerId: string, req: MessageInitShape<typeof InstallExampleWorkflowRequestSchema>): Promise<InstallExampleWorkflowResponse> {
+  return callWorker(workerId, 'InstallExampleWorkflow', InstallExampleWorkflowRequestSchema, InstallExampleWorkflowResponseSchema, req)
+}
+
+export function createWorkflowRun(workerId: string, req: MessageInitShape<typeof CreateWorkflowRunRequestSchema>): Promise<CreateWorkflowRunResponse> {
+  return callWorker(workerId, 'CreateWorkflowRun', CreateWorkflowRunRequestSchema, CreateWorkflowRunResponseSchema, req)
+}
+
+export function attachWorkflowLead(workerId: string, req: MessageInitShape<typeof AttachWorkflowLeadRequestSchema>): Promise<AttachWorkflowLeadResponse> {
+  return callWorker(workerId, 'AttachWorkflowLead', AttachWorkflowLeadRequestSchema, AttachWorkflowLeadResponseSchema, req)
+}
+
+export function listWorkflowRuns(workerId: string, req: MessageInitShape<typeof ListWorkflowRunsRequestSchema>): Promise<ListWorkflowRunsResponse> {
+  return callWorker(workerId, 'ListWorkflowRuns', ListWorkflowRunsRequestSchema, ListWorkflowRunsResponseSchema, req)
+}
+
+export function getWorkflowRun(workerId: string, req: MessageInitShape<typeof GetWorkflowRunRequestSchema>): Promise<GetWorkflowRunResponse> {
+  return callWorker(workerId, 'GetWorkflowRun', GetWorkflowRunRequestSchema, GetWorkflowRunResponseSchema, req)
+}
+
+export function controlWorkflowRun(workerId: string, req: MessageInitShape<typeof ControlWorkflowRunRequestSchema>): Promise<ControlWorkflowRunResponse> {
+  return callWorker(workerId, 'ControlWorkflowRun', ControlWorkflowRunRequestSchema, ControlWorkflowRunResponseSchema, req)
+}
+
+export function controlWorkflowTask(workerId: string, req: MessageInitShape<typeof ControlWorkflowTaskRequestSchema>): Promise<ControlWorkflowTaskResponse> {
+  return callWorker(workerId, 'ControlWorkflowTask', ControlWorkflowTaskRequestSchema, ControlWorkflowTaskResponseSchema, req)
+}
+
+export function updateWorkflowRole(workerId: string, req: MessageInitShape<typeof UpdateWorkflowRoleRequestSchema>): Promise<UpdateWorkflowRoleResponse> {
+  return callWorker(workerId, 'UpdateWorkflowRole', UpdateWorkflowRoleRequestSchema, UpdateWorkflowRoleResponseSchema, req)
+}
+
+export function decideWorkflowApproval(workerId: string, req: MessageInitShape<typeof DecideWorkflowApprovalRequestSchema>): Promise<DecideWorkflowApprovalResponse> {
+  return callWorker(workerId, 'DecideWorkflowApproval', DecideWorkflowApprovalRequestSchema, DecideWorkflowApprovalResponseSchema, req)
+}
+
+export function sendWorkflowAgentMessage(workerId: string, req: MessageInitShape<typeof SendWorkflowAgentMessageRequestSchema>): Promise<SendWorkflowAgentMessageResponse> {
+  return callWorker(workerId, 'SendWorkflowAgentMessage', SendWorkflowAgentMessageRequestSchema, SendWorkflowAgentMessageResponseSchema, req)
 }
 
 // ---------------------------------------------------------------------------

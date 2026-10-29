@@ -727,6 +727,22 @@ func TestWorkspaceArchive_RefusesEveryWriteRPCOnAnArchivedTab(t *testing.T) {
 		"OpenTerminal":  "creates a tab, so it addresses no archived one",
 		"SetQuakePanel": "addresses the workspace, not one tab",
 	}
+	// A workflow participant method addresses a RUN, named by its credential,
+	// and writes only the coordinator's workflow tables; it names no tab, so
+	// no archive state reaches it. The messages a run sends its agents go
+	// through EnqueueAgentInput, which the table above already covers.
+	for _, method := range WorkflowParticipantMethods {
+		unguarded[method] = "addresses a workflow run, not one tab"
+	}
+	// The owner's workflow methods address the library or a run, likewise.
+	for _, method := range []string{
+		"SaveAgentProfile", "DeleteAgentProfile", "SaveWorkflowTemplate", "DeleteWorkflowTemplate",
+		"ImportWorkflowTemplate", "InstallExampleWorkflow", "CreateWorkflowRun", "AttachWorkflowLead",
+		"ControlWorkflowRun", "ControlWorkflowTask", "UpdateWorkflowRole", "DecideWorkflowApproval",
+		"SendWorkflowAgentMessage",
+	} {
+		unguarded[method] = "addresses the workflow library or a run, not one tab"
+	}
 	_, _, scopes := registerAllClassified(channel.NewDispatcher(), svc)
 	for method, scope := range scopes {
 		if scope != leapmuxv1.Scope_SCOPE_AGENT_WRITE && scope != leapmuxv1.Scope_SCOPE_TERMINAL_WRITE {

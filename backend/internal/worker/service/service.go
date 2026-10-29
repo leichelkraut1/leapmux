@@ -33,6 +33,7 @@ import (
 	"github.com/leapmux/leapmux/internal/worker/inputqueue"
 	"github.com/leapmux/leapmux/internal/worker/terminal"
 	"github.com/leapmux/leapmux/internal/worker/wakelock"
+	"github.com/leapmux/leapmux/internal/worker/workflow"
 	"github.com/leapmux/leapmux/util/pathutil"
 	"github.com/leapmux/leapmux/util/validate"
 	"google.golang.org/grpc/codes"
@@ -71,6 +72,10 @@ type Service struct {
 	Watchers   *WatcherManager // Fan-out manager for event broadcasting
 	Output     *OutputHandler  // Agent output NDJSON processor
 	InputQueue *inputqueue.Manager
+	// Workflows coordinates the workflow runs whose Lead this worker hosts,
+	// and keeps the bindings of the workflow agents it hosts. Bootstrap
+	// installs its platform and runs its loop.
+	Workflows *workflow.Engine
 
 	// RemoteIPC supplies per-agent local-IPC servers for the
 	// `leapmux control` CLI. Nil disables remote control (env vars are
@@ -596,6 +601,9 @@ func New(cfg Config) *Service {
 		TerminalStartup: newTerminalStartupRegistry(cfg.Clock),
 		PrivateEvents:   NewPrivateEventsBus(),
 		lastBellAt:      make(map[string]time.Time),
+		Workflows: workflow.New(workflow.Config{
+			DB: cfg.DB, WorkerID: cfg.WorkerID, Clock: cfg.Clock, Capabilities: workerCapabilities,
+		}),
 	}
 	// The seed is config data, so it is minted here -- the one place the raw
 	// string exists -- rather than inside the setter.
@@ -1479,6 +1487,7 @@ func registerAllClassified(d *channel.Dispatcher, svc *Service) (map[string]meth
 	registerAgentSessionHandlers(r, svc)
 	registerNativeProcessHandlers(r, svc)
 	registerCleanupHandlers(r, svc)
+	registerWorkflowHandlers(r, svc)
 	registerSysInfoHandlers(ownerOnly, svc)
 	tunnels := registerTunnelHandlers(ownerOnly)
 	// Swap in the new manager and Stop the prior one it displaced. A

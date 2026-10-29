@@ -30,6 +30,7 @@ import { AgentDashboard } from '~/components/dashboard/AgentDashboard'
 import { CliPathDialog } from '~/components/desktop/CliPathDialog'
 import { isWorkspaceMutatable } from '~/components/shell/sectionUtils'
 import { focusedTerminalId, setTerminalScreenSink, writeToFocusedTerminal } from '~/components/terminal/TerminalView'
+import { WorkflowsHost } from '~/components/workflows/WorkflowsHost'
 import { AgentTreeStatusContext } from '~/components/workspace/AgentTreeStatus'
 import { useAuth } from '~/context/AuthContext'
 import { usePreferences } from '~/context/PreferencesContext'
@@ -1919,6 +1920,20 @@ export const AppShell: Component = () => {
             onClose={closeAgentDashboard}
           />
         </Show>
+
+        <WorkflowsHost
+          workers={workerSection.workers()}
+          workerInfo={workerSection.workerInfoFn}
+          activeWorkspaceId={workspace.activeWorkspaceId}
+          isWorkspaceMutatable={isWorkspaceMutatableById}
+          view={tabView}
+          layoutStore={layoutStore}
+          selection={selection}
+          metadata={tabMetadata}
+          repoGitStore={repoGitStore}
+          selectTab={tabOps.handleTabSelect}
+          selectWorkspace={id => handleSelectWorkspace(id)}
+        />
 
         <workerSection.Dialogs />
 

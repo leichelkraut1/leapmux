@@ -58,6 +58,9 @@ export const UserMenuItems: Component = () => {
       <button role="menuitem" onClick={() => setSearchParams({ dashboard: 'agents' })}>
         Agent dashboard
       </button>
+      <button role="menuitem" onClick={() => setSearchParams({ workflows: 'runs' })}>
+        Workflows
+      </button>
       <AppAboutMenuItem />
       <button role="menuitem" onClick={() => openPreferences()}>
         <DropdownMenuItemContent label="Preferences..." {...(preferencesHint !== undefined ? { detail: preferencesHint } : {})} />

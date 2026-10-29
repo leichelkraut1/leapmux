@@ -430,5 +430,13 @@ func EnvVars(socketURL, token string, info TokenInfo) []string {
 	if info.AgentProvider != "" {
 		envs = append(envs, "LEAPMUX_CONTROL_AGENT_PROVIDER="+info.AgentProvider)
 	}
+	if b := info.Workflow; b.GetRunId() != "" {
+		envs = append(envs,
+			"LEAPMUX_WORKFLOW_RUN_ID="+b.GetRunId(),
+			"LEAPMUX_WORKFLOW_ROLE="+b.GetRoleKey(),
+			"LEAPMUX_WORKFLOW_COORDINATOR_WORKER_ID="+b.GetCoordinatorWorkerId(),
+			"LEAPMUX_WORKFLOW_TOKEN="+b.GetToken(),
+		)
+	}
 	return envs
 }

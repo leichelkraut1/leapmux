@@ -1,0 +1,625 @@
+syntax = "proto3";
+package leapmux.v1;
+
+import "leapmux/v1/agent.proto";
+
+// Workflows: reusable multi-agent teams that a Lead agent coordinates.
+//
+// Every message here is an inner RPC over the E2EE channel. Nothing reaches
+// the Hub in plaintext: profiles and templates live in the worker DB of the
+// computer the user saves them on, and a run lives in the worker DB of its
+// COORDINATOR, which is the Lead agent's worker. The coordinator dispatches to
+// agents on other computers through the same cross-worker channel `leapmux
+// control` already uses.
+//
+// Two audiences call these methods:
+//   - The run's owner: the frontend, the CLI, or any of the owner's agents,
+//     under the ordinary agent:read / agent:write scopes. An agent can drive a
+//     workflow exactly as its owner can.
+//   - A participating agent, through the WorkflowAgent* methods, with a
+//     WorkflowAgentAuth credential that names its run and slot. The
+//     credential is how the engine knows which role is speaking (only the
+//     Lead delegates; only an assignee reports its task).
+//
+// A workflow agent keeps its full control socket unless its template sets
+// confine_agents, which limits that socket to the WorkflowAgent* methods on
+// its coordinator.
+
+// --- Vocabulary ---
+
+enum WorkerPlacementStrategy {
+  WORKER_PLACEMENT_STRATEGY_UNSPECIFIED = 0;
+  // Run on exactly worker_id. Never falls back to another computer.
+  WORKER_PLACEMENT_STRATEGY_SPECIFIC_WORKER = 1;
+  // Any online worker whose capabilities include every required one.
+  WORKER_PLACEMENT_STRATEGY_CAPABILITY = 2;
+  // Any online worker.
+  WORKER_PLACEMENT_STRATEGY_ANY_WORKER = 3;
+}
+
+// How a role's agent gets a working directory of its own.
+enum WorkflowGitIsolation {
+  WORKFLOW_GIT_ISOLATION_UNSPECIFIED = 0;
+  // Work in the role's working directory as is.
+  WORKFLOW_GIT_ISOLATION_SHARED = 1;
+  // Create a git worktree on a run-scoped branch (wf/<run>/<role>), so two
+  // agents never edit the same checkout.
+  WORKFLOW_GIT_ISOLATION_WORKTREE = 2;
+}
+
+enum WorkflowApprovalGate {
+  WORKFLOW_APPROVAL_GATE_UNSPECIFIED = 0;
+  WORKFLOW_APPROVAL_GATE_NONE = 1;
+  // A human approves before the task is dispatched.
+  WORKFLOW_APPROVAL_GATE_BEFORE_START = 2;
+  // A human approves an accepted result before the task succeeds.
+  WORKFLOW_APPROVAL_GATE_BEFORE_COMPLETE = 3;
+}
+
+enum WorkflowRunStatus {
+  WORKFLOW_RUN_STATUS_UNSPECIFIED = 0;
+  // Created; the Lead agent has not attached yet.
+  WORKFLOW_RUN_STATUS_PENDING = 1;
+  WORKFLOW_RUN_STATUS_RUNNING = 2;
+  // Waiting on a human decision.
+  WORKFLOW_RUN_STATUS_WAITING = 3;
+  // Cannot progress without user action (lost Lead, escalation).
+  WORKFLOW_RUN_STATUS_BLOCKED = 4;
+  WORKFLOW_RUN_STATUS_PAUSED = 5;
+  WORKFLOW_RUN_STATUS_FAILED = 6;
+  WORKFLOW_RUN_STATUS_CANCELLED = 7;
+  WORKFLOW_RUN_STATUS_COMPLETED = 8;
+}
+
+enum WorkflowTaskStatus {
+  WORKFLOW_TASK_STATUS_UNSPECIFIED = 0;
+  // Planned from a template step; the Lead has not released it.
+  WORKFLOW_TASK_STATUS_PENDING = 1;
+  // Released; waiting on dependencies, a worker, or capacity (see detail).
+  WORKFLOW_TASK_STATUS_QUEUED = 2;
+  WORKFLOW_TASK_STATUS_AWAITING_APPROVAL = 3;
+  // The instruction is recorded and being delivered to its agent.
+  WORKFLOW_TASK_STATUS_DISPATCHING = 4;
+  WORKFLOW_TASK_STATUS_RUNNING = 5;
+  // The assignee reported a result; the Lead has not reviewed it.
+  WORKFLOW_TASK_STATUS_SUBMITTED = 6;
+  // Needs user action: retry limit reached, dependency failed.
+  WORKFLOW_TASK_STATUS_BLOCKED = 7;
+  WORKFLOW_TASK_STATUS_SUCCEEDED = 8;
+  WORKFLOW_TASK_STATUS_FAILED = 9;
+  WORKFLOW_TASK_STATUS_CANCELLED = 10;
+}
+
+enum WorkflowTaskOutcome {
+  WORKFLOW_TASK_OUTCOME_UNSPECIFIED = 0;
+  WORKFLOW_TASK_OUTCOME_COMPLETED = 1;
+  WORKFLOW_TASK_OUTCOME_FAILED = 2;
+  // The assignee cannot proceed without help.
+  WORKFLOW_TASK_OUTCOME_BLOCKED = 3;
+}
+
+enum WorkflowAgentStatus {
+  WORKFLOW_AGENT_STATUS_UNSPECIFIED = 0;
+  // A slot is reserved and the agent is being opened.
+  WORKFLOW_AGENT_STATUS_STARTING = 1;
+  WORKFLOW_AGENT_STATUS_ACTIVE = 2;
+  // Its worker is unreachable; the agent may still be running.
+  WORKFLOW_AGENT_STATUS_UNREACHABLE = 3;
+  // The agent is gone (closed, failed to start, or not found on its worker).
+  WORKFLOW_AGENT_STATUS_LOST = 4;
+  WORKFLOW_AGENT_STATUS_CLOSED = 5;
+}
+
+enum WorkflowApprovalKind {
+  WORKFLOW_APPROVAL_KIND_UNSPECIFIED = 0;
+  WORKFLOW_APPROVAL_KIND_TASK_START = 1;
+  WORKFLOW_APPROVAL_KIND_TASK_COMPLETION = 2;
+  WORKFLOW_APPROVAL_KIND_RUN_COMPLETION = 3;
+  // A task ran out of attempts. Approving grants one more.
+  WORKFLOW_APPROVAL_KIND_ESCALATION = 4;
+  // Requested by the Lead for a sensitive operation (a merge, a deploy).
+  WORKFLOW_APPROVAL_KIND_OPERATION = 5;
+}
+
+enum WorkflowApprovalStatus {
+  WORKFLOW_APPROVAL_STATUS_UNSPECIFIED = 0;
+  WORKFLOW_APPROVAL_STATUS_PENDING = 1;
+  WORKFLOW_APPROVAL_STATUS_APPROVED = 2;
+  WORKFLOW_APPROVAL_STATUS_REJECTED = 3;
+  WORKFLOW_APPROVAL_STATUS_CANCELLED = 4;
+}
+
+enum WorkflowEventKind {
+  WORKFLOW_EVENT_KIND_UNSPECIFIED = 0;
+  WORKFLOW_EVENT_KIND_RUN = 1;
+  WORKFLOW_EVENT_KIND_TASK = 2;
+  WORKFLOW_EVENT_KIND_AGENT = 3;
+  WORKFLOW_EVENT_KIND_MESSAGE = 4;
+  WORKFLOW_EVENT_KIND_RESULT = 5;
+  WORKFLOW_EVENT_KIND_REVIEW = 6;
+  WORKFLOW_EVENT_KIND_APPROVAL = 7;
+  WORKFLOW_EVENT_KIND_PLACEMENT = 8;
+  WORKFLOW_EVENT_KIND_ERROR = 9;
+  WORKFLOW_EVENT_KIND_USER = 10;
+}
+
+enum WorkflowExportFormat {
+  WORKFLOW_EXPORT_FORMAT_UNSPECIFIED = 0;
+  WORKFLOW_EXPORT_FORMAT_YAML = 1;
+  WORKFLOW_EXPORT_FORMAT_JSON = 2;
+}
+
+// --- Definitions ---
+
+message WorkerPlacement {
+  WorkerPlacementStrategy strategy = 1;
+  // SPECIFIC_WORKER: the computer. Required for that strategy.
+  string worker_id = 2;
+  // CAPABILITY: every entry must be among the worker's capabilities, e.g.
+  // "os:darwin", "xcode", "gpu".
+  repeated string required_capabilities = 3;
+  // CAPABILITY / ANY_WORKER: when non-empty, only these computers qualify.
+  repeated string allowed_worker_ids = 4;
+}
+
+// AgentProfile is a reusable agent configuration. Inside a template role it
+// is an OVERRIDE: unset fields inherit from the referenced profile.
+message AgentProfile {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  AgentProvider agent_provider = 4;
+  // Option selections keyed by option-group id (model, effort, permissionMode
+  // and provider axes), exactly as OpenAgentRequest.options takes them. A
+  // missing id takes the provider's default on the worker.
+  map<string, string> options = 5;
+  WorkerPlacement placement = 6;
+  // The agent's working directory on its worker. Empty uses the run's
+  // project directory.
+  string working_dir = 7;
+  // Role-specific system instructions (Markdown).
+  string instructions = 8;
+  // Concurrent agents of this profile in one run. 0 means 1.
+  uint32 max_instances = 9;
+  int64 updated_at_ms = 10;
+}
+
+message WorkflowRole {
+  // Stable identifier, [a-z][a-z0-9-]*, e.g. "builder".
+  string key = 1;
+  string name = 2;
+  string profile_id = 3;
+  AgentProfile agent = 4;
+  bool is_lead = 5;
+  WorkflowGitIsolation git_isolation = 6;
+  // What a COMPLETED report must carry: "summary", "commit", "tests",
+  // "artifacts". The engine refuses a report that lacks one.
+  repeated string required_outputs = 7;
+  // A result waits for the Lead's review before the task succeeds.
+  bool review_required = 8;
+}
+
+message WorkflowStep {
+  string key = 1;
+  string title = 2;
+  string role_key = 3;
+  string instructions = 4;
+  repeated string depends_on = 5;
+  WorkflowApprovalGate approval = 6;
+  // 0 uses the template's default_max_attempts.
+  uint32 max_attempts = 7;
+  // Released at launch rather than waiting for the Lead.
+  bool auto_start = 8;
+}
+
+message WorkflowTemplate {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  // The default process and rules the Lead follows (Markdown).
+  string instructions = 4;
+  repeated WorkflowRole roles = 5;
+  repeated WorkflowStep steps = 6;
+  string completion_criteria = 7;
+  // 0 means 3.
+  uint32 default_max_attempts = 8;
+  bool require_final_approval = 9;
+  // Tasks dispatched at once across the run. 0 means 1 (sequential).
+  uint32 max_parallel_tasks = 10;
+  // Agents a run may open in total, Lead included. 0 means 8.
+  uint32 max_agents = 11;
+  // Operations the Lead must request approval for, stated to every agent.
+  repeated string sensitive_operations = 12;
+  uint32 version = 13;
+  int64 updated_at_ms = 14;
+  // Limit each agent's control socket to its run: the WorkflowAgent* methods
+  // on the coordinator and nothing else. Off by default -- a workflow agent
+  // then keeps the whole `leapmux control` surface, so it can open helper
+  // agents, read other tabs and drive other workflows, as any of the owner's
+  // agents can.
+  bool confine_agents = 15;
+}
+
+// WorkflowTemplateBundle is the import/export document: a template and the
+// profiles its roles reference.
+message WorkflowTemplateBundle {
+  uint32 format_version = 1;
+  WorkflowTemplate template = 2;
+  repeated AgentProfile profiles = 3;
+}
+
+// --- Runs ---
+
+message WorkflowRoleAssignment {
+  string role_key = 1;
+  // The resolved role: its profile merged with template and launch overrides.
+  WorkflowRole role = 2;
+  // The computer chosen for SPECIFIC_WORKER, or the last one placement chose.
+  string worker_id = 3;
+}
+
+message WorkflowRunAgent {
+  string slot_id = 1;
+  string run_id = 2;
+  string role_key = 3;
+  string agent_id = 4;
+  string worker_id = 5;
+  WorkflowAgentStatus status = 6;
+  string status_detail = 7;
+  string current_task_id = 8;
+  int64 created_at_ms = 9;
+}
+
+message WorkflowEvidence {
+  string label = 1;
+  // A path on the reporting agent's worker, a URL, or inline text.
+  string value = 2;
+}
+
+message WorkflowTaskResult {
+  WorkflowTaskOutcome outcome = 1;
+  string summary = 2;
+  repeated string artifacts = 3;
+  string git_branch = 4;
+  string git_commit = 5;
+  string test_summary = 6;
+  // Set only when the agent ran tests: tests_passed then says how they went.
+  bool tests_ran = 7;
+  bool tests_passed = 8;
+  repeated WorkflowEvidence evidence = 9;
+  string reported_by_slot_id = 10;
+  int64 reported_at_ms = 11;
+}
+
+message WorkflowTask {
+  string id = 1;
+  string run_id = 2;
+  string step_key = 3;
+  string role_key = 4;
+  string title = 5;
+  string instructions = 6;
+  repeated string depends_on = 7;
+  WorkflowTaskStatus status = 8;
+  string status_detail = 9;
+  WorkflowApprovalGate approval = 10;
+  uint32 attempt = 11;
+  uint32 max_attempts = 12;
+  // The slot (agent) the task is or was assigned to.
+  string slot_id = 13;
+  // The worker the task is pinned to by a reassignment, overriding the role.
+  string worker_id = 14;
+  WorkflowTaskResult result = 15;
+  string review_feedback = 16;
+  string created_by = 17;
+  int64 created_at_ms = 18;
+  int64 started_at_ms = 19;
+  int64 completed_at_ms = 20;
+  int64 updated_at_ms = 21;
+}
+
+message WorkflowApproval {
+  string id = 1;
+  string run_id = 2;
+  string task_id = 3;
+  WorkflowApprovalKind kind = 4;
+  WorkflowApprovalStatus status = 5;
+  string title = 6;
+  string details = 7;
+  string requested_by = 8;
+  string decision_note = 9;
+  int64 created_at_ms = 10;
+  int64 decided_at_ms = 11;
+}
+
+message WorkflowEvent {
+  int64 id = 1;
+  string run_id = 2;
+  string task_id = 3;
+  WorkflowEventKind kind = 4;
+  string actor = 5;
+  string message = 6;
+  int64 at_ms = 7;
+}
+
+message WorkflowRun {
+  string id = 1;
+  string name = 2;
+  string template_id = 3;
+  uint32 template_version = 4;
+  // The template as launched; later template edits do not reach the run.
+  WorkflowTemplate template = 5;
+  WorkflowRunStatus status = 6;
+  string status_detail = 7;
+  string objective = 8;
+  string working_dir = 9;
+  string base_branch = 10;
+  string workspace_id = 11;
+  string coordinator_worker_id = 12;
+  string lead_slot_id = 13;
+  string lead_agent_id = 14;
+  string summary = 15;
+  int64 created_at_ms = 16;
+  int64 started_at_ms = 17;
+  int64 completed_at_ms = 18;
+  int64 updated_at_ms = 19;
+}
+
+message WorkflowRunSummary {
+  WorkflowRun run = 1;
+  uint32 tasks_total = 2;
+  uint32 tasks_succeeded = 3;
+  uint32 tasks_active = 4;
+  uint32 tasks_blocked = 5;
+  uint32 approvals_pending = 6;
+}
+
+message WorkflowRunDetail {
+  WorkflowRun run = 1;
+  repeated WorkflowRoleAssignment roles = 2;
+  repeated WorkflowRunAgent agents = 3;
+  repeated WorkflowTask tasks = 4;
+  repeated WorkflowApproval approvals = 5;
+  // Newest last; at most the latest 200.
+  repeated WorkflowEvent events = 6;
+}
+
+// --- User methods (SCOPE_WORKFLOW_MANAGE) ---
+
+message ListWorkflowLibraryRequest {}
+message ListWorkflowLibraryResponse {
+  repeated AgentProfile profiles = 1;
+  repeated WorkflowTemplate templates = 2;
+}
+
+message SaveAgentProfileRequest { AgentProfile profile = 1; }
+message SaveAgentProfileResponse { AgentProfile profile = 1; }
+
+message DeleteAgentProfileRequest { string profile_id = 1; }
+message DeleteAgentProfileResponse {}
+
+message SaveWorkflowTemplateRequest { WorkflowTemplate template = 1; }
+message SaveWorkflowTemplateResponse { WorkflowTemplate template = 1; }
+
+message DeleteWorkflowTemplateRequest { string template_id = 1; }
+message DeleteWorkflowTemplateResponse {}
+
+message ExportWorkflowTemplateRequest {
+  string template_id = 1;
+  WorkflowExportFormat format = 2;
+}
+message ExportWorkflowTemplateResponse {
+  string document = 1;
+  string file_name = 2;
+}
+
+// ImportWorkflowTemplate reads a YAML or JSON WorkflowTemplateBundle. It
+// always creates new ids, so importing twice yields two templates.
+message ImportWorkflowTemplateRequest { string document = 1; }
+message ImportWorkflowTemplateResponse {
+  WorkflowTemplate template = 1;
+  repeated AgentProfile profiles = 2;
+}
+
+// InstallExampleWorkflow saves the bundled "Develop, audit and test on iOS"
+// template and its profiles into this worker's library.
+message InstallExampleWorkflowRequest {}
+message InstallExampleWorkflowResponse {
+  WorkflowTemplate template = 1;
+  repeated AgentProfile profiles = 2;
+}
+
+// A per-role change applied at launch or to a running run.
+message WorkflowRoleOverride {
+  string role_key = 1;
+  WorkerPlacement placement = 2;
+  AgentProvider agent_provider = 3;
+  map<string, string> options = 4;
+  string working_dir = 5;
+}
+
+// CreateWorkflowRun records a PENDING run on this worker, which becomes its
+// coordinator and must host the Lead. The caller then opens the Lead with the
+// returned binding and calls AttachWorkflowLead.
+message CreateWorkflowRunRequest {
+  WorkflowTemplate template = 1;
+  // The profiles the template's roles reference.
+  repeated AgentProfile profiles = 2;
+  repeated WorkflowRoleOverride overrides = 3;
+  string name = 4;
+  string objective = 5;
+  string working_dir = 6;
+  string base_branch = 7;
+  string workspace_id = 8;
+}
+message CreateWorkflowRunResponse {
+  WorkflowRun run = 1;
+  WorkflowBinding lead_binding = 2;
+  // The Lead's resolved configuration, for the OpenAgent call.
+  WorkflowRole lead_role = 3;
+}
+
+message AttachWorkflowLeadRequest {
+  string run_id = 1;
+  string agent_id = 2;
+}
+message AttachWorkflowLeadResponse { WorkflowRunDetail detail = 1; }
+
+message ListWorkflowRunsRequest {}
+message ListWorkflowRunsResponse { repeated WorkflowRunSummary runs = 1; }
+
+message GetWorkflowRunRequest { string run_id = 1; }
+message GetWorkflowRunResponse { WorkflowRunDetail detail = 1; }
+
+enum WorkflowRunAction {
+  WORKFLOW_RUN_ACTION_UNSPECIFIED = 0;
+  WORKFLOW_RUN_ACTION_PAUSE = 1;
+  WORKFLOW_RUN_ACTION_RESUME = 2;
+  WORKFLOW_RUN_ACTION_CANCEL = 3;
+  // Re-check every agent and worker now instead of at the next interval.
+  WORKFLOW_RUN_ACTION_RECONCILE = 4;
+  WORKFLOW_RUN_ACTION_DELETE = 5;
+}
+
+message ControlWorkflowRunRequest {
+  string run_id = 1;
+  WorkflowRunAction action = 2;
+}
+message ControlWorkflowRunResponse { WorkflowRunDetail detail = 1; }
+
+enum WorkflowTaskAction {
+  WORKFLOW_TASK_ACTION_UNSPECIFIED = 0;
+  // Queue a BLOCKED, FAILED or CANCELLED task for one more attempt.
+  WORKFLOW_TASK_ACTION_RETRY = 1;
+  WORKFLOW_TASK_ACTION_CANCEL = 2;
+  // Pin the task to worker_id and queue it again on a fresh agent there.
+  WORKFLOW_TASK_ACTION_REASSIGN = 3;
+}
+
+message ControlWorkflowTaskRequest {
+  string run_id = 1;
+  string task_id = 2;
+  WorkflowTaskAction action = 3;
+  string worker_id = 4;
+}
+message ControlWorkflowTaskResponse { WorkflowRunDetail detail = 1; }
+
+message UpdateWorkflowRoleRequest {
+  string run_id = 1;
+  WorkflowRoleOverride override = 2;
+}
+message UpdateWorkflowRoleResponse { WorkflowRunDetail detail = 1; }
+
+message DecideWorkflowApprovalRequest {
+  string run_id = 1;
+  string approval_id = 2;
+  bool approve = 3;
+  string note = 4;
+}
+message DecideWorkflowApprovalResponse { WorkflowRunDetail detail = 1; }
+
+// SendWorkflowAgentMessage sends the user's own instruction to a
+// participant, recorded in the run's audit trail.
+message SendWorkflowAgentMessageRequest {
+  string run_id = 1;
+  string slot_id = 2;
+  string text = 3;
+}
+message SendWorkflowAgentMessageResponse {}
+
+// --- Hosting-worker method (SCOPE_AGENT_READ), called by the coordinator ---
+
+// FindWorkflowAgents lists the agents this worker opened for a run, so a
+// coordinator recovering a spawn it cannot confirm adopts the agent instead of
+// opening a second one.
+message FindWorkflowAgentsRequest { string run_id = 1; }
+message FindWorkflowAgentsResponse {
+  message Entry {
+    string slot_id = 1;
+    string agent_id = 2;
+  }
+  repeated Entry agents = 1;
+}
+
+// --- Participant methods (a workflow agent, via its control socket) ---
+
+message WorkflowAgentAuth {
+  string run_id = 1;
+  string token = 2;
+}
+
+message WorkflowAgentContextRequest { WorkflowAgentAuth auth = 1; }
+message WorkflowAgentContextResponse {
+  WorkflowRun run = 1;
+  string slot_id = 2;
+  string role_key = 3;
+  bool is_lead = 4;
+  repeated WorkflowRoleAssignment roles = 5;
+  repeated WorkflowRunAgent agents = 6;
+  repeated WorkflowTask tasks = 7;
+  repeated WorkflowApproval approvals = 8;
+}
+
+// Lead only: create a task for a role.
+message WorkflowAgentDelegateRequest {
+  WorkflowAgentAuth auth = 1;
+  string role_key = 2;
+  string title = 3;
+  string instructions = 4;
+  repeated string depends_on = 5;
+  WorkflowApprovalGate approval = 6;
+  uint32 max_attempts = 7;
+  // Release a PENDING template task instead of creating one; its step
+  // instructions are kept and `instructions` is appended.
+  string task_id = 8;
+}
+message WorkflowAgentDelegateResponse { WorkflowTask task = 1; }
+
+// Lead only: a follow-up instruction to a task's agent.
+message WorkflowAgentSendRequest {
+  WorkflowAgentAuth auth = 1;
+  string task_id = 2;
+  string text = 3;
+}
+message WorkflowAgentSendResponse {}
+
+// The task's assignee: report its structured result.
+message WorkflowAgentReportRequest {
+  WorkflowAgentAuth auth = 1;
+  string task_id = 2;
+  WorkflowTaskResult result = 3;
+}
+message WorkflowAgentReportResponse { WorkflowTask task = 1; }
+
+// Any participant: a progress note recorded on the task.
+message WorkflowAgentProgressRequest {
+  WorkflowAgentAuth auth = 1;
+  string task_id = 2;
+  string note = 3;
+}
+message WorkflowAgentProgressResponse {}
+
+// Lead only: accept a SUBMITTED result, or send it back with feedback.
+message WorkflowAgentReviewRequest {
+  WorkflowAgentAuth auth = 1;
+  string task_id = 2;
+  bool accept = 3;
+  string feedback = 4;
+}
+message WorkflowAgentReviewResponse { WorkflowTask task = 1; }
+
+// Lead only: ask a human to approve a sensitive operation.
+message WorkflowAgentRequestApprovalRequest {
+  WorkflowAgentAuth auth = 1;
+  string title = 2;
+  string details = 3;
+  string task_id = 4;
+}
+message WorkflowAgentRequestApprovalResponse { WorkflowApproval approval = 1; }
+
+// Lead only: finish the run.
+message WorkflowAgentCompleteRequest {
+  WorkflowAgentAuth auth = 1;
+  string summary = 2;
+  bool failed = 3;
+}
+message WorkflowAgentCompleteResponse { WorkflowRun run = 1; }

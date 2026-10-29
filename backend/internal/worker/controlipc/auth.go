@@ -66,6 +66,12 @@ type TokenInfo struct {
 	// that agent scripts read to learn who they are running as.
 	WorkingDir    string
 	AgentProvider string // Empty for terminals.
+
+	// Workflow is the run this agent belongs to, or nil. Its credential is
+	// emitted as LEAPMUX_WORKFLOW_* so `leapmux control workflow` can name the
+	// run and coordinator without a flag; the router enforces the
+	// confinement, not this field.
+	Workflow *leapmuxv1.WorkflowBinding
 }
 
 // TokenStore maps LEAPMUX_CONTROL_TOKEN values to their TokenInfo. The

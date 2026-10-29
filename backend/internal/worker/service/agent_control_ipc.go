@@ -144,6 +144,7 @@ func (svc *Service) remintAgentControlIPC(opts agent.Options, phase string) ([]s
 			TabID:         opts.AgentID,
 			WorkingDir:    opts.WorkingDir,
 			AgentProvider: agentlabels.CLIAlias(opts.AgentProvider),
+			Workflow:      svc.workflowBindingFor(opts.AgentID),
 		})
 	})
 	return envs, err
