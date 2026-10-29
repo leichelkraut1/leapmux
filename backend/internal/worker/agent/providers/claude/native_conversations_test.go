@@ -17,7 +17,11 @@ import (
 
 func nativeClaudeFixture(t *testing.T, root, cwd, sessionID string, records ...string) string {
 	t.Helper()
-	path := filepath.Join(root, claudeProjectsDirName, mangleClaudePath(cwd), sessionID+".jsonl")
+	project := mangleClaudePath(cwd)
+	if len(project) > claudeMangleMaxLength {
+		project = project[:claudeMangleMaxLength] + "-generated"
+	}
+	path := filepath.Join(root, claudeProjectsDirName, project, sessionID+".jsonl")
 	agenttest.WriteFixtureFile(t, path, strings.Join(records, "\n")+"\n")
 	return path
 }
