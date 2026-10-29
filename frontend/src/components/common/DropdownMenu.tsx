@@ -446,6 +446,7 @@ export function DropdownMenu(props: DropdownMenuProps) {
   // Where a right-click or long-press that opened this menu landed. Cleared when
   // the popover closes, so the next kebab click re-anchors to the kebab.
   const [pressAnchor, setPressAnchor] = createSignal<ContextMenuPress>()
+  let pressOrigin: { element: HTMLElement, rect: DOMRect } | undefined
 
   const setTriggerRef = (el: HTMLElement) => {
     triggerEl = el
@@ -544,12 +545,22 @@ export function DropdownMenu(props: DropdownMenuProps) {
     if (popoverEl && e.target instanceof Node && popoverEl.contains(e.target)) {
       return
     }
-    // A press anchor is a frozen point in the viewport, not an element: the row
-    // the user pressed scrolled away, and re-running the arithmetic would
-    // attach the menu to that stale point over whatever scrolled into place. Every
-    // OS context menu closes on scroll instead, and so does this one. An
-    // element anchor follows its element, so it keeps repositioning.
+    // A press anchor is a frozen point. Close when its owning row moves away,
+    // but retain it for an unrelated scroll or a queued event from before the
+    // menu opened. Label focus/scroll-into-view can deliver that event later;
+    // closing on every captured scroll made a label's menu immediately vanish.
+    // Rect-only callers have no row to verify, so keep their scroll dismissal.
     if (!(getAnchor() instanceof Element)) {
+      if (pressOrigin?.element.isConnected) {
+        const current = pressOrigin.element.getBoundingClientRect()
+        const opened = pressOrigin.rect
+        if (Math.abs(current.left - opened.left) <= 1
+          && Math.abs(current.top - opened.top) <= 1
+          && Math.abs(current.width - opened.width) <= 1
+          && Math.abs(current.height - opened.height) <= 1) {
+          return
+        }
+      }
       popoverEl?.hidePopover()
       return
     }
@@ -828,6 +839,7 @@ export function DropdownMenu(props: DropdownMenuProps) {
       // opened by a press has no element anchor to clear `aria-expanded` on -- the
       // trigger's own copy is reactive on `isOpen()` and falls with it.
       setPressAnchor(undefined)
+      pressOrigin = undefined
       // Hand the popover back to the platform. A long press opened it as
       // `manual` and dismissed it by hand (see `showPressMenu`); every other way
       // of opening this menu wants the native light dismiss, and the attribute
@@ -904,11 +916,12 @@ export function DropdownMenu(props: DropdownMenuProps) {
   // in flight, and the menu never opens under the finger.
   const contextMenuEl = createMemo(() => props.contextMenuFor?.())
   createEffect(() => {
-    const el = contextMenuEl()
-    if (!el)
+    const initialEl = contextMenuEl()
+    if (!initialEl)
       return
-    const detach = attachContextMenuGesture(el, {
+    const detach = attachContextMenuGesture(initialEl, {
       onOpen: (press) => {
+        pressOrigin = { element: initialEl, rect: initialEl.getBoundingClientRect() }
         setPressAnchor(press)
         if (!popoverEl)
           return

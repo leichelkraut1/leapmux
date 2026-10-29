@@ -126,7 +126,12 @@ func TestClaudeNativeConversationRequiresAnIdentityBoundProject(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			root, original, foreign := t.TempDir(), t.TempDir(), t.TempDir()
+			root := t.TempDir()
+			// These are metadata only, never filesystem targets. Distinct prefixes
+			// keep this identity refusal meaningful even under a very long TEMP.
+			volumeRoot := filepath.VolumeName(root) + string(filepath.Separator)
+			original := filepath.Join(volumeRoot, "generated-original")
+			foreign := filepath.Join(volumeRoot, "generated-foreign")
 			const session = "generated-origin-binding"
 			var records []string
 			if tc.prefix != "" {

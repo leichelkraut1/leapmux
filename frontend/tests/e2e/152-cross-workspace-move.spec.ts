@@ -40,6 +40,42 @@ async function clickSectionMenuItem(page: Page, slug: string, itemName: string):
  */
 
 test.describe('Cross-workspace projection isolation', () => {
+  test('a sidebar label menu survives an unrelated pane scroll and still offers Move to workspace', async ({ page, leapmuxServer }) => {
+    const { workspaceId: source } = await createWorkspaceWithAgentsViaAPI(leapmuxServer, 'Label menu source')
+    await createWorkspaceWithAgentsViaAPI(leapmuxServer, 'Label menu target')
+    await gotoWorkspace(page, leapmuxServer.adminToken, source)
+    await expandWorkspaceRow(page, source)
+    const leaf = sidebarLeaves(page, source).first()
+    await leaf.getByTestId('tab-tree-leaf-label').click({ button: 'right' })
+    const menu = leaf.getByTestId('tab-tree-leaf-menu')
+    await expect(menu).toBeVisible()
+
+    // A real browser scroll event from another pane must not dismiss a menu
+    // whose owning sidebar row remains in place. The temporary pane contains
+    // only generated geometry and never changes workspace or chat data.
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      const pane = document.createElement('div')
+      pane.style.cssText = 'position:fixed;right:0;bottom:0;width:20px;height:20px;overflow:auto;pointer-events:none'
+      const content = document.createElement('div')
+      content.style.height = '200px'
+      pane.append(content)
+      document.body.append(pane)
+      pane.addEventListener('scroll', () => {
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          pane.remove()
+          resolve()
+        }))
+      }, { once: true })
+      pane.scrollTop = 40
+    }))
+
+    await expect(menu).toBeVisible()
+    await expect(menu.getByTestId('tab-menu-move')).toBeVisible()
+    await expect(menu.getByTestId('tab-menu-move')).toHaveText('Move to workspace')
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden()
+  })
+
   test('a menu move converges across source and destination clients and survives reload', async ({ browser, leapmuxServer }, testInfo) => {
     const { workspaceId: source, agentIds: [sourceAgent] } = await createWorkspaceWithAgentsViaAPI(leapmuxServer, 'Menu source')
     const { workspaceId: target, agentIds: [targetAgent] } = await createWorkspaceWithAgentsViaAPI(leapmuxServer, 'Menu target')
