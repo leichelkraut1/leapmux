@@ -158,7 +158,7 @@ func readCodexNativeConversationAt(ctx context.Context, query agent.NativeConver
 			return false, sessionstore.ErrNativeConversationIdentity
 		}
 		nativeCWD, validPath := codexNativeConversationPath(nativeCWD)
-		if !validPath || !filepath.IsAbs(nativeCWD) || filepath.Clean(nativeCWD) != filepath.Clean(cwd) {
+		if !validPath || !filepath.IsAbs(nativeCWD) || !sessionstore.SameDir(nativeCWD, cwd) {
 			return false, sessionstore.ErrNativeConversationIdentity
 		}
 		return true, nil

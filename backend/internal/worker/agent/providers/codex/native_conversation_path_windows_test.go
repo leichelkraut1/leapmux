@@ -70,6 +70,40 @@ func TestReadCodexNativeConversationWindowsVerbatimLongPath(t *testing.T) {
 	assert.Equal(t, cwd, page.WorkingDir)
 }
 
+func TestReadCodexNativeConversationWindowsCWDCaseMatchesWithoutChangingNativeBytes(t *testing.T) {
+	for _, shape := range []string{"mixed-drive-and-components", "verbatim-index", "verbatim-metadata", "different-directory"} {
+		t.Run(shape, func(t *testing.T) {
+			home, index, path, cwd, db := codexConversationFixture(t, false)
+			indexedCWD, nativeCWD := strings.ToUpper(cwd), strings.ToLower(cwd)
+			if shape == "verbatim-index" {
+				indexedCWD = `\\?\` + indexedCWD
+			} else if shape == "verbatim-metadata" {
+				nativeCWD = `\\?\` + nativeCWD
+			} else if shape == "different-directory" {
+				nativeCWD += "-foreign"
+			}
+			_, err := db.Exec("UPDATE threads SET cwd=? WHERE id=?", indexedCWD, codexConversationFixtureID)
+			require.NoError(t, err)
+			codexFixtureMetadataCWD(t, path, nativeCWD)
+			before, err := os.ReadFile(path)
+			require.NoError(t, err)
+			page, err := readCodexNativeConversationAt(context.Background(), agent.NativeConversationQuery{SessionID: codexConversationFixtureID}, home, index)
+			if shape == "different-directory" {
+				require.Error(t, err)
+				assert.Empty(t, page.Records)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, page.Records, 3)
+				assert.Empty(t, page.PartialReason)
+				assert.Equal(t, before[:bytes.IndexByte(before, '\n')], page.Records[0].NativeJSON)
+			}
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, before, after)
+		})
+	}
+}
+
 func TestReadCodexNativeConversationWindowsRejectsForeignVerbatimScopeAndIdentity(t *testing.T) {
 	for _, kind := range []string{"outside-root", "foreign-volume", "foreign-cwd", "native-device-cwd"} {
 		t.Run(kind, func(t *testing.T) {
