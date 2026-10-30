@@ -24,7 +24,7 @@ async function openWorkflows(page: Page): Promise<Locator> {
 async function librarySection(page: Page, dialog: Locator, section: 'Profiles' | 'Templates', workerId: string) {
   await dialog.getByRole('radio', { name: section, exact: true }).click()
   await dialog.getByTestId('workflow-library-computer').click()
-  await page.getByTestId(`workflow-computer-option-${workerId}`).click()
+  await page.getByTestId('workflow-library-computer-menu').getByTestId(`workflow-computer-option-${workerId}`).click()
   await expect(dialog.getByTestId('workflow-library-computer')).toContainText('Local')
 }
 
@@ -85,10 +85,10 @@ test.describe('Workflows library', () => {
     const editor = dialog.getByTestId('workflow-profile-editor')
     await editor.getByLabel('Name', { exact: true }).fill(name)
     await editor.getByTestId('agent-provider-selector-trigger').click()
-    await page.getByTestId(`agent-provider-option-${AgentProvider.CLAUDE_CODE}`).click()
+    await editor.getByTestId('agent-provider-selector-menu').getByTestId(`agent-provider-option-${AgentProvider.CLAUDE_CODE}`).click()
     await editor.getByRole('radio', { name: 'Specific computer', exact: true }).click()
     await editor.getByTestId('profile-placement-computer').click()
-    await page.getByTestId(`workflow-computer-option-${leapmuxServer.workerId}`).click()
+    await page.getByTestId('profile-placement-computer-menu').getByTestId(`workflow-computer-option-${leapmuxServer.workerId}`).click()
     await editor.getByRole('button', { name: 'Save profile', exact: true }).click()
     const saved = profileRow(dialog, name)
     await expect(saved).toContainText('Local')
@@ -122,7 +122,7 @@ test.describe('Workflows library', () => {
     await builder.getByLabel('Override the profile\'s placement', { exact: true }).check()
     await builder.getByRole('radio', { name: 'Specific computer', exact: true }).click()
     await builder.getByTestId('role-1-placement-computer').click()
-    await page.getByTestId(`workflow-computer-option-${leapmuxServer.workerId}`).click()
+    await page.getByTestId('role-1-placement-computer-menu').getByTestId(`workflow-computer-option-${leapmuxServer.workerId}`).click()
     await editor.getByRole('button', { name: 'Save template', exact: true }).click()
     await expect(templateRow(dialog, editedName)).toBeVisible()
 
@@ -169,7 +169,7 @@ test.describe('Workflows on a narrow screen', () => {
     await expect(launch.getByText('The Lead is pinned to', { exact: true })).toBeVisible()
     const builderRow = launch.locator('[data-testid="workflow-launch-role"][data-role-key="builder"]')
     await builderRow.getByTestId('workflow-launch-role-computer-builder').click()
-    await page.getByTestId(`workflow-computer-option-${leapmuxServer.workerId}`).click()
+    await page.getByTestId('workflow-launch-role-computer-builder-menu').getByTestId(`workflow-computer-option-${leapmuxServer.workerId}`).click()
     await expect(builderRow.getByTestId('workflow-launch-role-computer-builder')).toContainText('Local')
     await launch.getByTestId('workflow-launch-objective').fill('Generated layout check only; do not launch agents.')
     await expect(launch.getByTestId('workflow-launch-project-dir')).not.toHaveValue('')

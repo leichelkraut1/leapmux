@@ -4256,10 +4256,10 @@ const DOMAINS = [
         { json: 'formats', go: 'NativeConversationFormat', ts: 'NATIVE_CONVERSATION_FORMAT' },
         { json: 'directions', go: 'NativeConversationDirection', ts: 'NATIVE_CONVERSATION_DIRECTION' },
       ]
-      const go = tables.map(table => 'const (\n' + goConstBlock(Object.entries(value[table.json]).map(([name, token]) => ({ name: table.go + name, value: jsonString(token) }))) + '\n)').join('\n\n')
-      const ts = tables.map(table => 'export const ' + table.ts + ' = {\n' + Object.entries(value[table.json]).map(([name, token]) => '  ' + name + ': ' + jsonString(token) + ',').join('\n') + '\n} as const').join('\n\n')
-      out['backend/generated/contracts/native-conversations.go'] = GO_HEADER('native-conversations.json') + 'package contracts\n\n' + go + '\n'
-      out['frontend/src/generated/contracts/native-conversations.ts'] = TS_HEADER('native-conversations.json') + '\n' + ts + '\n'
+      const go = tables.map(table => `const (\n${goConstBlock(Object.entries(value[table.json]).map(([name, token]) => ({ name: table.go + name, value: jsonString(token) })))}\n)`).join('\n\n')
+      const ts = tables.map(table => `export const ${table.ts} = {\n${Object.entries(value[table.json]).map(([name, token]) => `  ${name}: ${jsonString(token)},`).join('\n')}\n} as const`).join('\n\n')
+      out['backend/generated/contracts/native-conversations.go'] = `${GO_HEADER('native-conversations.json')}package contracts\n\n${go}\n`
+      out['frontend/src/generated/contracts/native-conversations.ts'] = `${TS_HEADER('native-conversations.json')}\n${ts}\n`
     },
   },
   {
