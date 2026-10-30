@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"os"
 	"os/exec"
 	"runtime"
@@ -219,19 +218,13 @@ func validateWorkflowBinding(b *leapmuxv1.WorkflowBinding) error {
 
 // workflowBindingFor reads a local agent's binding for a relaunch, so a
 // resumed workflow agent keeps its credential (and its confinement, when its
-// template asked for one).
-func (svc *Service) workflowBindingFor(agentID string) *leapmuxv1.WorkflowBinding {
+// template asked for one). An unreadable binding must stop the relaunch:
+// treating it as an unbound agent would silently grant an unconfined socket.
+func (svc *Service) workflowBindingFor(agentID string) (*leapmuxv1.WorkflowBinding, error) {
 	if svc.Workflows == nil {
-		return nil
+		return nil, nil
 	}
-	b, err := svc.Workflows.Store().Binding(bgCtx(), agentID)
-	if err != nil {
-		// The relaunch proceeds as an ordinary agent; the next relaunch
-		// reads the binding again.
-		slog.Warn("read workflow binding for relaunch", "agent_id", agentID, "error", err)
-		return nil
-	}
-	return b
+	return svc.Workflows.Store().Binding(bgCtx(), agentID)
 }
 
 // workerCapabilities is what this computer offers workflow placement: its OS

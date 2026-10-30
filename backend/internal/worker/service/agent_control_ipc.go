@@ -136,6 +136,16 @@ func (svc *Service) remintControlIPC(
 // a socket that no longer answers. The caller reports the failure and keeps the
 // agent on its current settings; the next relaunch mints again.
 func (svc *Service) remintAgentControlIPC(opts agent.Options, phase string) ([]string, error) {
+	if svc.ControlIPC == nil {
+		return nil, nil
+	}
+	// Resolve the persisted binding before retiring the current socket. A
+	// failed read cannot grant ordinary control to a previously confined agent,
+	// or disturb a live process whose settings restart must now be refused.
+	binding, err := svc.workflowBindingFor(opts.AgentID)
+	if err != nil {
+		return nil, err
+	}
 	owner := svc.RegisteredBy()
 	envs, _, err := svc.remintControlIPC(tabKindAgent, opts.AgentID, phase, owner, func() ([]string, func(), error) {
 		return svc.ControlIPC.AgentSpawning(AgentSpawnInfo{
@@ -144,7 +154,7 @@ func (svc *Service) remintAgentControlIPC(opts agent.Options, phase string) ([]s
 			TabID:         opts.AgentID,
 			WorkingDir:    opts.WorkingDir,
 			AgentProvider: agentlabels.CLIAlias(opts.AgentProvider),
-			Workflow:      svc.workflowBindingFor(opts.AgentID),
+			Workflow:      binding,
 		})
 	})
 	return envs, err

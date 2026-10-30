@@ -10,6 +10,7 @@ import (
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/util/userid"
+	"github.com/leapmux/leapmux/internal/worker/agent"
 	"github.com/leapmux/leapmux/internal/worker/channel"
 )
 
@@ -79,4 +80,86 @@ func TestWorkerCapabilitiesNameTheOS(t *testing.T) {
 		hasOS = hasOS || len(c) > 3 && c[:3] == "os:"
 	}
 	assert.True(t, hasOS)
+}
+
+// A binding-read failure must not be mistaken for a successful unbound read:
+// that would restart an opted-in confined agent with ordinary full control.
+func TestEnsureAgentRunning_WorkflowBindingReadFailureRefusesSpawn(t *testing.T) {
+	t.Parallel()
+	ipc := &agentIPCRecorder{}
+	svc, _, _ := setupTestService(t, withRemoteIPC(ipc))
+	rec := newStartRecorder()
+	rec.install(svc)
+	seedOpenAgent(t, svc, "bound-agent", true)
+	require.NoError(t, svc.Workflows.Store().PutBinding(t.Context(), "bound-agent", &leapmuxv1.WorkflowBinding{
+		RunId: "run", SlotId: "slot", RoleKey: "builder", CoordinatorWorkerId: "coordinator", Token: "test-token", Confine: true,
+	}))
+	_, err := svc.DB.ExecContext(t.Context(), "DROP TABLE workflow_agent_bindings")
+	require.NoError(t, err)
+
+	err = svc.ensureAgentRunning("bound-agent", resumeIfConversation, interactiveStart)
+	require.ErrorContains(t, err, "read workflow binding")
+	assert.Empty(t, rec.ids(), "a failed binding read must stop the provider launch")
+	assert.Empty(t, ipc.log(), "no unconfined replacement socket may be minted")
+}
+
+func TestRemintAgentControlIPC_WorkflowBindingReadFailureKeepsOldSocket(t *testing.T) {
+	t.Parallel()
+	ipc := &agentIPCRecorder{}
+	svc, _, _ := setupTestService(t, withRemoteIPC(ipc))
+	seedOpenAgent(t, svc, "bound-agent", true)
+	require.NoError(t, svc.Workflows.Store().PutBinding(t.Context(), "bound-agent", &leapmuxv1.WorkflowBinding{
+		RunId: "run", SlotId: "slot", RoleKey: "builder", CoordinatorWorkerId: "coordinator", Token: "test-token", Confine: true,
+	}))
+	opts := agent.Options{AgentID: "bound-agent", AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE}
+	envs, err := svc.remintAgentControlIPC(opts, "test")
+	require.NoError(t, err)
+	assert.Contains(t, envs, "LEAPMUX_CONTROL_TOKEN=token-1")
+	_, err = svc.DB.ExecContext(t.Context(), "DROP TABLE workflow_agent_bindings")
+	require.NoError(t, err)
+
+	envs, err = svc.remintAgentControlIPC(opts, "test")
+	require.ErrorContains(t, err, "read workflow binding")
+	assert.Empty(t, envs)
+	assert.Equal(t, []string{"mint:token-1"}, ipc.log(), "an aborted restart keeps the existing socket")
+}
+
+type workflowSpawnRecorder struct {
+	agentIPCRecorder
+	binding *leapmuxv1.WorkflowBinding
+}
+
+func (f *workflowSpawnRecorder) AgentSpawning(info AgentSpawnInfo) ([]string, func(), error) {
+	f.binding = info.Workflow
+	return f.agentIPCRecorder.AgentSpawning(info)
+}
+
+func TestRemintAgentControlIPC_PreservesWorkflowBinding(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		binding *leapmuxv1.WorkflowBinding
+	}{
+		{name: "ordinary unbound agent"},
+		{name: "unconfined workflow", binding: &leapmuxv1.WorkflowBinding{
+			RunId: "run", SlotId: "slot", RoleKey: "builder", CoordinatorWorkerId: "coordinator", Token: "test-token",
+		}},
+		{name: "confined workflow", binding: &leapmuxv1.WorkflowBinding{
+			RunId: "run", SlotId: "slot", RoleKey: "builder", CoordinatorWorkerId: "coordinator", Token: "test-token", Confine: true,
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			ipc := &workflowSpawnRecorder{}
+			svc, _, _ := setupTestService(t, withRemoteIPC(ipc))
+			seedOpenAgent(t, svc, "agent", true)
+			if test.binding != nil {
+				require.NoError(t, svc.Workflows.Store().PutBinding(t.Context(), "agent", test.binding))
+			}
+
+			envs, err := svc.remintAgentControlIPC(agent.Options{AgentID: "agent", AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE}, "test")
+			require.NoError(t, err)
+			assert.Contains(t, envs, "LEAPMUX_CONTROL_TOKEN=token-1")
+			assert.True(t, proto.Equal(test.binding, ipc.binding), "persisted credentials and confinement reach the factory unchanged")
+		})
+	}
 }
