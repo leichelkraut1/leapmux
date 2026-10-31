@@ -46,6 +46,36 @@ describe('readNativeConversation', () => {
   })
 })
 
+describe('inspectNativeSessionControl', () => {
+  it('inspects only the selected live session over its encrypted worker channel', async () => {
+    const { inspectNativeSessionControl } = await import('./workerRpc')
+    const { AgentProvider } = await import('~/generated/proto/leapmux/v1/agent_pb')
+    const request = { agentProvider: AgentProvider.CODEX, sessionId: 'generated-session' }
+    const controller = new AbortController()
+    callWorkerMock.mockResolvedValueOnce({ sessionId: request.sessionId, canSend: false })
+    await inspectNativeSessionControl('generated-worker', request, { signal: controller.signal })
+    expect(callWorkerMock).toHaveBeenCalledWith('generated-worker', 'InspectNativeSessionControl', expect.anything(), expect.anything(), request, { signal: controller.signal })
+  })
+})
+
+describe('native session control writes', () => {
+  it.each(['send', 'interrupt'] as const)('does not automatically retry an unconfirmed %s', async (action) => {
+    vi.useFakeTimers()
+    const { sendNativeSessionInput, interruptNativeSession } = await import('./workerRpc')
+    const { AgentProvider } = await import('~/generated/proto/leapmux/v1/agent_pb')
+    const failure = unavailable()
+    callWorkerMock.mockRejectedValue(failure)
+    const identity = { agentProvider: AgentProvider.CODEX, sessionId: 'generated-session', bindingToken: 'generated-binding', requestId: 'generated-request' }
+    const result = (action === 'send'
+      ? sendNativeSessionInput('generated-worker', { ...identity, text: 'generated text' })
+      : interruptNativeSession('generated-worker', { ...identity, expectedTurnId: 'generated-turn' })).catch(error => error)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(await result).toBe(failure)
+    expect(callWorkerMock).toHaveBeenCalledOnce()
+    expect(callWorkerMock.mock.calls[0]![1]).toBe(action === 'send' ? 'SendNativeSessionInput' : 'InterruptNativeSession')
+  })
+})
+
 describe('callWorker retries an Unavailable reply', () => {
   // The worker declares Unavailable as "the caller should retry": an
   // incomplete provider scan, a subagent registry that is not loaded, and

@@ -26,6 +26,9 @@ type StartFunc func(ctx context.Context, opts Options, sink ProviderServices) (A
 // static catalog, and its option policy. Each provider states one Registration,
 // and NewRegistry collects them; nothing mutates a Registration after that.
 type Registration struct {
+	// NewNativeSessionController connects only to explicitly available live owners.
+	// nil leaves external chats read-only. The Manager owns its bridge lifetime.
+	NewNativeSessionController func(NativeSessionControllerOptions) NativeSessionController
 	// ReadNativeConversation reads saved native history without starting, resuming,
 	// attaching for control, or modifying a provider. nil means unsupported.
 	ReadNativeConversation func(context.Context, NativeConversationQuery) (NativeConversationPage, error)

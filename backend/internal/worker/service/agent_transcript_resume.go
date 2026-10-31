@@ -25,6 +25,11 @@ func (svc *Service) createAgentRecordWithTranscript(ctx context.Context, params 
 	if err := validateAgentRecordProvider(params); err != nil {
 		return err
 	}
+	releaseNative, err := svc.admitNativeResume(ctx, params.AgentProvider, resumeSessionID)
+	if err != nil {
+		return err
+	}
+	defer releaseNative()
 
 	// The source lookup and the copy must see one database state. Creating the
 	// target inside this transaction also prevents a failed copy from leaving

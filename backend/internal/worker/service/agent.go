@@ -210,7 +210,7 @@ func registerAgentHandlers(d registrar, svc *Service) {
 			}, resumeSessionID); err != nil {
 				// The row does not exist, so no startup will ever run for it.
 				svc.AgentStartup.abandon(startupHandle)
-				if errors.Is(err, errNativeSessionAlreadyOpen) {
+				if errors.Is(err, errNativeSessionAlreadyOpen) || errors.Is(err, errNativeSessionExternallyControlled) {
 					sendFailedPrecondition(sender, err.Error())
 					return
 				}

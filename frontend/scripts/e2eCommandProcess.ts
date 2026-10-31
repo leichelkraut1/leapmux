@@ -2,6 +2,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import process from 'node:process'
 import { stopProcess, validateProcessShutdownDelay } from '../tests/e2e/helpers/process'
+import { ownedLinuxGroupHasOnlyDeadMembers } from './linuxProcessGroup'
 import { spawnWindowsCommandJob } from './windowsCommandJob'
 
 export interface CommandProcess {
@@ -124,6 +125,13 @@ function stopOwnedProcessGroup(child: ChildProcess, delay: number): Promise<void
       }
       try {
         if (!signalOwnedProcess(-groupId, 0) && ended) {
+          finish()
+          return
+        }
+        // A container PID 1 may leave dead grandchildren unreaped forever.
+        // killpg(0) still sees those zombies. Only a root exit plus two stable
+        // all-dead Linux metadata snapshots can finish this surviving group.
+        if (ended && process.platform === 'linux' && ownedLinuxGroupHasOnlyDeadMembers(groupId)) {
           finish()
           return
         }

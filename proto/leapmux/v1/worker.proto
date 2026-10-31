@@ -384,6 +384,93 @@ message ReadNativeConversationResponse {
   string partial_reason = 13;
 }
 
+// External-chat control always addresses an existing live owner. None of these
+// methods may cold-resume, launch another provider, or take over a saved chat.
+message InspectNativeSessionControlRequest {
+  AgentProvider agent_provider = 1;
+  string session_id = 2;
+}
+
+message InspectNativeSessionControlResponse {
+  string session_id = 1;
+  string owner_label = 2;
+  string transport_label = 3;
+  bool can_send = 4;
+  bool can_interrupt = 5;
+  string unavailable_reason = 6;
+  // Opaque short-lived binding to this Worker and the exact native owner.
+  string binding_token = 7;
+  string observed_at = 8;
+  string expires_at = 9;
+  string active_turn_id = 10;
+  AgentActivityState activity_state = 11;
+  repeated NativeSessionInputOutcome recent_inputs = 12;
+  NativeSessionInputBehavior input_behavior = 13;
+}
+
+// The caller explicitly accepts the native owner's delivery semantics. Sending
+// now may steer an active turn; it must never masquerade as a next-turn queue.
+enum NativeSessionInputBehavior {
+  NATIVE_SESSION_INPUT_BEHAVIOR_UNSPECIFIED = 0;
+  NATIVE_SESSION_INPUT_BEHAVIOR_QUEUE_NEXT_TURN = 1;
+  NATIVE_SESSION_INPUT_BEHAVIOR_SEND_NOW = 2;
+}
+
+// An enqueue receipt is not a claim that the provider started the prompt. The
+// live owner reports later outcomes, including a Stop dropping queued input.
+enum NativeSessionInputState {
+  NATIVE_SESSION_INPUT_STATE_UNSPECIFIED = 0;
+  NATIVE_SESSION_INPUT_STATE_QUEUED = 1;
+  NATIVE_SESSION_INPUT_STATE_DISPATCHED = 2;
+  NATIVE_SESSION_INPUT_STATE_STARTED = 3;
+  NATIVE_SESSION_INPUT_STATE_DROPPED = 4;
+  NATIVE_SESSION_INPUT_STATE_REJECTED = 5;
+  NATIVE_SESSION_INPUT_STATE_UNCERTAIN = 6;
+}
+
+message NativeSessionInputOutcome {
+  string request_id = 1;
+  NativeSessionInputState state = 2;
+  string detail = 3;
+  string turn_id = 4;
+}
+
+enum NativeSessionInputDisposition {
+  NATIVE_SESSION_INPUT_DISPOSITION_UNSPECIFIED = 0;
+  NATIVE_SESSION_INPUT_DISPOSITION_ACCEPTED = 1;
+  NATIVE_SESSION_INPUT_DISPOSITION_QUEUED = 2;
+}
+
+message SendNativeSessionInputRequest {
+  AgentProvider agent_provider = 1;
+  string session_id = 2;
+  string binding_token = 3;
+  string request_id = 4;
+  string text = 5;
+  NativeSessionInputBehavior input_behavior = 6;
+}
+
+message SendNativeSessionInputResponse {
+  string session_id = 1;
+  string request_id = 2;
+  NativeSessionInputDisposition disposition = 3;
+  string detail = 4;
+}
+
+message InterruptNativeSessionRequest {
+  AgentProvider agent_provider = 1;
+  string session_id = 2;
+  string binding_token = 3;
+  string request_id = 4;
+  string expected_turn_id = 5;
+}
+
+message InterruptNativeSessionResponse {
+  string session_id = 1;
+  string request_id = 2;
+  string detail = 3;
+}
+
 // Classification describes an executable, not whether a chat is working.
 // UNKNOWN means a provider's name matched but CLI versus desktop is ambiguous.
 enum NativeAgentProcessKind {

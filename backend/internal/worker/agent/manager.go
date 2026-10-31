@@ -23,14 +23,19 @@ var ErrAgentNotFound = errors.New("agent not found")
 
 // Manager tracks active agents and routes messages.
 type Manager struct {
-	nativeServicesMu     sync.Mutex
-	nativeServices       map[leapmuxv1.AgentProvider]NativeServiceObserver
-	nativeServicesClosed bool
-	mu                   sync.RWMutex
-	agents               map[string]*agentRegistration // agentID -> runtime registration
-	cachedOptionGroups   map[string]cachedCatalog      // agentID -> last known option groups
-	lifecycleLocks       map[string]*lifecycleEntry    // agentID -> refcounted mutex
-	onExit               ExitHandler
+	nativeControlMu     sync.Mutex
+	nativeControllers   map[leapmuxv1.AgentProvider]*nativeControllerEntry
+	nativeControlClosed bool
+	// Set by PrepareAgentDirs before any controller can be requested.
+	nativeControlDirectory string
+	nativeServicesMu       sync.Mutex
+	nativeServices         map[leapmuxv1.AgentProvider]NativeServiceObserver
+	nativeServicesClosed   bool
+	mu                     sync.RWMutex
+	agents                 map[string]*agentRegistration // agentID -> runtime registration
+	cachedOptionGroups     map[string]cachedCatalog      // agentID -> last known option groups
+	lifecycleLocks         map[string]*lifecycleEntry    // agentID -> refcounted mutex
+	onExit                 ExitHandler
 	// registry states every provider this manager can start. It is fixed at
 	// construction and never nil, so every read of a provider's registration goes
 	// through the one value the worker was wired with.
@@ -147,6 +152,7 @@ func (m *Manager) PrepareAgentDirs(ctx context.Context, dataDir string) error {
 			return fmt.Errorf("prepare the attachment directory: %w", err)
 		}
 		m.attachmentRoot = filepath.Join(absolute, "attachments")
+		m.nativeControlDirectory = filepath.Join(absolute, "native-control")
 	}
 	m.agentDirs = dirs
 	return nil
@@ -1114,6 +1120,7 @@ func (m *Manager) ListAgentIDs() []string {
 
 // StopAll stops all running agents.
 func (m *Manager) StopAll() {
+	m.closeNativeControllers()
 	m.closeNativeServices()
 	m.mu.Lock()
 	providers := make([]Agent, 0, len(m.agents))

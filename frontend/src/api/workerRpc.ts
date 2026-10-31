@@ -75,7 +75,10 @@ import type {
 import type {
   GetWorkerSystemInfoResponse,
   InspectNativeAgentProcessesResponse,
+  InspectNativeSessionControlResponse,
+  InterruptNativeSessionResponse,
   ReadNativeConversationResponse,
+  SendNativeSessionInputResponse,
 } from '~/generated/proto/leapmux/v1/worker_pb'
 import type {
   GetTabPayloadResponse,
@@ -234,8 +237,14 @@ import {
   GetWorkerSystemInfoResponseSchema,
   InspectNativeAgentProcessesRequestSchema,
   InspectNativeAgentProcessesResponseSchema,
+  InspectNativeSessionControlRequestSchema,
+  InspectNativeSessionControlResponseSchema,
+  InterruptNativeSessionRequestSchema,
+  InterruptNativeSessionResponseSchema,
   ReadNativeConversationRequestSchema,
   ReadNativeConversationResponseSchema,
+  SendNativeSessionInputRequestSchema,
+  SendNativeSessionInputResponseSchema,
 } from '~/generated/proto/leapmux/v1/worker_pb'
 import {
   GetTabPayloadRequestSchema,
@@ -425,7 +434,7 @@ async function callWorker<
   reqSchema: ReqSchema,
   respSchema: RespSchema,
   req: MessageInitShape<ReqSchema>,
-  opts?: { timeoutMs?: number, signal?: AbortSignal },
+  opts?: { timeoutMs?: number, signal?: AbortSignal, retryUnavailable?: false },
 ): Promise<MessageShape<RespSchema>> {
   for (let attempt = 0; ; attempt++) {
     emitDevEvent('leapmux:rpc-send', () => ({ method, at: performance.now() }))
@@ -436,7 +445,7 @@ async function callWorker<
     }
     catch (err) {
       emitDevEvent('leapmux:rpc-recv', () => ({ method, at: performance.now(), ok: false }))
-      if (attempt >= UNAVAILABLE_MAX_RETRIES || !isWorkerUnavailable(err) || opts?.signal?.aborted)
+      if (opts?.retryUnavailable === false || attempt >= UNAVAILABLE_MAX_RETRIES || !isWorkerUnavailable(err) || opts?.signal?.aborted)
         throw err
       await sleep(UNAVAILABLE_RETRY_BASE_MS * (2 ** attempt), opts?.signal)
     }
@@ -468,6 +477,31 @@ export function readNativeConversation(
   opts?: { signal?: AbortSignal },
 ): Promise<ReadNativeConversationResponse> {
   return callWorker(workerId, 'ReadNativeConversation', ReadNativeConversationRequestSchema, ReadNativeConversationResponseSchema, req, opts)
+}
+
+/** Inspect the existing app's control bridge without starting or resuming it. */
+export function inspectNativeSessionControl(
+  workerId: string,
+  req: MessageInitShape<typeof InspectNativeSessionControlRequestSchema>,
+  opts?: { signal?: AbortSignal },
+): Promise<InspectNativeSessionControlResponse> {
+  return callWorker(workerId, 'InspectNativeSessionControl', InspectNativeSessionControlRequestSchema, InspectNativeSessionControlResponseSchema, req, opts)
+}
+
+/** Queue text in the exact live owner identified by its current binding. */
+export function sendNativeSessionInput(
+  workerId: string,
+  req: MessageInitShape<typeof SendNativeSessionInputRequestSchema>,
+): Promise<SendNativeSessionInputResponse> {
+  return callWorker(workerId, 'SendNativeSessionInput', SendNativeSessionInputRequestSchema, SendNativeSessionInputResponseSchema, req, { retryUnavailable: false })
+}
+
+/** Explicitly interrupt the bound owner's exact turn; never kill its process. */
+export function interruptNativeSession(
+  workerId: string,
+  req: MessageInitShape<typeof InterruptNativeSessionRequestSchema>,
+): Promise<InterruptNativeSessionResponse> {
+  return callWorker(workerId, 'InterruptNativeSession', InterruptNativeSessionRequestSchema, InterruptNativeSessionResponseSchema, req, { retryUnavailable: false })
 }
 
 export function getWorkerSystemInfo(workerId: string): Promise<GetWorkerSystemInfoResponse> {

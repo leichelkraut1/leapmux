@@ -1,0 +1,6 @@
+{
+  "_readme": "Bounds shared by the owner-only native-chat control RPCs and browser composer. Text is measured in UTF-8 bytes. A short control lease identifies a verified, already-running owner; it does not authorize launching, resuming, or replacing a provider.",
+  "MaxTextBytes": 65536,
+  "LeaseSeconds": 30,
+  "PollMilliseconds": 5000
+}

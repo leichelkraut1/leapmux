@@ -4263,6 +4263,18 @@ const DOMAINS = [
     },
   },
   {
+    name: 'native-session-control',
+    emit(out, read) {
+      const value = read('native-session-control')
+      mustBe(value.PollMilliseconds < value.LeaseSeconds * 1000, 'native-session-control.json', 'poll interval must renew the control lease before expiry')
+      const entries = Object.entries(value).filter(([name]) => name !== '_readme')
+      const go = goConstBlock(entries.map(([name, number]) => ({ name: `NativeSessionControl${name}`, value: String(number) })))
+      const ts = entries.map(([name, number]) => `  ${name}: ${number},`).join('\n')
+      out['backend/generated/contracts/native-session-control.go'] = `${GO_HEADER('native-session-control.json')}package contracts\n\nconst (\n${go}\n)\n`
+      out['frontend/src/generated/contracts/native-session-control.ts'] = `${TS_HEADER('native-session-control.json')}\nexport const NATIVE_SESSION_CONTROL = {\n${ts}\n} as const\n`
+    },
+  },
+  {
     name: 'worker-vocab',
     requiresDescriptor: true,
     emit(out, read, descriptorSet) {

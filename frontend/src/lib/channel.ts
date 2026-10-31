@@ -41,6 +41,12 @@ import { IDLE_REKEY_INTERVAL_MS, PING_METHOD } from '~/generated/contracts/wire'
 import {
   HubControlFrameSchema,
 } from '~/generated/proto/leapmux/v1/channel_pb'
+import {
+  InspectNativeSessionControlRequestSchema,
+  InspectNativeSessionControlResponseSchema,
+  InterruptNativeSessionRequestSchema,
+  SendNativeSessionInputRequestSchema,
+} from '~/generated/proto/leapmux/v1/worker_pb'
 import { abortError, ChannelError, channelNotOpenError } from './channelError'
 import { ChannelInbound } from './channelInbound'
 import { ChannelOpen } from './channelOpen'
@@ -61,6 +67,17 @@ export { clearAllKeyPins, clearKeyPin, KeyPinRejectedError, KeyPinStore } from '
 export type { WorkerKeyBundle } from './workerKeyBundle'
 
 const log = createLogger('channel')
+
+const PRIVATE_NATIVE_CONTROL_TYPES = new Set<string>([
+  InspectNativeSessionControlRequestSchema.typeName,
+  InspectNativeSessionControlResponseSchema.typeName,
+  InterruptNativeSessionRequestSchema.typeName,
+  SendNativeSessionInputRequestSchema.typeName,
+])
+
+function debugWorkerPayload<T extends GenMessage<any>>(schema: T, message: MessageShape<T>): string {
+  return PRIVATE_NATIVE_CONTROL_TYPES.has(schema.typeName) ? '[redacted native chat control]' : toJsonString(schema, message)
+}
 
 // safeCall invokes a user-supplied listener callback and swallows any throw so
 // one throwing listener cannot break the iteration that notifies the rest. The
@@ -812,7 +829,7 @@ export class ChannelManager {
     }
     const msg = create(reqSchema, req)
     if (log.isDebug())
-      log.debug('callWorker request', { method, request: toJsonString(reqSchema, msg) })
+      log.debug('callWorker request', { method, request: debugWorkerPayload(reqSchema, msg) })
     const payload = toBinary(reqSchema, msg)
     let resp
     try {
@@ -824,7 +841,7 @@ export class ChannelManager {
     }
     const result = fromBinary(respSchema, resp.payload)
     if (log.isDebug())
-      log.debug('callWorker response', { method, response: toJsonString(respSchema, result) })
+      log.debug('callWorker response', { method, response: debugWorkerPayload(respSchema, result) })
     return result
   }
 

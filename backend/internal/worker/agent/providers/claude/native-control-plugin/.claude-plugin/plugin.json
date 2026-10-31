@@ -1,0 +1,7 @@
+{
+  "name": "leapmux-native-control",
+  "version": "0.1.0",
+  "description": "Opt-in control of this existing Claude chat through your local LeapMux Worker.",
+  "author": {"name": "LeapMux"},
+  "license": "MIT"
+}

@@ -1,11 +1,20 @@
 import type { LoggerCapture } from '~/test-support/loggerCapture'
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import {
   InnerMessageSchema,
   InnerRpcRequestSchema,
   InnerRpcResponseSchema,
 } from '~/generated/proto/leapmux/v1/channel_pb'
+import {
+  InspectNativeSessionControlRequestSchema,
+  InspectNativeSessionControlResponseSchema,
+  InterruptNativeSessionRequestSchema,
+  InterruptNativeSessionResponseSchema,
+  SendNativeSessionInputRequestSchema,
+  SendNativeSessionInputResponseSchema,
+} from '~/generated/proto/leapmux/v1/worker_pb'
 import { captureLoggerOutput } from '~/test-support/loggerCapture'
 import { ChannelManager } from './channel'
 import {
@@ -23,6 +32,47 @@ import {
   sessions,
 } from './channel.test-support'
 import { ChannelError } from './channelError'
+
+describe('ChannelManager callWorker debug payloads', () => {
+  const h = new ChannelManagerTestHarness()
+  let capture: LoggerCapture
+  beforeEach(() => {
+    h.setup()
+    capture = captureLoggerOutput()
+  })
+  afterEach(() => {
+    capture.restore()
+    h.teardown()
+  })
+
+  it.each(['inspect', 'send', 'interrupt'] as const)('redacts native %s control fields while preserving the actual RPC payload', async (action) => {
+    const debug = vi.spyOn(console, 'debug')
+    vi.spyOn(h.mgr, 'getOrOpenChannel').mockResolvedValue('generated-channel')
+    const call = vi.spyOn(h.mgr, 'call')
+    const bindingToken = 'private-generated-binding-marker'
+    const text = 'private generated input marker'
+    const identity = { agentProvider: AgentProvider.CODEX, sessionId: 'generated-native-session', requestId: 'generated-request', bindingToken }
+    if (action === 'inspect') {
+      call.mockResolvedValue(create(InnerRpcResponseSchema, { payload: toBinary(InspectNativeSessionControlResponseSchema, create(InspectNativeSessionControlResponseSchema, { sessionId: identity.sessionId, bindingToken })) }))
+      const response = await h.mgr.callWorker('generated-worker', 'InspectNativeSessionControl', InspectNativeSessionControlRequestSchema, InspectNativeSessionControlResponseSchema, { agentProvider: identity.agentProvider, sessionId: identity.sessionId })
+      expect(response.bindingToken).toBe(bindingToken)
+    }
+    else if (action === 'send') {
+      call.mockResolvedValue(create(InnerRpcResponseSchema, { payload: toBinary(SendNativeSessionInputResponseSchema, create(SendNativeSessionInputResponseSchema, { sessionId: identity.sessionId, requestId: identity.requestId })) }))
+      await h.mgr.callWorker('generated-worker', 'SendNativeSessionInput', SendNativeSessionInputRequestSchema, SendNativeSessionInputResponseSchema, { ...identity, text })
+      expect(fromBinary(SendNativeSessionInputRequestSchema, call.mock.calls[0]![2]).text).toBe(text)
+    }
+    else {
+      call.mockResolvedValue(create(InnerRpcResponseSchema, { payload: toBinary(InterruptNativeSessionResponseSchema, create(InterruptNativeSessionResponseSchema, { sessionId: identity.sessionId, requestId: identity.requestId })) }))
+      await h.mgr.callWorker('generated-worker', 'InterruptNativeSession', InterruptNativeSessionRequestSchema, InterruptNativeSessionResponseSchema, { ...identity, expectedTurnId: 'generated-turn' })
+      expect(fromBinary(InterruptNativeSessionRequestSchema, call.mock.calls[0]![2]).bindingToken).toBe(bindingToken)
+    }
+    const logged = JSON.stringify(debug.mock.calls)
+    expect(logged).toContain('[redacted native chat control]')
+    expect(logged).not.toContain(bindingToken)
+    expect(logged).not.toContain(text)
+  })
+})
 
 describe('ChannelManager call', () => {
   const h = new ChannelManagerTestHarness()

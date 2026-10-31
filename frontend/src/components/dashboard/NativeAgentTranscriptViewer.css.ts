@@ -46,3 +46,32 @@ export const historyAction = style({
   alignSelf: 'center',
   flexShrink: 0,
 })
+
+export const connectionDescription = style({
+  display: 'block',
+  marginTop: 'var(--space-1)',
+  color: 'var(--muted-foreground)',
+})
+
+export const composer = style({
+  display: 'flex',
+  flexDirection: 'column',
+  flexShrink: 0,
+  gap: 'var(--space-2)',
+  minWidth: 0,
+})
+
+export const editor = style({
+  width: '100%',
+  minHeight: '4.5rem',
+  maxHeight: '12rem',
+  resize: 'vertical',
+  font: 'inherit',
+})
+
+export const actions = style({
+  display: 'flex',
+  flexWrap: 'wrap',
+  justifyContent: 'flex-end',
+  gap: 'var(--space-2)',
+})

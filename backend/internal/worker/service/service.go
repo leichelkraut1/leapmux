@@ -164,6 +164,9 @@ type Service struct {
 	nativeTurnRestarts  map[string]struct{}
 	nativeTurnRestartWG sync.WaitGroup
 
+	// Serialize native input with the durable claim of a managed resume.
+	nativeControlAdmissions nativeControlAdmission
+
 	// tunnels is the worker-singleton tunnel manager built in RegisterAll. It
 	// owns the half-closed idle reaper goroutine, which Shutdown stops for clean
 	// teardown hygiene. registerAllClassified stops any prior manager before
@@ -1487,6 +1490,7 @@ func registerAllClassified(d *channel.Dispatcher, svc *Service) (map[string]meth
 	registerAgentSessionHandlers(r, svc)
 	registerNativeProcessHandlers(r, svc)
 	registerNativeConversationHandlers(r, svc)
+	registerNativeControlHandlers(r, svc)
 	registerCleanupHandlers(r, svc)
 	registerWorkflowHandlers(r, svc)
 	registerSysInfoHandlers(ownerOnly, svc)
@@ -1586,6 +1590,10 @@ type protoJSONValue struct{ msg proto.Message }
 
 // LogValue implements slog.LogValuer.
 func (p protoJSONValue) LogValue() slog.Value {
+	switch p.msg.(type) {
+	case *leapmuxv1.SendNativeSessionInputRequest, *leapmuxv1.InterruptNativeSessionRequest, *leapmuxv1.InspectNativeSessionControlResponse:
+		return slog.StringValue("[native chat control payload omitted]")
+	}
 	return slog.StringValue(protojson.Format(p.msg))
 }
 
