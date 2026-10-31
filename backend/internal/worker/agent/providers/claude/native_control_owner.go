@@ -52,14 +52,17 @@ func verifyClaudeNativeControlOwner(ctx context.Context, sessionID string) (nati
 	return verifyClaudeControlExecutable(ctx, first, before, name, executable, nameErr, exeErr)
 }
 
-func claudeNativeControlExecutable(name, executable string) bool {
+func claudeNativeControlExecutable(pid int, name, executable string) bool {
+	if encodedPID, updated := claudeUpdatedExecutablePID(name); updated && encodedPID != pid {
+		return false
+	}
 	return recognizeNativeProcess(name, executable) == leapmuxv1.NativeAgentProcessKind_NATIVE_AGENT_PROCESS_KIND_CLI
 }
 
 func verifyClaudeControlExecutable(ctx context.Context, first agent.NativeSessionObservation, before procutil.ProcessIdentity,
 	name, executable string, nameErr, exeErr error,
 ) (nativeControlOwner, error) {
-	if nameErr != nil || exeErr != nil || !claudeNativeControlExecutable(name, executable) {
+	if nameErr != nil || exeErr != nil || !claudeNativeControlExecutable(first.PID, name, executable) {
 		return nativeControlOwner{}, agent.ErrNativeControlUnavailable
 	}
 	second, err := lookupClaudeNativeControlSession(ctx, first.SessionID)
