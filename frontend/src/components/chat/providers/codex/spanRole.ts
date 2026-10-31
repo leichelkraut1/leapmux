@@ -5,6 +5,7 @@ import { pickString } from '~/lib/jsonPick'
 import { retainedRowIsFinal } from '../registry'
 import { codexRawExecRole } from './extractors/execute'
 import { extractItem } from './extractors/item'
+import { codexNativeHistoryFunctionRole } from './extractors/nativeHistory'
 import { CODEX_STATUS } from './itemVocabulary'
 import { isCodexFinishedStatus } from './status'
 
@@ -19,6 +20,9 @@ const CODEX_TOOL_SPANS = new Set<string>([
 ])
 
 export function codexSpanRole(parsed: ResolvedMessageContent): ToolSpanRole {
+  const externalRole = codexNativeHistoryFunctionRole(parsed.parentObject)
+  if (externalRole)
+    return externalRole
   const executionRole = codexRawExecRole(parsed.parentObject)
   if (executionRole)
     return retainedRowIsFinal(parsed.completion) ? 'result' : executionRole
@@ -32,6 +36,9 @@ export function codexSpanRole(parsed: ResolvedMessageContent): ToolSpanRole {
 }
 
 export function codexRelatedMessages(parsed: ResolvedMessageContent) {
+  const externalRole = codexNativeHistoryFunctionRole(parsed.parentObject)
+  if (externalRole)
+    return externalRole === 'request' ? ['result'] as const : ['request'] as const
   const executionRole = codexRawExecRole(parsed.parentObject)
   if (executionRole)
     return executionRole === 'result' ? ['request'] as const : ['result'] as const

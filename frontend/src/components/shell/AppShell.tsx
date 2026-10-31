@@ -5,6 +5,7 @@ import type { SectionActions } from './sectionUtils'
 import type { SidebarElementsOpts } from './SidebarElements'
 import type { TabContext } from './tabContext'
 import type { CliPathStatus } from '~/api/platformBridge'
+import type { NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { SetGoalState } from '~/components/shell/AppShellDialogs'
 import type { BranchRefActions } from '~/components/workspace/branchActions'
 import type { WorkspaceStartActions, WorkspaceStartAt } from '~/components/workspace/workspaceStartActions'
@@ -13,20 +14,28 @@ import type { BranchRef } from '~/components/workspace/workspaceTabTree.model'
 import type { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import type { LinkConfirmState } from '~/hooks/createLinkConfirm'
 import type { ChangeBranchMode } from '~/hooks/useGitModeState'
+import type { DashboardAgent } from '~/stores/agentDashboard'
 import type { GoalAction, GoalSurface } from '~/stores/chatGoal'
 import type { SavedViewportScroll } from '~/stores/chatTypes'
+import type { Tab } from '~/stores/tab.types'
 import type { TabView } from '~/stores/tabView'
 import { useLocation, useSearchParams } from '@solidjs/router'
-import { createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount, Show } from 'solid-js'
+import { createEffect, createMemo, createResource, createSignal, on, onCleanup, onMount, Show, untrack } from 'solid-js'
 import { getRuntimeState, isTauriApp, platformBridge } from '~/api/platformBridge'
 import { apiLoadingTimeoutMs, workspaceBootstrapTimeoutMs } from '~/api/transport'
 import { setExpectedUserId } from '~/api/workerRpc'
 import { createAgentComposerActionStateStore } from '~/components/chat/agentComposerActionState'
+import { nativeConversationFromParams, nativeConversationKey, nativeConversationRouteProvider } from '~/components/chat/nativeConversation'
 import { pluginFor } from '~/components/chat/providers/registry'
+import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
 import { BootSplash } from '~/components/common/BootSplash'
+import { AgentDashboard } from '~/components/dashboard/AgentDashboard'
+import { NativeAgentTranscriptViewer } from '~/components/dashboard/NativeAgentTranscriptViewer'
 import { CliPathDialog } from '~/components/desktop/CliPathDialog'
 import { isWorkspaceMutatable } from '~/components/shell/sectionUtils'
 import { focusedTerminalId, setTerminalScreenSink, writeToFocusedTerminal } from '~/components/terminal/TerminalView'
+import { WorkflowsHost } from '~/components/workflows/WorkflowsHost'
+import { AgentTreeStatusContext } from '~/components/workspace/AgentTreeStatus'
 import { useAuth } from '~/context/AuthContext'
 import { usePreferences } from '~/context/PreferencesContext'
 import { TunnelProvider } from '~/context/TunnelContext'
@@ -37,6 +46,7 @@ import { createDialogState } from '~/hooks/createDialogState'
 import { createLinkConfirm } from '~/hooks/createLinkConfirm'
 import { createLoadingSignal } from '~/hooks/createLoadingSignal'
 import { useChatAutoFocus } from '~/hooks/useChatAutoFocus'
+import { useExternalAgentInventory } from '~/hooks/useExternalAgentInventory'
 import { useIsMobileLayout } from '~/hooks/useIsMobileLayout'
 import { useShortcuts } from '~/hooks/useShortcuts'
 import { useVisualViewportInset } from '~/hooks/useVisualViewportInset'
@@ -59,6 +69,7 @@ import { printConsoleBanner } from '~/lib/systemInfo'
 import { interceptUntrustedLinkClicks } from '~/lib/untrustedLinkClicks'
 import { isWorkerKnownOnline, onlineWorkerIdSet, workerOnlineState } from '~/lib/workerLiveness'
 import { createAgentActivityStore } from '~/stores/agentActivity.store'
+import { buildAgentDashboard } from '~/stores/agentDashboard'
 import { createAgentInputQueueStore } from '~/stores/agentInputQueue.store'
 import { createAgentSessionStore } from '~/stores/agentSession.store'
 import { createChatStore } from '~/stores/chat.store'
@@ -352,7 +363,7 @@ export const AppShell: Component = () => {
   // agent record, terminal title) hasn't arrived yet. The hook fires
   // off one best-effort fetch per pending tab; see useTabHydrators for
   // the per-type predicates.
-  useTabHydrators({
+  const tabHydrators = useTabHydrators({
     view: tabView,
     metadata: tabMetadata,
     repoGitStore,
@@ -439,7 +450,7 @@ export const AppShell: Component = () => {
   onCleanup(() => turnEndRefresh.dispose())
 
   // Streaming connection management
-  useWorkspaceConnection({
+  const workspaceConnection = useWorkspaceConnection({
     chatStore,
     agentInputQueueStore,
     view: tabView,
@@ -458,6 +469,7 @@ export const AppShell: Component = () => {
     // keeps the agent busy afterwards. The gate decides which turn end can
     // show in the tree the user sees, and collapses a burst of them.
     onTurnEndRefresh: turnEndRefresh.notify,
+    onWorkerStreamReopened: tabHydrators.refreshWorkerAgents,
   })
 
   // Auto-open new workspace dialog from URL search params
@@ -1192,6 +1204,11 @@ export const AppShell: Component = () => {
     focusTile,
   })
 
+  const canMoveSidebarTab = (tab: Tab) => sectionStore.state.loaded
+    && isWorkspaceMutatableById(tab.workspaceId)
+    && !(tab.type === TabType.AGENT && tab.parentAgentId)
+    && !tabOps.closingTabKeys().has(tabKey(tab))
+
   // Active agent to-dos for the right sidebar section. "Active" is
   // derived from the active tab — if the user is looking at an AGENT
   // tab, that's the active agent. Todos are owned by the root agent, so a
@@ -1548,6 +1565,62 @@ export const AppShell: Component = () => {
     },
   })
 
+  const externalInventory = useExternalAgentInventory(
+    () => workerSection.workers().map(worker => ({
+      workerId: worker.id,
+      workerName: workerSection.workerInfoFn(worker.id)?.name || worker.id,
+      online: worker.online,
+    })),
+    () => searchParams.dashboard === 'agents' && workerSection.registryStatus() === 'available',
+  )
+  const dashboardRows = createMemo(() => buildAgentDashboard({
+    tabs: tabView.all(),
+    workspaces: workspaceStore.state.workspaces,
+    workers: workerSection.workers(),
+    workerName: id => workerSection.workerInfoFn(id)?.name,
+    workerFresh: id => workerSection.channelStatusFn(id) === 'connected' && workspaceConnection.workerStreamReady(id),
+    providerName: provider => provider === undefined ? undefined : agentProviderLabel(provider),
+    activity: agentActivityStore,
+  }))
+
+  const dashboardRowsById = createMemo(() => new Map(dashboardRows().map(row => [row.agentId, row])))
+  const agentTreeStatus = (agentId: string) => dashboardRowsById().get(agentId)?.status ?? 'unknown'
+
+  const [nativeConversation, setNativeConversation] = createSignal<NativeConversationRef>()
+  const linkedNativeConversation = createMemo(() => nativeConversationFromParams(searchParams, workerSection.workers().map(worker => ({ workerId: worker.id, workerName: workerSection.workerInfoFn(worker.id)?.name || worker.id }))))
+  createEffect(on(() => {
+    const linked = linkedNativeConversation()
+    return linked ? nativeConversationKey(linked) : undefined
+  }, (key) => {
+    const current = untrack(nativeConversation)
+    if (key !== (current ? nativeConversationKey(current) : undefined))
+      setNativeConversation(linkedNativeConversation())
+  }))
+  const closeNativeConversation = () => {
+    setNativeConversation(undefined)
+    setSearchParams({ externalWorker: undefined, externalProvider: undefined, externalSession: undefined }, { replace: true })
+  }
+  const openNativeConversation = (conversation: NativeConversationRef) => {
+    const provider = nativeConversationRouteProvider(conversation.agentProvider)
+    if (!provider)
+      return
+    setNativeConversation(conversation)
+    setSearchParams({ externalWorker: conversation.workerId, externalProvider: provider, externalSession: conversation.sessionId }, { replace: true })
+  }
+  const closeAgentDashboard = () => {
+    setNativeConversation(undefined)
+    setSearchParams({ dashboard: undefined, externalWorker: undefined, externalProvider: undefined, externalSession: undefined }, { replace: true })
+  }
+  const openDashboardAgent = (row: DashboardAgent) => {
+    // Resolve again on click: a live row may have moved or closed while shown.
+    const tab = tabView.getAgentTab(row.agentId)
+    if (!tab)
+      return
+    tabOps.handleTabSelect(tab)
+    handleSelectWorkspace(tab.workspaceId)
+    closeAgentDashboard()
+  }
+
   // Sidebar element factories
   // Use getters for reactive values so that LeftSidebar/RightSidebar props
   // remain reactive when accessed through the intermediate opts object.
@@ -1615,6 +1688,17 @@ export const AppShell: Component = () => {
     tabItemOps: {
       onClose: tabOps.handleTabClose,
       onRename: (tab, title) => renameTab({ view: tabView, metadata: tabMetadata }, tab, title),
+      moveTargets: tab => canMoveSidebarTab(tab)
+        ? workspaceStore.state.workspaces
+            .filter(target => target.id !== tab.workspaceId && isWorkspaceMutatableById(target.id))
+            .map(target => ({ id: target.id, label: target.title || 'Untitled' }))
+        : [],
+      onMove: (tab, targetWorkspaceId) => {
+        const current = tabView.get(tabKey(tab))
+        if (!current || !canMoveSidebarTab(current) || !isWorkspaceMutatableById(targetWorkspaceId))
+          return
+        handleCrossWorkspaceMove(targetWorkspaceId, tabKey(current), current.workspaceId)
+      },
       get closingKeys() { return tabOps.closingTabKeys() },
     },
     // Tile order for sidebar leaf ordering. No active/inactive fork: every
@@ -1778,9 +1862,11 @@ export const AppShell: Component = () => {
             lookupTileIdForTab={tileDrag.lookupTileIdForTab}
             renderDragOverlay={tileDrag.renderDragOverlay}
           >
-            <Show when={!isMobileLayout()} fallback={<MobileShellLayer />}>
-              <DesktopShellLayer />
-            </Show>
+            <AgentTreeStatusContext.Provider value={agentTreeStatus}>
+              <Show when={!isMobileLayout()} fallback={<MobileShellLayer />}>
+                <DesktopShellLayer />
+              </Show>
+            </AgentTreeStatusContext.Provider>
           </TabDragProvider>
         </SectionDragProvider>
       </div>
@@ -1862,6 +1948,48 @@ export const AppShell: Component = () => {
           onRefreshProviders={agentOps.loadAvailableProviders}
           repoGitStore={repoGitStore}
         />
+
+        <Show when={searchParams.dashboard === 'agents'}>
+          <AgentDashboard
+            rows={dashboardRows()}
+            registryStatus={workerSection.registryStatus()}
+            externalWorkers={externalInventory.rows()}
+            onRefreshExternal={() => {
+              if (workerSection.registryStatus() === 'unavailable')
+                void workerSection.refreshWorkers()
+              else
+                void externalInventory.refresh()
+            }}
+            onOpenAgent={openDashboardAgent}
+            onOpenExternalSession={openNativeConversation}
+            onClose={closeAgentDashboard}
+          />
+        </Show>
+
+        <WorkflowsHost
+          workers={workerSection.workers()}
+          workerInfo={workerSection.workerInfoFn}
+          activeWorkspaceId={workspace.activeWorkspaceId}
+          isWorkspaceMutatable={isWorkspaceMutatableById}
+          view={tabView}
+          layoutStore={layoutStore}
+          selection={selection}
+          metadata={tabMetadata}
+          repoGitStore={repoGitStore}
+          selectTab={tabOps.handleTabSelect}
+          selectWorkspace={id => handleSelectWorkspace(id)}
+        />
+
+        <Show when={nativeConversation()} keyed>
+          {conversation => (
+            <NativeAgentTranscriptViewer
+              conversation={conversation}
+              workerName={workerSection.workerInfoFn(conversation.workerId)?.name || conversation.workerName}
+              online={workerSection.workers().some(worker => worker.id === conversation.workerId && worker.online)}
+              onClose={closeNativeConversation}
+            />
+          )}
+        </Show>
 
         <workerSection.Dialogs />
 

@@ -33,8 +33,9 @@ describe('codex provider capabilities', () => {
     expect(plugin?.configuration?.attachments).toEqual({
       text: true,
       image: true,
-      pdf: false,
-      binary: false,
+      pdf: true,
+      binary: true,
+      fileBackedKinds: ['pdf', 'binary'],
     })
   })
 })

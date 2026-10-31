@@ -521,7 +521,30 @@ describe('DropdownMenu contextMenuFor', () => {
     expect(e.defaultPrevented).toBe(true)
   })
 
-  it('hides a press-anchored menu when anything else scrolls', () => {
+  it('keeps a press-anchored menu when a queued or unrelated scroll leaves its row in place', () => {
+    vi.useFakeTimers()
+    try {
+      const { row, popover } = renderRowMenu()
+      const hide = vi.spyOn(popover, 'hidePopover')
+      row.dispatchEvent(new MouseEvent('contextmenu', { clientX: 150, bubbles: true, cancelable: true }))
+      vi.runAllTimers()
+      expect(popover.matches(':popover-open')).toBe(true)
+
+      document.dispatchEvent(new Event('scroll'))
+      const unrelated = document.createElement('div')
+      document.body.append(unrelated)
+      unrelated.dispatchEvent(new Event('scroll'))
+      unrelated.remove()
+
+      expect(hide).not.toHaveBeenCalled()
+      expect(popover.matches(':popover-open')).toBe(true)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('hides a press-anchored menu when its row scrolls away', () => {
     vi.useFakeTimers()
     try {
       const { row, popover } = renderRowMenu()
@@ -531,12 +554,27 @@ describe('DropdownMenu contextMenuFor', () => {
       vi.runAllTimers()
       expect(popover.matches(':popover-open')).toBe(true)
 
-      // A press anchor is a frozen point, not an element to follow: the row it
-      // pointed at scrolled away, so the menu closes instead of floating
-      // over whatever took its place. Element-anchored menus keep repositioning.
+      stubRect(row, { left: 40, top: 80, width: 200, height: 22 })
       document.dispatchEvent(new Event('scroll'))
 
       expect(hide).toHaveBeenCalled()
+      expect(popover.matches(':popover-open')).toBe(false)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('hides a press-anchored menu if its owning row detached before a scroll', () => {
+    vi.useFakeTimers()
+    try {
+      const { row, popover } = renderRowMenu()
+      row.dispatchEvent(new MouseEvent('contextmenu', { clientX: 150, bubbles: true, cancelable: true }))
+      vi.runAllTimers()
+      expect(popover.matches(':popover-open')).toBe(true)
+
+      row.remove()
+      document.dispatchEvent(new Event('scroll'))
       expect(popover.matches(':popover-open')).toBe(false)
     }
     finally {

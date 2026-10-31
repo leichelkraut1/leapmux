@@ -17,6 +17,12 @@ export interface WorkerInfo {
   version: string
   commitHash: string
   buildTime: string
+  /**
+   * What workflow placement can require of this computer (`os:darwin`, `xcode`,
+   * ...), sorted and deduplicated by the worker. Optional: a row persisted
+   * before the field existed has none, and a reader treats that as unknown.
+   */
+  capabilities?: readonly string[]
   updatedAt: number // Date.now()
 }
 

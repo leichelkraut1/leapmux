@@ -115,22 +115,23 @@ describe('useWatchEventsStreams', () => {
     await Promise.resolve()
   }
 
-  function mount(plansFn: () => Map<string, { agents: never[], terminals: never[], terminalResync: Set<string> }>, opts: Partial<Pick<UseWatchEventsStreamsOpts, 'onEvent' | 'onWorkerOnline' | 'onPromoted' | 'onReplayRequested' | 'onReplayRetired'>> = {}) {
+  function mount(plansFn: () => Map<string, { agents: never[], terminals: never[], terminalResync: Set<string> }>, opts: Partial<Pick<UseWatchEventsStreamsOpts, 'onEvent' | 'onWorkerOnline' | 'onPromoted' | 'onReplayRequested' | 'onReplayRetired' | 'onWorkerStreamReopened'>> = {}) {
     return createRoot((dispose) => {
       disposeRoot = dispose
       const harness = installTestBridge({ workspaceId: WS })
       const stores = createTestTabStores(WS)
       const plans = createMemo(plansFn)
-      useWatchEventsStreams({
+      const streams = useWatchEventsStreams({
         view: stores.view,
         plans,
         onEvent: opts.onEvent ?? (() => {}),
         onWorkerOnline: opts.onWorkerOnline ?? (() => {}),
+        ...(opts.onWorkerStreamReopened ? { onWorkerStreamReopened: opts.onWorkerStreamReopened } : {}),
         onPromoted: opts.onPromoted ?? (() => {}),
         ...(opts.onReplayRequested ? { onReplayRequested: opts.onReplayRequested } : {}),
         ...(opts.onReplayRetired ? { onReplayRetired: opts.onReplayRetired } : {}),
       })
-      return { harness, stores, dispose }
+      return { harness, stores, dispose, streams }
     })
   }
 
@@ -1234,6 +1235,55 @@ describe('useWatchEventsStreams', () => {
     setMode(WatchMode.FULL)
     await flush()
     expect(promoted).toHaveLength(1)
+  })
+
+  it('refreshes background agents once after a replacement subscription is acknowledged', async () => {
+    const reopened = vi.fn()
+    const [includeOther, setIncludeOther] = createSignal(false)
+    const { streams } = mount(() => new Map([
+      ['w1', {
+        agents: [{ agentId: 'a1', mode: WatchMode.NOTIFY } as never, ...(includeOther() ? [{ agentId: 'a2', mode: WatchMode.NOTIFY } as never] : [])],
+        terminals: [],
+        terminalResync: new Set<string>(),
+      }],
+    ]), { onWorkerStreamReopened: reopened })
+    const ack = (handle: FakeHandle, id = handle._requestId()) => handle._emit({
+      event: { case: 'updateAck', value: { updateId: id, rejectedAgents: [], rejectedTerminals: [] } },
+    } as unknown as WatchEventsResponse)
+    expect(streams.workerStreamReady('w1')).toBe(false)
+    await flush()
+    expect(streams.workerStreamReady('w1')).toBe(false)
+    ack(handles[0]!)
+    expect(streams.workerStreamReady('w1')).toBe(true)
+    expect(reopened).not.toHaveBeenCalled()
+
+    handles[0]!._end()
+    expect(streams.workerStreamReady('w1')).toBe(false)
+    await vi.advanceTimersByTimeAsync(1000)
+    await flush()
+    expect(streams.workerStreamReady('w1')).toBe(false)
+    expect(reopened).not.toHaveBeenCalled()
+    ack(handles[1]!, handles[0]!._requestId())
+    expect(streams.workerStreamReady('w1')).toBe(false)
+    ack(handles[1]!)
+    expect(reopened).toHaveBeenCalledExactlyOnceWith('w1')
+    expect(streams.workerStreamReady('w1')).toBe(true)
+
+    // Neither a duplicate ack nor an ordinary interest change is a reconnect.
+    ack(handles[1]!)
+    setIncludeOther(true)
+    await flush()
+    ack(handles[1]!)
+    expect(reopened).toHaveBeenCalledTimes(1)
+
+    // An application stream failure also loses live authority while the channel remains open.
+    handles[1]!._error(new Error('watch handler failed'))
+    expect(streams.workerStreamReady('w1')).toBe(false)
+    await vi.advanceTimersByTimeAsync(1000)
+    await flush()
+    ack(handles[2]!)
+    expect(reopened).toHaveBeenCalledTimes(2)
+    expect(streams.workerStreamReady('w1')).toBe(true)
   })
 
   it('marks the worker offline on a clean stream end, then reconnects', async () => {

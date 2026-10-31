@@ -3,11 +3,13 @@ import type { ControlResponseSummary } from './controlResponse'
 import type { TurnEnd } from './divider'
 import type { NotificationThread } from './notification'
 import type { ToolCall } from './toolCall'
+import type { ImageResultSource } from '~/lib/imageBlocks'
 
 /** One file a user attached to a message they sent. */
 export interface UserMessageAttachment {
   filename?: string
   mimeType?: string
+  image?: ImageResultSource
 }
 
 /** Where one row sits in its tool span. */

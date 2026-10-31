@@ -3,6 +3,7 @@ import type { ClaudeRowContext, ClaudeToolRow } from './toolCommon'
 import type { RowExtractionInput } from '~/components/chat/rowExtractionTypes'
 import type { ParsedMessageContent } from '~/lib/messageParser'
 import { joinContentParagraphs } from '~/lib/contentBlocks'
+import { parseImageBlock } from '~/lib/imageBlocks'
 import { pickObject } from '~/lib/jsonPick'
 import { leapmuxPlanExecutionRow, leapmuxUserRow } from '../../../leapmuxRows'
 import { toolCallRow } from '../../../model/row'
@@ -60,7 +61,12 @@ export function claudeExtractRow(input: RowExtractionInput): ChatRow | null {
  */
 function claudeAssistantRow(payload: Record<string, unknown> | undefined, block: 'text' | 'thinking'): ChatRow {
   const content = getMessageContentArray(payload)
-  const text = content ? joinContentParagraphs(content, { [block]: block }) : ''
+  const nativeContent = pickObject(payload, 'message')?.content
+  const text = content
+    ? joinContentParagraphs(content, { [block]: block })
+    : payload?.type === 'assistant' && block === 'text' && typeof nativeContent === 'string'
+      ? nativeContent
+      : ''
   if (!text)
     return { kind: 'hidden' }
   return block === 'text' ? { kind: 'assistant-text', text } : { kind: 'assistant-thinking', text }
@@ -80,8 +86,19 @@ function claudeUserTextRow(payload: Record<string, unknown> | undefined): ChatRo
     return null
   const raw = message.content
   if (Array.isArray(raw)) {
-    const text = joinContentParagraphs(raw, { text: 'text' })
-    return text ? { kind: 'user', text, attachments: [] } : { kind: 'hidden' }
+    // Images have their own attachment renderer; do not also embed them in text.
+    const text = joinContentParagraphs(raw, { text: 'text' }, () => null)
+    const attachments = raw.flatMap((block) => {
+      const image = parseImageBlock(block)
+      if (!image)
+        return []
+      // Saved image bytes can render in the passive viewer. Paths and remote
+      // URLs never become file reads or implicit network requests from a chat.
+      const { filePath: _filePath, url, ...inline } = image
+      const safeImage = url?.startsWith('data:') ? { ...inline, url } : inline
+      return [{ ...(image.mimeType ? { mimeType: image.mimeType } : {}), image: safeImage }]
+    })
+    return text || attachments.length ? { kind: 'user', text, attachments } : { kind: 'hidden' }
   }
   if (typeof raw !== 'string')
     return null

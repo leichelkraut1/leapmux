@@ -19,11 +19,9 @@ type codexProvider struct {
 	agent.ProviderDefaults
 }
 
-// LeapMux currently sends text and image blocks through this provider.
-// Native audio inputs are not integrated: https://github.com/leapmux/leapmux/issues/498.
-func (codexProvider) ValidateAttachment(attachment agent.ClassifiedAttachment) error {
-	return providerkit.RejectPDFAndBinaryAttachment("codex", attachment)
-}
+// Native text and image inputs retain their transport. PDFs and other files
+// use private durable Worker files with text references for native tools.
+// This does not claim native audio or other multimodal input support.
 
 func (p codexProvider) ResolveControlResponse(ctx agent.ControlResponseContext) agent.ControlResponseResolution {
 	if result, ok := providerkit.ResolveMCPElicitationResponse(ctx, contracts.MCPElicitationMethodCodex, codexMCPElicitationMeta); ok {

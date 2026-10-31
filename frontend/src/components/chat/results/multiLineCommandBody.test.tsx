@@ -69,6 +69,21 @@ describe('CommandInputSummary', () => {
     restore()
   })
 
+  it('preserves every command line when the compact summary is expanded and collapsed', () => {
+    const [collapsed, setCollapsed] = createSignal(true)
+    const command = 'printf first\nprintf second\nprintf last'
+    const view = render(() => <CommandInputSummary command={command} collapsed={collapsed()} />)
+    const summary = () => view.container.firstElementChild
+    expect(summary()).toHaveAttribute('data-command-input-collapsed', '')
+    expect(summary()?.textContent).toBe(command)
+    setCollapsed(false)
+    expect(summary()).not.toHaveAttribute('data-command-input-collapsed')
+    expect(summary()?.textContent).toBe(command)
+    setCollapsed(true)
+    expect(summary()).toHaveAttribute('data-command-input-collapsed', '')
+    expect(summary()?.textContent).toBe(command)
+  })
+
   it('reports nothing for a summary that mounts expanded', () => {
     const { reported, restore } = mountSummary({ scroll: 120, client: 40 }, false)
     expect(reported).toEqual([])

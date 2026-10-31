@@ -87,6 +87,10 @@ func registerAgentHandlers(d registrar, svc *Service) {
 				sendInvalidArgument(sender, err.Error())
 				return
 			}
+			if err := validateWorkflowBinding(r.GetWorkflow()); err != nil {
+				sendInvalidArgument(sender, err.Error())
+				return
+			}
 
 			// A client-set title is CLEANED, never refused, with the rule
 			// that validate.CleanName documents. RenameAgent,
@@ -206,7 +210,7 @@ func registerAgentHandlers(d registrar, svc *Service) {
 			}, resumeSessionID); err != nil {
 				// The row does not exist, so no startup will ever run for it.
 				svc.AgentStartup.abandon(startupHandle)
-				if errors.Is(err, errNativeSessionAlreadyOpen) {
+				if errors.Is(err, errNativeSessionAlreadyOpen) || errors.Is(err, errNativeSessionExternallyControlled) {
 					sendFailedPrecondition(sender, err.Error())
 					return
 				}
@@ -230,6 +234,23 @@ func registerAgentHandlers(d registrar, svc *Service) {
 				return
 			}
 
+			// A workflow agent's binding is durable BEFORE its socket exists, so
+			// the coordinator's FindWorkflowAgents finds the agent even if this
+			// worker restarts mid-open, and every relaunch re-applies the
+			// confinement from the same row.
+			if binding := r.GetWorkflow(); binding != nil {
+				if err := svc.Workflows.Store().PutBinding(bgCtx(), agentID, binding); err != nil {
+					slog.Error("failed to record workflow binding", "agent_id", agentID, "error", err)
+					if _, closeErr := svc.Queries.CloseAgent(bgCtx(), agentID); closeErr != nil {
+						slog.Warn("failed to close the agent whose binding was not recorded", "agent_id", agentID, "error", closeErr)
+					}
+					svc.agentCleanups.abandonClaim(agentID)
+					svc.AgentStartup.abandon(startupHandle)
+					sendInternalError(sender, "failed to record workflow binding")
+					return
+				}
+			}
+
 			remoteEnvs, _, err := svc.spawnControlIPC(string(tabKindAgent), agentID, "", svc.agentCleanups.register, func() ([]string, func(), error) {
 				return svc.ControlIPC.AgentSpawning(AgentSpawnInfo{
 					UserID:        caller.UserID,
@@ -237,6 +258,7 @@ func registerAgentHandlers(d registrar, svc *Service) {
 					TabID:         agentID,
 					WorkingDir:    plan.PlannedWorkingDir,
 					AgentProvider: agentlabels.CLIAlias(agentProvider),
+					Workflow:      r.GetWorkflow(),
 				})
 			})
 			if err != nil {

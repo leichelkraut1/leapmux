@@ -35,6 +35,7 @@ const fakes = vi.hoisted(() => {
 })
 
 vi.mock('./ui', () => ({
+  revealActivityTarget: vi.fn(async () => {}),
   bandRows: (_page: Page, kind?: string) => fakes.locator(`${kind ?? 'all'} rows`),
   expectRowsInOrder: async (rows: { description: string }, texts: readonly string[]) => {
     recorded.events.push(`order ${rows.description}: ${texts.join(' | ')}`)

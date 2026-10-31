@@ -131,7 +131,7 @@ export interface UseTabHydratorsOpts {
   settingsPendingAxes?: (agentId: string) => ReadonlySet<string>
 }
 
-export function useTabHydrators(opts: UseTabHydratorsOpts): void {
+export function useTabHydrators(opts: UseTabHydratorsOpts): { refreshWorkerAgents: (workerId: string) => void } {
   type Tab = ReturnType<typeof opts.view.all>[number]
   const hydratableTabs = (): Tab[] => hydratableTabsOf(opts.view)
   const resolveHydratable = (tab: Tab): Tab | undefined => resolveHydratableIn(opts.view, tab)
@@ -159,6 +159,7 @@ export function useTabHydrators(opts: UseTabHydratorsOpts): void {
    * the reply through `resolveSettingsTabFields`; see `settingsPendingAxes`.
    */
   const [reaskAgentTabIds, setReaskAgentTabIds] = createSignal<ReadonlySet<string>>(new Set())
+  const agentRefreshEpochs = new Map<string, number>()
 
   const dropReask = (tabIds: Iterable<string>) => {
     setReaskAgentTabIds((prev) => {
@@ -210,7 +211,7 @@ export function useTabHydrators(opts: UseTabHydratorsOpts): void {
   }
   type HydrationSpec = PerTabSpec | BatchedSpec
 
-  function createTabHydration(spec: HydrationSpec): void {
+  function createTabHydration(spec: HydrationSpec): { refreshWorker: (workerId: string) => void } {
     const inflight = new Set<string>()
     // Per-tab retry: a single RPC failure (e.g. worker channel still
     // handshaking after a page refresh) would otherwise leave the tab
@@ -466,6 +467,15 @@ export function useTabHydrators(opts: UseTabHydratorsOpts): void {
         })
       })
     }
+
+    return {
+      refreshWorker(workerId) {
+        if (spec.kind !== 'batched')
+          return
+        retry.reset(workerId)
+        void runForBatch(workerId, pendingForWorker(workerId))
+      },
+    }
   }
 
   /**
@@ -580,14 +590,19 @@ export function useTabHydrators(opts: UseTabHydratorsOpts): void {
   // tile/position/worker fields. Batched per worker so opening a
   // workspace with N agents on the same worker costs one ListAgents
   // call instead of N.
-  createTabHydration({
+  const agentHydration = createTabHydration({
     kind: 'batched',
     predicate: tab => tab.type === TabType.AGENT
       && Boolean(tab.workerId)
       && (!isHydrated(tab.id) || reaskAgentTabIds().has(tab.id)),
     fetchBatch: async (workerId, tabs) => {
       const landed = watchLiveWrites(opts.metadata, tabs.map(t => t.id))
+      const refreshEpoch = agentRefreshEpochs.get(workerId)
+      const activityRevisions = new Map(tabs.map(t => [t.id, opts.agentActivityStore.revision(t.id)]))
       const resp = await listAgents(workerId, { tabIds: tabs.map(t => t.id) })
+      // A reconnect supersedes an older in-flight snapshot, including its settings.
+      if (refreshEpoch !== agentRefreshEpochs.get(workerId))
+        return { resolved: new Set<string>(), verdicts: [] }
       const byId = new Map(resp.agents.map(a => [a.id, a]))
       const resolved = new Set<string>()
       // The ask happened, so drop the re-ask marks whatever the reply says. A
@@ -658,7 +673,8 @@ export function useTabHydrators(opts: UseTabHydratorsOpts): void {
         // no spinner for the rest of
         // the turn. The exact value belongs to the close guard,
         // which fetches it at the moment of the close (see createTabBusyProbe).
-        opts.agentActivityStore.seedPublished(tab.id, agent.publishedActivityState)
+        if (activityRevisions.get(tab.id) === opts.agentActivityStore.revision(tab.id))
+          opts.agentActivityStore.seedPublished(tab.id, agent.publishedActivityState)
         resolved.add(tab.id)
       }
       return { resolved, verdicts: resp.verdicts }
@@ -718,4 +734,22 @@ export function useTabHydrators(opts: UseTabHydratorsOpts): void {
       return { resolved, verdicts: resp.verdicts }
     },
   })
+
+  return {
+    refreshWorkerAgents(workerId) {
+      // NOTIFY subscriptions do not replay activity on reconnect. Reuse the
+      // account-wide agent hydration path once, without restarting any agent.
+      agentRefreshEpochs.set(workerId, (agentRefreshEpochs.get(workerId) ?? 0) + 1)
+      const ids = opts.view.all()
+        .filter(tab => tab.type === TabType.AGENT && tab.workerId === workerId)
+        .map(tab => tab.id)
+      if (ids.length === 0)
+        return
+      for (const id of ids)
+        opts.agentActivityStore.forget(id)
+      setReaskAgentTabIds(prev => new Set([...prev, ...ids]))
+      // Also restores an exhausted budget when membership did not change.
+      agentHydration.refreshWorker(workerId)
+    },
+  }
 }

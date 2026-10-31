@@ -361,6 +361,25 @@ var ownerGuardedProbes = func() []ownerGuardedProbe {
 				Agents: []*leapmuxv1.WatchAgentEntry{{AgentId: "agent-1"}},
 			}
 		}},
+		ownerGuardedProbe{"InspectNativeAgentProcesses", "InspectNativeAgentProcesses", func() proto.Message {
+			return &leapmuxv1.InspectNativeAgentProcessesRequest{}
+		}},
+		ownerGuardedProbe{"ReadNativeConversation", "ReadNativeConversation", func() proto.Message {
+			return &leapmuxv1.ReadNativeConversationRequest{
+				AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX,
+				SessionId:     "00000000-0000-0000-0000-000000000001",
+				Direction:     "latest",
+			}
+		}},
+		ownerGuardedProbe{"InspectNativeSessionControl", "InspectNativeSessionControl", func() proto.Message {
+			return &leapmuxv1.InspectNativeSessionControlRequest{AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, SessionId: "generated-session"}
+		}},
+		ownerGuardedProbe{"SendNativeSessionInput", "SendNativeSessionInput", func() proto.Message {
+			return &leapmuxv1.SendNativeSessionInputRequest{AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, SessionId: "generated-session", BindingToken: "generated-opaque-binding", RequestId: "generated-request", Text: "harmless generated marker"}
+		}},
+		ownerGuardedProbe{"InterruptNativeSession", "InterruptNativeSession", func() proto.Message {
+			return &leapmuxv1.InterruptNativeSessionRequest{AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, SessionId: "generated-session", BindingToken: "generated-opaque-binding", RequestId: "generated-request", ExpectedTurnId: "generated-turn"}
+		}},
 		ownerGuardedProbe{"ListAgentSessions", "ListAgentSessions", func() proto.Message {
 			return &leapmuxv1.ListAgentSessionsRequest{
 				AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE,
@@ -456,6 +475,73 @@ var ownerGuardedProbes = func() []ownerGuardedProbe {
 			return &leapmuxv1.GrantTunnelReadCreditRequest{ConnId: "conn-1", Credit: 4}
 		}},
 	)
+	// Workflows: the user's methods, the coordinator's question to a hosting
+	// worker, and the participant methods. Each request is populated so a
+	// stranger is refused with work it would otherwise have had to do.
+	workflowAuth := &leapmuxv1.WorkflowAgentAuth{RunId: "run-1", Token: "token"}
+	for _, p := range []struct {
+		method string
+		req    func() proto.Message
+	}{
+		{"ListWorkflowLibrary", func() proto.Message { return &leapmuxv1.ListWorkflowLibraryRequest{} }},
+		{"SaveAgentProfile", func() proto.Message {
+			return &leapmuxv1.SaveAgentProfileRequest{Profile: &leapmuxv1.AgentProfile{Name: "p", AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX}}
+		}},
+		{"DeleteAgentProfile", func() proto.Message { return &leapmuxv1.DeleteAgentProfileRequest{ProfileId: "p-1"} }},
+		{"SaveWorkflowTemplate", func() proto.Message {
+			return &leapmuxv1.SaveWorkflowTemplateRequest{Template: &leapmuxv1.WorkflowTemplate{Name: "t"}}
+		}},
+		{"DeleteWorkflowTemplate", func() proto.Message { return &leapmuxv1.DeleteWorkflowTemplateRequest{TemplateId: "t-1"} }},
+		{"ExportWorkflowTemplate", func() proto.Message { return &leapmuxv1.ExportWorkflowTemplateRequest{TemplateId: "t-1"} }},
+		{"ImportWorkflowTemplate", func() proto.Message { return &leapmuxv1.ImportWorkflowTemplateRequest{Document: "template: {name: t}"} }},
+		{"InstallExampleWorkflow", func() proto.Message { return &leapmuxv1.InstallExampleWorkflowRequest{} }},
+		{"CreateWorkflowRun", func() proto.Message {
+			return &leapmuxv1.CreateWorkflowRunRequest{Objective: "x", WorkingDir: "/tmp", WorkspaceId: "ws-1"}
+		}},
+		{"AttachWorkflowLead", func() proto.Message { return &leapmuxv1.AttachWorkflowLeadRequest{RunId: "run-1", AgentId: "agent-1"} }},
+		{"ListWorkflowRuns", func() proto.Message { return &leapmuxv1.ListWorkflowRunsRequest{} }},
+		{"GetWorkflowRun", func() proto.Message { return &leapmuxv1.GetWorkflowRunRequest{RunId: "run-1"} }},
+		{"ControlWorkflowRun", func() proto.Message {
+			return &leapmuxv1.ControlWorkflowRunRequest{RunId: "run-1", Action: leapmuxv1.WorkflowRunAction_WORKFLOW_RUN_ACTION_CANCEL}
+		}},
+		{"ControlWorkflowTask", func() proto.Message {
+			return &leapmuxv1.ControlWorkflowTaskRequest{RunId: "run-1", TaskId: "task-1", Action: leapmuxv1.WorkflowTaskAction_WORKFLOW_TASK_ACTION_RETRY}
+		}},
+		{"UpdateWorkflowRole", func() proto.Message {
+			return &leapmuxv1.UpdateWorkflowRoleRequest{RunId: "run-1", Override: &leapmuxv1.WorkflowRoleOverride{RoleKey: "builder"}}
+		}},
+		{"DecideWorkflowApproval", func() proto.Message {
+			return &leapmuxv1.DecideWorkflowApprovalRequest{RunId: "run-1", ApprovalId: "a-1", Approve: true}
+		}},
+		{"SendWorkflowAgentMessage", func() proto.Message {
+			return &leapmuxv1.SendWorkflowAgentMessageRequest{RunId: "run-1", SlotId: "slot-1", Text: "x"}
+		}},
+		{"FindWorkflowAgents", func() proto.Message { return &leapmuxv1.FindWorkflowAgentsRequest{RunId: "run-1"} }},
+		{"WorkflowAgentContext", func() proto.Message { return &leapmuxv1.WorkflowAgentContextRequest{Auth: workflowAuth} }},
+		{"WorkflowAgentDelegate", func() proto.Message {
+			return &leapmuxv1.WorkflowAgentDelegateRequest{Auth: workflowAuth, RoleKey: "builder", Title: "t", Instructions: "x"}
+		}},
+		{"WorkflowAgentSend", func() proto.Message {
+			return &leapmuxv1.WorkflowAgentSendRequest{Auth: workflowAuth, TaskId: "task-1", Text: "x"}
+		}},
+		{"WorkflowAgentReport", func() proto.Message {
+			return &leapmuxv1.WorkflowAgentReportRequest{Auth: workflowAuth, TaskId: "task-1", Result: &leapmuxv1.WorkflowTaskResult{Summary: "x"}}
+		}},
+		{"WorkflowAgentProgress", func() proto.Message {
+			return &leapmuxv1.WorkflowAgentProgressRequest{Auth: workflowAuth, TaskId: "task-1", Note: "x"}
+		}},
+		{"WorkflowAgentReview", func() proto.Message {
+			return &leapmuxv1.WorkflowAgentReviewRequest{Auth: workflowAuth, TaskId: "task-1", Accept: true}
+		}},
+		{"WorkflowAgentRequestApproval", func() proto.Message {
+			return &leapmuxv1.WorkflowAgentRequestApprovalRequest{Auth: workflowAuth, Title: "Merge"}
+		}},
+		{"WorkflowAgentComplete", func() proto.Message {
+			return &leapmuxv1.WorkflowAgentCompleteRequest{Auth: workflowAuth, Summary: "done"}
+		}},
+	} {
+		probes = append(probes, ownerGuardedProbe{p.method, p.method, p.req})
+	}
 	return probes
 }()
 

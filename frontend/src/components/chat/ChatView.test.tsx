@@ -21,6 +21,14 @@ import { ROW_BLEED_LEFT_VAR, rowBleedLeftStyle } from './widgets/SpanLines.geome
 
 const A_TXT_RE = /a\.txt/
 
+/** Tests of inner tool rendering open the same disclosure a reader opens. */
+function renderExpandedActivity(ui: Parameters<typeof render>[0]) {
+  const view = render(ui)
+  for (const button of screen.queryAllByRole('button', { name: /^Expand activity \(/ }))
+    fireEvent.click(button)
+  return view
+}
+
 type HiddenPremeasureOnMeasure = (id: string, height: number, heightKey: string | undefined, measureDurationMs: number, settled: boolean) => boolean
 
 // ChatView is exercised by two complementary unit suites in this file. The
@@ -45,7 +53,7 @@ const mockState = vi.hoisted(() => ({
    * momentum, relight" -- which is what invoking `onMomentumScroll` pins here.
    * The classification itself belongs to the hook's own tests.
    */
-  scrollOpts: undefined as undefined | { onMomentumScroll?: () => void },
+  scrollOpts: undefined as undefined | { onMomentumScroll?: () => void, revealMessage?: ((seq: bigint | undefined, id?: string) => void) | undefined },
 }))
 
 const virtualizerState = vi.hoisted(() => ({
@@ -201,6 +209,7 @@ vi.mock('./useChatScroll', async () => {
         getScrollState: () => undefined,
         forceScrollToBottom: vi.fn(),
         pageScroll: vi.fn(),
+        anchorRowForResize: vi.fn(),
       }
     },
   }
@@ -640,6 +649,7 @@ describe('ChatView', () => {
     ]
     const messageContext = testMessageContext({ messages: () => messages })
     const view = render(() => <PreferencesProvider><ChatView messages={messages} messageContext={messageContext} /></PreferencesProvider>)
+    expect(screen.queryByTestId('activity-group-toggle')).toBeNull()
     await reportChatViewportSize(view)
     const row = (seq: number) => {
       const element = view.container.querySelector(`[data-seq="${seq}"]`)
@@ -748,7 +758,7 @@ describe('ChatView', () => {
     })
     const fetchSpan = vi.fn(async () => [request, result])
     const messageContext = testMessageContext({ messages: () => [result], fetchSpan })
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={[result]} messageContext={messageContext} />
       </PreferencesProvider>
@@ -1023,7 +1033,7 @@ describe('ChatView', () => {
       withContent('m3', { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } }, 3n),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1173,7 +1183,7 @@ describe('ChatView', () => {
     ]
     let setMessages!: (messages: AgentChatMessage[]) => void
 
-    render(() => {
+    renderExpandedActivity(() => {
       const [messages, updateMessages] = createSignal(initialMessages)
       setMessages = updateMessages
       return (
@@ -1695,13 +1705,115 @@ describe('ChatView', () => {
     expect(onLoadOlderMessages).toHaveBeenCalledTimes(2)
   })
 
+  it('collapses consecutive native activity while leaving the final reply and its code visible', () => {
+    const command = makeCodexCommandMessage({ id: 'activity-command', seq: 2n, spanId: 'call', status: 'completed', aggregatedOutput: 'command output' })
+    const thought = makeCodexReasoningMessage({ id: 'activity-thought', seq: 1n, spanId: 'thought', summary: ['Reasoning details'] })
+    const answer = { ...makeMessage('assistant', 'Final answer\n\n```ts\nconst answer = 42\n```', 'answer'), seq: 3n }
+    const view = render(() => <PreferencesProvider><ChatView messages={[thought, command, answer]} /></PreferencesProvider>)
+    const button = screen.getByRole('button', { name: 'Expand activity (2 messages)' })
+    expect(button).toHaveTextContent('Activity')
+    expect(view.container).not.toHaveTextContent('command output')
+    expect(view.container).not.toHaveTextContent('Reasoning details')
+    expect(view.container).toHaveTextContent('Final answer')
+    expect(view.container).toHaveTextContent('const answer = 42')
+    expect([...view.container.querySelectorAll('[data-seq]')].map(row => row.getAttribute('data-seq'))).toEqual(['1', '3'])
+    fireEvent.click(button)
+    expect(view.container).toHaveTextContent('command output')
+    expect(view.container).toHaveTextContent('Reasoning details')
+    expect([...view.container.querySelectorAll('[data-seq]')].map(row => row.getAttribute('data-seq'))).toEqual(['1', '2', '3'])
+  })
+
+  it('keeps an explicitly opened activity group open as native output appends', () => {
+    // The global synchronous rAF stub recurses in the live indicator's timed loop.
+    // This fixture verifies controls and folding; real animation runs in browser tests.
+    const animationFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(0)
+    let view: ReturnType<typeof render> | undefined
+    try {
+      const initial = makeCodexCommandMessage({ id: 'activity-start', seq: 1n, spanId: 'call', status: 'inProgress' })
+      const [messages, setMessages] = createSignal([initial])
+      const [working, setWorking] = createSignal(true)
+      view = render(() => <PreferencesProvider><ChatView messages={messages()} agentLifecycle={{ agentWorking: working() }} /></PreferencesProvider>)
+      const button = screen.getByRole('button', { name: 'Expand activity (1 message)' })
+      expect(button).toHaveTextContent('Working')
+      fireEvent.click(button)
+      setMessages([initial, makeCodexCommandMessage({ id: 'activity-end', seq: 2n, spanId: 'call', status: 'completed', aggregatedOutput: 'retained result' })])
+      expect(screen.getByRole('button', { name: 'Collapse activity (2 messages)' })).toBe(button)
+      expect(view.container).toHaveTextContent('retained result')
+      setWorking(false)
+      expect(button).toHaveTextContent('Activity')
+      fireEvent.click(button)
+      expect(view.container).not.toHaveTextContent('retained result')
+      expect(screen.getByTestId('thinking-indicator')).not.toBeVisible()
+    }
+    finally {
+      view?.unmount()
+      animationFrame.mockRestore()
+    }
+  })
+
+  it('keeps background-task controls usable beside a folded live group', () => {
+    // The global synchronous rAF stub recurses in the live indicator's timed loop.
+    // This fixture verifies controls and folding; real animation runs in browser tests.
+    const animationFrame = vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(0)
+    let view: ReturnType<typeof render> | undefined
+    try {
+      const onOpenSubagent = vi.fn()
+      const command = makeCodexCommandMessage({ id: 'working-tool', seq: 1n, spanId: 'call', status: 'inProgress' })
+      view = render(() => (
+        <PreferencesProvider>
+          <ChatView
+            messages={[command]}
+            agentLifecycle={{
+              agentWorking: true,
+              backgroundTasks: [{ rowKey: 'child-task', childAgentId: 'child', kind: 'subagent', title: 'Running checks', activity: '', status: 'running' }],
+              onOpenSubagent,
+            }}
+          />
+        </PreferencesProvider>
+      ))
+      expect(screen.getByRole('button', { name: 'Expand activity (1 message)' })).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.getByTestId('thinking-bg-tasks-chip')).toHaveTextContent('1 background task')
+      expect(screen.getAllByTestId('thinking-indicator')).toHaveLength(1)
+      fireEvent.click(screen.getByTestId('thinking-bg-tasks-chip'))
+      fireEvent.click(screen.getByTestId('bg-task-row'))
+      expect(onOpenSubagent).toHaveBeenCalledWith(expect.objectContaining({ childAgentId: 'child' }))
+    }
+    finally {
+      view?.unmount()
+      animationFrame.mockRestore()
+    }
+  })
+
+  it('folds claude tools but keeps questions and failed commands outside the group', () => {
+    const claude = (id: string, seq: bigint, name: string, input: unknown) => create(AgentChatMessageSchema, {
+      id,
+      seq,
+      contentCompression: ContentCompression.NONE,
+      source: MessageSource.AGENT,
+      agentProvider: AgentProvider.CLAUDE_CODE,
+      spanId: id,
+      spanType: name,
+      content: new TextEncoder().encode(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } })),
+    })
+    const messages = [
+      claude('read', 1n, 'Bash', { command: 'echo hidden-command' }),
+      claude('question', 2n, 'AskUserQuestion', { questions: [{ question: 'Choose a branch', header: 'Branch', options: [{ label: 'A', description: 'First' }, { label: 'B', description: 'Second' }], multiSelect: false }] }),
+      makeCodexCommandMessage({ id: 'failed', seq: 3n, spanId: 'failure', status: 'failed', exitCode: 1, aggregatedOutput: 'visible failure' }),
+    ]
+    const view = render(() => <PreferencesProvider><ChatView messages={messages} /></PreferencesProvider>)
+    expect(screen.getByRole('button', { name: 'Expand activity (1 message)' })).toBeInTheDocument()
+    expect(view.container).not.toHaveTextContent('hidden-command')
+    expect(view.container).toHaveTextContent('Choose a branch')
+    expect(view.container).toHaveTextContent('visible failure')
+  })
+
   it('keeps both codex commandExecution start and completed messages in history', () => {
     const messages = [
       makeCodexCommandMessage({ id: 'cmd-start', seq: 1n, spanId: 'cmd-1', status: 'inProgress' }),
       makeCodexCommandMessage({ id: 'cmd-done', seq: 2n, spanId: 'cmd-1', status: 'completed', aggregatedOutput: 'done\n' }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1723,7 +1835,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1754,7 +1866,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1779,7 +1891,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1795,7 +1907,7 @@ describe('ChatView', () => {
       makeCodexFileChangeMessage({ id: 'fc-done', seq: 2n, spanId: 'fc-1', status: 'completed' }),
     ]
 
-    render(() => (
+    renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1821,7 +1933,7 @@ describe('ChatView', () => {
     ]
     const messageContext = testMessageContext({ messages: () => messages })
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} messageContext={messageContext} />
       </PreferencesProvider>
@@ -1843,7 +1955,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1861,7 +1973,7 @@ describe('ChatView', () => {
       makeCodexFileChangeMessage({ id: 'fc-done', seq: 1n, spanId: 'fc-1', status: 'completed' }),
     ]
 
-    render(() => (
+    renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1886,7 +1998,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1911,7 +2023,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1932,7 +2044,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1953,7 +2065,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1978,7 +2090,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -1997,7 +2109,7 @@ describe('ChatView', () => {
       makeCodexFileChangeMessage({ id: 'fc-done', seq: 1n, spanId: 'fc-1', status: 'completed' }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2023,7 +2135,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2047,7 +2159,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    render(() => (
+    renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2067,7 +2179,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2090,7 +2202,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2117,7 +2229,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2143,7 +2255,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2161,7 +2273,7 @@ describe('ChatView', () => {
       makeCodexReasoningMessage({ id: 'reason-done', seq: 1n, spanId: 'reason-1', summary: ['done'] }),
     ]
 
-    render(() => (
+    renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2180,7 +2292,7 @@ describe('ChatView', () => {
       makeCodexReasoningMessage({ id: 'reason-done', seq: 2n, spanId: 'reason-1', summary: ['done'] }),
     ]
 
-    render(() => (
+    renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2203,7 +2315,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2228,7 +2340,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2258,7 +2370,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2291,7 +2403,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2318,7 +2430,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    const view = render(() => (
+    const view = renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2341,7 +2453,7 @@ describe('ChatView', () => {
       }),
     ]
 
-    render(() => (
+    renderExpandedActivity(() => (
       <PreferencesProvider>
         <ChatView messages={messages} />
       </PreferencesProvider>
@@ -2372,6 +2484,38 @@ describe('chat view virtualized with stubbed deps', () => {
   })
 
   describe('chat view virtualized visible slice', () => {
+    it('measures only the collapsed header and reveals an exact hidden target before navigation', async () => {
+      virtualizerState.attachedIds = []
+      virtualizerState.measuredIds = new Set()
+      virtualizerState.currentHeightKeys = new Map()
+      hiddenPremeasureState.candidates = []
+      virtualizerState.setRange?.({ start: 0, end: 3 })
+      const messages = [
+        makeCodexCommandMessage({ id: 'm0', seq: 1n, spanId: 'call', status: 'inProgress' }),
+        makeCodexCommandMessage({ id: 'm1', seq: 2n, spanId: 'call', status: 'completed', aggregatedOutput: 'done' }),
+        { ...makeMessage('assistant', 'Answer', 'm2'), seq: 3n },
+      ]
+      const { container } = render(() => <ChatView messages={messages} />)
+      await waitFor(() => {
+        expect(hiddenPremeasureState.candidates.map(candidate => candidate.item.id)).toEqual(['m0', 'm2'])
+      })
+      const collapsedKey = virtualizerState.currentHeightKeys.get('m0')
+      expect(container.querySelector('[data-seq="2"]')).toBeNull()
+      expect(container.querySelector('[data-seq="1"] [data-testid="mock-message-bubble"]')).toBeNull()
+      const reveal = mockState.scrollOpts?.revealMessage
+      expect(reveal).toBeTypeOf('function')
+      reveal?.(2n)
+      await waitFor(() => {
+        expect(hiddenPremeasureState.candidates.map(candidate => candidate.item.id)).toEqual(['m0', 'm1', 'm2'])
+      })
+      expect(virtualizerState.currentHeightKeys.get('m0')).not.toBe(collapsedKey)
+      expect(container.querySelector('[data-seq="2"] [data-message-id="m1"]')).not.toBeNull()
+      const headers = container.querySelectorAll('[data-testid="activity-group-toggle"]')
+      expect(headers).toHaveLength(2) // visible and hidden measurement use one rendering path
+      for (const header of headers)
+        expect(header).toHaveAttribute('aria-expanded', 'true')
+    })
+
     it('does not mount rows between stale pending premeasure ids and the current viewport range', async () => {
       virtualizerState.attachedIds = []
       virtualizerState.measuredIds = new Set()

@@ -33,6 +33,7 @@ import (
 	"github.com/leapmux/leapmux/internal/worker/inputqueue"
 	"github.com/leapmux/leapmux/internal/worker/terminal"
 	"github.com/leapmux/leapmux/internal/worker/wakelock"
+	"github.com/leapmux/leapmux/internal/worker/workflow"
 	"github.com/leapmux/leapmux/util/pathutil"
 	"github.com/leapmux/leapmux/util/validate"
 	"google.golang.org/grpc/codes"
@@ -71,6 +72,10 @@ type Service struct {
 	Watchers   *WatcherManager // Fan-out manager for event broadcasting
 	Output     *OutputHandler  // Agent output NDJSON processor
 	InputQueue *inputqueue.Manager
+	// Workflows coordinates the workflow runs whose Lead this worker hosts,
+	// and keeps the bindings of the workflow agents it hosts. Bootstrap
+	// installs its platform and runs its loop.
+	Workflows *workflow.Engine
 
 	// RemoteIPC supplies per-agent local-IPC servers for the
 	// `leapmux control` CLI. Nil disables remote control (env vars are
@@ -158,6 +163,9 @@ type Service struct {
 	nativeTurnRestartMu sync.Mutex
 	nativeTurnRestarts  map[string]struct{}
 	nativeTurnRestartWG sync.WaitGroup
+
+	// Serialize native input with the durable claim of a managed resume.
+	nativeControlAdmissions nativeControlAdmission
 
 	// tunnels is the worker-singleton tunnel manager built in RegisterAll. It
 	// owns the half-closed idle reaper goroutine, which Shutdown stops for clean
@@ -596,6 +604,9 @@ func New(cfg Config) *Service {
 		TerminalStartup: newTerminalStartupRegistry(cfg.Clock),
 		PrivateEvents:   NewPrivateEventsBus(),
 		lastBellAt:      make(map[string]time.Time),
+		Workflows: workflow.New(workflow.Config{
+			DB: cfg.DB, WorkerID: cfg.WorkerID, Clock: cfg.Clock, Capabilities: workerCapabilities,
+		}),
 	}
 	// The seed is config data, so it is minted here -- the one place the raw
 	// string exists -- rather than inside the setter.
@@ -1477,7 +1488,11 @@ func registerAllClassified(d *channel.Dispatcher, svc *Service) (map[string]meth
 	registerTerminalHandlers(r, svc)
 	registerAgentHandlers(r, svc)
 	registerAgentSessionHandlers(r, svc)
+	registerNativeProcessHandlers(r, svc)
+	registerNativeConversationHandlers(r, svc)
+	registerNativeControlHandlers(r, svc)
 	registerCleanupHandlers(r, svc)
+	registerWorkflowHandlers(r, svc)
 	registerSysInfoHandlers(ownerOnly, svc)
 	tunnels := registerTunnelHandlers(ownerOnly)
 	// Swap in the new manager and Stop the prior one it displaced. A
@@ -1575,6 +1590,10 @@ type protoJSONValue struct{ msg proto.Message }
 
 // LogValue implements slog.LogValuer.
 func (p protoJSONValue) LogValue() slog.Value {
+	switch p.msg.(type) {
+	case *leapmuxv1.SendNativeSessionInputRequest, *leapmuxv1.InterruptNativeSessionRequest, *leapmuxv1.InspectNativeSessionControlResponse:
+		return slog.StringValue("[native chat control payload omitted]")
+	}
 	return slog.StringValue(protojson.Format(p.msg))
 }
 

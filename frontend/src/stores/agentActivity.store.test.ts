@@ -5,6 +5,22 @@ import { activityInterruptsWork, createAgentActivityStore } from '~/stores/agent
 const { WORKING, IDLE, WAITING_FOR_USER } = AgentActivityState
 
 describe('createAgentActivityStore', () => {
+  it('advances snapshot revisions for repeated publications and disconnects', () => {
+    const store = createAgentActivityStore()
+    const initial = store.revision('a1')
+    store.seedPublished('a1', AgentActivityState.IDLE)
+    const seeded = store.revision('a1')
+    expect(seeded).toBeGreaterThan(initial)
+    store.apply('a1', AgentActivityState.IDLE)
+    const repeated = store.revision('a1')
+    expect(repeated).toBeGreaterThan(seeded)
+    store.apply('a1', AgentActivityState.UNSPECIFIED)
+    expect(store.revision('a1')).toBe(repeated)
+    store.forget('a1')
+    expect(store.revision('a1')).toBeGreaterThan(repeated)
+    expect(store.hasPublished('a1')).toBe(false)
+  })
+
   const invalidCases = [AgentActivityState.UNSPECIFIED, -1, -2147483648, 99, 2147483647]
     .flatMap(value => [
       { value, baseline: 'cold', expected: IDLE },
@@ -69,6 +85,24 @@ describe('createAgentActivityStore', () => {
 
     // An unreported agent uses the idle default without a spinner.
     expect(store.isBusy('never-seen')).toBe(false)
+  })
+
+  it('distinguishes a confirmed idle level from an unreported or disconnected agent', () => {
+    const store = createAgentActivityStore()
+    expect(store.hasPublished('a1')).toBe(false)
+    store.apply('a1', AgentActivityState.UNSPECIFIED)
+    store.seedPublished('a1', AgentActivityState.UNSPECIFIED)
+    expect(store.hasPublished('a1')).toBe(false)
+
+    store.apply('a1', IDLE)
+    expect(store.hasPublished('a1')).toBe(true)
+    store.forget('a1')
+    expect(store.hasPublished('a1')).toBe(false)
+
+    store.seedPublished('a1', WAITING_FOR_USER)
+    expect(store.hasPublished('a1')).toBe(true)
+    store.apply('a1', AgentActivityState.UNSPECIFIED)
+    expect(store.hasPublished('a1')).toBe(true)
   })
 
   it('holds what the worker last said', () => {

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "native-session-control.schema.json",
+  "title": "native session control bounds",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_readme", "MaxTextBytes", "LeaseSeconds", "PollMilliseconds"],
+  "properties": {
+    "_readme": { "type": "string", "minLength": 1 },
+    "MaxTextBytes": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+    "LeaseSeconds": { "type": "integer", "minimum": 5, "maximum": 120 },
+    "PollMilliseconds": { "type": "integer", "minimum": 1000, "maximum": 10000 }
+  }
+}

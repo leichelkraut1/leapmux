@@ -69,6 +69,14 @@ export interface WorkerInfoStore {
   getOs: (workerId: string) => string | undefined
 }
 
+function sameStringList(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  if (a === b)
+    return true
+  if (a === undefined || b === undefined || a.length !== b.length)
+    return false
+  return a.every((value, index) => value === b[index])
+}
+
 /**
  * Build a fresh store instance with its own reactive `infoMap`. Use for
  * test isolation; production code reads {@link workerInfoStore} instead.
@@ -214,6 +222,8 @@ export function createWorkerInfoStore(): WorkerInfoStore {
           version: resp.version,
           commitHash: resp.commitHash,
           buildTime: resp.buildTime,
+          // `?? []`: a worker that predates the field answers without it.
+          capabilities: [...(resp.capabilities ?? [])],
           updatedAt: Date.now(),
         }
         setWorkerInfo(workerId, next)
@@ -227,8 +237,13 @@ export function createWorkerInfoStore(): WorkerInfoStore {
       // `updatedAt` alone is not a change worth notifying about: a re-fetch that
       // confirms the same system info would otherwise re-run every reader of
       // this worker on the TTL cadence, for a stamp nothing displays.
+      //
+      // `capabilities` is an array, so a shallow comparison would call every
+      // re-fetch a change. It is compared by element instead, and a confirmed
+      // list keeps the stored one's identity.
       const existing = untrack(() => infoByWorker[workerId])
-      if (!existing || !shallowEqualExcept(existing, info, ['updatedAt']))
+      const sameCapabilities = existing !== undefined && sameStringList(existing.capabilities, info.capabilities)
+      if (!existing || !sameCapabilities || !shallowEqualExcept(existing, info, ['updatedAt', 'capabilities']))
         setInfoByWorker(workerId, info)
     }
     return info

@@ -296,6 +296,8 @@ export interface PaginationCallbacks {
 }
 
 export interface UseChatScrollOptions extends PaginationCallbacks {
+  /** Reveal a collapsed transcript target before resolving its virtual offset. */
+  revealMessage?: ((seq: bigint | undefined, id?: string) => void) | undefined
   messages: Accessor<AgentChatMessage[]>
   messageVersion?: Accessor<number | undefined>
   agentWorking?: Accessor<boolean | undefined>
@@ -1534,6 +1536,7 @@ export function useChatScroll(opts: UseChatScrollOptions): UseChatScrollResult {
     rearmScrollBufferFiller: () => rearmScrollBufferFiller(),
     checkAtBottom,
     onJumpToSeq: opts.onJumpToSeq,
+    revealMessage: opts.revealMessage,
     onSaveViewportScroll: opts.onSaveViewportScroll,
     hasNewerMessages,
   })
@@ -1580,6 +1583,7 @@ export function useChatScroll(opts: UseChatScrollOptions): UseChatScrollResult {
     forceScrollToBottom,
     clearSavedViewportScroll: () => opts.onClearSavedViewportScroll?.(),
     savedViewportScroll: () => opts.savedViewportScroll?.(),
+    revealMessage: opts.revealMessage,
     setSuppressOlder: (v) => { suppressAutoLoadOlderAfterRestore = v },
     setLastScrollTopForDir: (v) => { lastScrollTopForDir = v },
     onGeometrySettled: () => bumpGeomTick(t => t + 1),

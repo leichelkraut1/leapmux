@@ -1,9 +1,11 @@
 import { expect } from '@playwright/test'
 import { test } from './fixtures'
-import { boxCenter, dragSidebarLeafTo } from './helpers/drag'
+import { boxCenter, mouseDragOnto } from './helpers/drag'
+import { settleFrames } from './helpers/frames'
 import { tabbarLabels } from './helpers/tabLabels'
-import { agentTabs, expandWorkspaceRow, expectAgentTabCount, sidebarLeafIds, sidebarLeafLabels, sidebarLeaves, waitForLayoutSave, waitForWorkspaceReady, workspaceRow } from './helpers/ui'
+import { agentTabs, expandWorkspaceRow, expectAgentTabCount, sidebarLeafIds, sidebarLeafLabels, sidebarLeaves, waitForLayoutSave, waitForWorkspaceReady, workspaceRow, workspaceRowTitle } from './helpers/ui'
 import { createWorkspaceWithAgentsViaAPI, showWorkspaceWithAgents } from './helpers/workspace'
+import { moveSidebarTabToWorkspace } from './helpers/workspaceMoveMenu'
 
 /**
  * Regression: dragging a tab from a non-active workspace's expanded
@@ -31,28 +33,26 @@ import { createWorkspaceWithAgentsViaAPI, showWorkspaceWithAgents } from './help
  * filters by key. The dedupe makes the first insert (typically the
  * one with metadata) win.
  *
- * This spec exercises the real drag-and-drop gesture through the
- * sidebar — the unit tests pin the reconciler / addTab contract; this
- * one pins the full UI flow end-to-end and adds a `page.reload()`
- * checkpoint so a future regression that survived in-session would
- * still fail after rehydration from the worker.
+ * The explicit Move to workspace menu uses the same CRDT move. Pointer
+ * attempts on workspace/chat rows must leave their order and membership
+ * unchanged; the menu move must retain metadata and persist after reload.
  */
 
-test.describe('Cross-workspace sidebar drag preserves title and icon', () => {
-  test('drag from non-active sidebar section to active workspace keeps title; survives reload', async ({ page, leapmuxServer }) => {
+test.describe('Cross-workspace sidebar menu move preserves title and icon', () => {
+  test('menu move from a non-active workspace keeps its title and survives reload', async ({ page, leapmuxServer }) => {
     // Give each agent a known title. The bug removes exactly this field.
     // An agent that the API opens has an empty title by default, which
     // shows the empty fallback before the move and after it, so the
     // test could not see the regression.
     const wsATitle = 'Source Agent'
     const wsBTitle = 'Target Agent'
-    const { workspaceId: wsA, agentIds: [wsAAgentId] } = await createWorkspaceWithAgentsViaAPI(leapmuxServer, 'Drag Source', { agentTitles: [wsATitle] })
+    const { workspaceId: wsA, agentIds: [wsAAgentId] } = await createWorkspaceWithAgentsViaAPI(leapmuxServer, 'Move Source', { agentTitles: [wsATitle] })
     if (!wsAAgentId)
       throw new Error('The source workspace opened no agent.')
 
     // Show wsB, the destination. In the original report, the target
     // workspace was active at the time of the drag.
-    const { workspaceId: wsB } = await showWorkspaceWithAgents(page, leapmuxServer, 'Drag Target', { agentTitles: [wsBTitle] })
+    const { workspaceId: wsB } = await showWorkspaceWithAgents(page, leapmuxServer, 'Move Target', { agentTitles: [wsBTitle] })
     await agentTabs(page).first().waitFor()
     // Poll: the title is worker-side metadata, fetched asynchronously after
     // the tab itself renders from the CRDT projection. A one-shot read races
@@ -60,7 +60,7 @@ test.describe('Cross-workspace sidebar drag preserves title and icon', () => {
     await expect.poll(() => tabbarLabels(page, 'agent')).toEqual([wsBTitle])
 
     // Expand wsA in the sidebar so its tab-tree-leaf mounts and is
-    // draggable. The projection already carries wsA's tabs, so the expansion
+    // available. The projection already carries wsA's tabs, so the expansion
     // only shows them.
     await expandWorkspaceRow(page, wsA)
     // One leaf each under wsA (the source) and wsB (the destination --
@@ -71,14 +71,42 @@ test.describe('Cross-workspace sidebar drag preserves title and icon', () => {
     await expect.poll(() => sidebarLeafLabels(page, wsB)).toHaveLength(1)
 
     // Verify wsA's leaf renders with its seeded title before the
-    // drag — confirms the projection + hydrators delivered the metadata
+    // move — confirms the projection + hydrators delivered the metadata
     // we'll be asserting survives the move.
     await expect.poll(() => sidebarLeafLabels(page, wsA)).toEqual([wsATitle])
 
-    // Target: drop on wsB's workspace item in the sidebar (it's the
-    // active workspace, so this is a non-active → active move).
+    const sourceLeaf = sidebarLeaves(page, wsA).first()
+    await expect(workspaceRow(page, wsA).locator('[data-drag-handle]')).toHaveCount(0)
+    await expect(sourceLeaf.locator('[data-drag-handle]')).toHaveCount(0)
+    const section = workspaceRow(page, wsA).locator('..')
+    const workspaceOrder = () => section.locator('[data-testid^="workspace-item-"]')
+      .evaluateAll(rows => rows.map(row => row.getAttribute('data-testid')))
+    const beforeOrder = await workspaceOrder()
+    const sourceIds = await sidebarLeafIds(page, wsA)
+    const targetIds = await sidebarLeafIds(page, wsB)
+
+    // Real pointer travel exceeds the drag activation distance. Neither the
+    // workspace row nor the chat leaf may lift, reorder or change ownership.
+    await mouseDragOnto(page, {
+      from: await boxCenter(workspaceRowTitle(page, wsA)),
+      to: await boxCenter(workspaceRowTitle(page, wsB)),
+      whileLifted: async () => expect(workspaceRow(page, wsA)).not.toHaveClass(/itemDragging/),
+    })
+    await settleFrames(page)
+    expect(await workspaceOrder()).toEqual(beforeOrder)
+    await mouseDragOnto(page, {
+      from: await boxCenter(sourceLeaf),
+      to: await boxCenter(workspaceRowTitle(page, wsB)),
+      whileLifted: async () => expect(sourceLeaf).not.toHaveClass(/tabDragging/),
+    })
+    await settleFrames(page)
+    expect(await workspaceOrder()).toEqual(beforeOrder)
+    expect(await sidebarLeafIds(page, wsA)).toEqual(sourceIds)
+    expect(await sidebarLeafIds(page, wsB)).toEqual(targetIds)
+
+    // The deliberate menu choice performs the non-active → active move.
     const saved = waitForLayoutSave(page)
-    await dragSidebarLeafTo(sidebarLeaves(page, wsA).first(), await boxCenter(workspaceRow(page, wsB)))
+    await moveSidebarTabToWorkspace(page, sourceLeaf, wsB)
     await saved
 
     // wsB's tabbar now has two agent tabs — the original wsBTitle

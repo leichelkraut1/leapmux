@@ -12,6 +12,7 @@ import (
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/util/sqltime"
 	"github.com/leapmux/leapmux/internal/util/testutil"
+	"github.com/leapmux/leapmux/internal/util/userid"
 	"github.com/leapmux/leapmux/internal/worker/agent"
 	"github.com/leapmux/leapmux/internal/worker/agent/providers/claude/claudetest"
 	"github.com/leapmux/leapmux/internal/worker/channel"
@@ -727,7 +728,34 @@ func TestWorkspaceArchive_RefusesEveryWriteRPCOnAnArchivedTab(t *testing.T) {
 		"OpenTerminal":  "creates a tab, so it addresses no archived one",
 		"SetQuakePanel": "addresses the workspace, not one tab",
 	}
+	// A workflow participant method addresses a RUN, named by its credential,
+	// and writes only the coordinator's workflow tables; it names no tab, so
+	// no archive state reaches it. The messages a run sends its agents go
+	// through EnqueueAgentInput, which the table above already covers.
+	for _, method := range WorkflowParticipantMethods {
+		unguarded[method] = "addresses a workflow run, not one tab"
+	}
+	// The owner's workflow methods address the library or a run, likewise.
+	for _, method := range []string{
+		"SaveAgentProfile", "DeleteAgentProfile", "SaveWorkflowTemplate", "DeleteWorkflowTemplate",
+		"ImportWorkflowTemplate", "InstallExampleWorkflow", "CreateWorkflowRun", "AttachWorkflowLead",
+		"ControlWorkflowRun", "ControlWorkflowTask", "UpdateWorkflowRole", "DecideWorkflowApproval",
+		"SendWorkflowAgentMessage",
+	} {
+		unguarded[method] = "addresses the workflow library or a run, not one tab"
+	}
 	_, _, scopes := registerAllClassified(channel.NewDispatcher(), svc)
+	// These write scopes authorize the machine owner's external native chat,
+	// not a managed agent/tab. A native UUID has no workspace archive state.
+	// The separate owner gate and durable managed-session claim check prevent
+	// using this surface to bypass an archived LeapMux tab's controls.
+	externalNativeWrites := map[string]string{
+		"SendNativeSessionInput": "machine-owner-scoped input to an external native session, not a workspace tab",
+		"InterruptNativeSession": "machine-owner-scoped interruption of an external native turn, not a workspace tab",
+	}
+	for method, reason := range externalNativeWrites {
+		assert.Equal(t, leapmuxv1.Scope_SCOPE_AGENT_WRITE, scopes[method], reason)
+	}
 	for method, scope := range scopes {
 		if scope != leapmuxv1.Scope_SCOPE_AGENT_WRITE && scope != leapmuxv1.Scope_SCOPE_TERMINAL_WRITE {
 			continue
@@ -736,6 +764,9 @@ func TestWorkspaceArchive_RefusesEveryWriteRPCOnAnArchivedTab(t *testing.T) {
 			continue
 		}
 		if _, ok := unguarded[method]; ok {
+			continue
+		}
+		if _, ok := externalNativeWrites[method]; ok {
 			continue
 		}
 		t.Errorf("%s is an agent or terminal WRITE method with no case above: "+
@@ -756,6 +787,91 @@ func TestWorkspaceArchive_RefusesEveryWriteRPCOnAnArchivedTab(t *testing.T) {
 	w := newTestWriter()
 	dispatch(dispatcher, "ListAgentMessages", &leapmuxv1.ListAgentMessagesRequest{AgentId: agentID}, w)
 	assert.Empty(t, w.errors, "an archived workspace must stay readable")
+}
+
+type archiveExternalNativeController struct {
+	sends      atomic.Int32
+	interrupts atomic.Int32
+}
+
+func (*archiveExternalNativeController) Inspect(context.Context, string) (agent.NativeSessionControlState, error) {
+	return agent.NativeSessionControlState{}, agent.ErrNativeControlUnavailable
+}
+func (f *archiveExternalNativeController) Send(context.Context, agent.NativeSessionInput) (agent.NativeSessionInputReceipt, error) {
+	f.sends.Add(1)
+	return agent.NativeSessionInputReceipt{Disposition: leapmuxv1.NativeSessionInputDisposition_NATIVE_SESSION_INPUT_DISPOSITION_ACCEPTED}, nil
+}
+func (f *archiveExternalNativeController) Interrupt(context.Context, agent.NativeSessionInterrupt) error {
+	f.interrupts.Add(1)
+	return nil
+}
+func (*archiveExternalNativeController) Close() error { return nil }
+
+func TestWorkspaceArchive_ExternalNativeControlsRemainOwnerScopedAndCannotTargetManagedChats(t *testing.T) {
+	svc, dispatcher, _ := setupTestService(t)
+	provider := leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX
+	const managedID = "generated-archived-root"
+	const managedSession = "11111111-2222-3333-4444-555555555555"
+	const externalSession = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	require.NoError(t, svc.Queries.CreateAgent(t.Context(), db.CreateAgentParams{
+		ID: managedID, AgentProvider: provider, WorkingDir: t.TempDir(), HomeDir: svc.HomeDir,
+		PendingResumeSessionID: managedSession,
+	}))
+	applyArchive(t, svc, leapmuxv1.WorkspaceArchiveState_WORKSPACE_ARCHIVE_STATE_ARCHIVED,
+		&leapmuxv1.TabRef{TabId: managedID, TabType: leapmuxv1.TabType_TAB_TYPE_AGENT})
+	fixture := &archiveExternalNativeController{}
+	var factories atomic.Int32
+	reg, ok := svc.Agents.Registry().Registration(provider)
+	require.True(t, ok)
+	reg.NewNativeSessionController = func(agent.NativeSessionControllerOptions) agent.NativeSessionController {
+		factories.Add(1)
+		return fixture
+	}
+	registry, err := agent.NewRegistry(reg)
+	require.NoError(t, err)
+	svc.Agents.StopAll()
+	svc.Agents = agent.NewManager(registry, nil)
+	t.Cleanup(svc.Agents.StopAll)
+	requests := []struct {
+		method string
+		make   func(string) proto.Message
+	}{
+		{"SendNativeSessionInput", func(session string) proto.Message {
+			return &leapmuxv1.SendNativeSessionInputRequest{AgentProvider: provider, SessionId: session,
+				BindingToken: "generated-opaque-owner-binding", RequestId: "generated-send-request", Text: "generated harmless text",
+				InputBehavior: leapmuxv1.NativeSessionInputBehavior_NATIVE_SESSION_INPUT_BEHAVIOR_SEND_NOW}
+		}},
+		{"InterruptNativeSession", func(session string) proto.Message {
+			return &leapmuxv1.InterruptNativeSessionRequest{AgentProvider: provider, SessionId: session,
+				BindingToken: "generated-opaque-owner-binding", RequestId: "generated-interrupt-request", ExpectedTurnId: "generated-turn"}
+		}},
+	}
+	for _, request := range requests {
+		t.Run(request.method, func(t *testing.T) {
+			wrongOwner := newTestWriter()
+			dispatchAs(dispatcher, userid.MustNew("user-2"), request.method, request.make(externalSession), wrongOwner)
+			require.Len(t, wrongOwner.errors, 1)
+			assert.Equal(t, int32(codes.PermissionDenied), wrongOwner.errors[0].code)
+			managed := newTestWriter()
+			dispatch(dispatcher, request.method, request.make(managedSession), managed)
+			require.Len(t, managed.errors, 1)
+			assert.Equal(t, int32(codes.FailedPrecondition), managed.errors[0].code)
+			assert.Contains(t, managed.errors[0].message, "workspace controls")
+		})
+	}
+	assert.Zero(t, factories.Load(), "neither a foreign owner nor a managed UUID may reach a native controller")
+	assert.Zero(t, fixture.sends.Load())
+	assert.Zero(t, fixture.interrupts.Load())
+	// An unrelated archived workspace cannot freeze another app's external chat.
+	// Only the harmless controller fixture is called; no provider process starts.
+	for _, request := range requests {
+		writer := newTestWriter()
+		dispatch(dispatcher, request.method, request.make(externalSession), writer)
+		require.Empty(t, writer.errors)
+		require.Len(t, writer.responses, 1)
+	}
+	assert.Equal(t, int32(1), fixture.sends.Load())
+	assert.Equal(t, int32(1), fixture.interrupts.Load())
 }
 
 // TestWorkspaceArchive_SkipsAClosedRow pins the closed_at predicate on both

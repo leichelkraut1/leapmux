@@ -8,7 +8,9 @@
 
 import type { MessageInitShape, MessageShape } from '@bufbuild/protobuf'
 import type { GenMessage } from '@bufbuild/protobuf/codegenv2'
+import type { NATIVE_CONVERSATION_DIRECTION } from '~/generated/contracts/native-conversations'
 import type {
+  AgentProvider,
   ApproveAutoReviewDenialResponse,
   BeginQueuedAgentInputEditResponse,
   CancelQueuedAgentInputEditResponse,
@@ -72,12 +74,36 @@ import type {
 } from '~/generated/proto/leapmux/v1/terminal_pb'
 import type {
   GetWorkerSystemInfoResponse,
+  InspectNativeAgentProcessesResponse,
+  InspectNativeSessionControlResponse,
+  InterruptNativeSessionResponse,
+  ReadNativeConversationResponse,
+  SendNativeSessionInputResponse,
 } from '~/generated/proto/leapmux/v1/worker_pb'
 import type {
   GetTabPayloadResponse,
   RegisterTabPayloadResponse,
   RevokeTabPayloadResponse,
 } from '~/generated/proto/leapmux/v1/worker_private_pb'
+import type {
+  AttachWorkflowLeadResponse,
+  ControlWorkflowRunResponse,
+  ControlWorkflowTaskResponse,
+  CreateWorkflowRunResponse,
+  DecideWorkflowApprovalResponse,
+  DeleteAgentProfileResponse,
+  DeleteWorkflowTemplateResponse,
+  ExportWorkflowTemplateResponse,
+  GetWorkflowRunResponse,
+  ImportWorkflowTemplateResponse,
+  InstallExampleWorkflowResponse,
+  ListWorkflowLibraryResponse,
+  ListWorkflowRunsResponse,
+  SaveAgentProfileResponse,
+  SaveWorkflowTemplateResponse,
+  SendWorkflowAgentMessageResponse,
+  UpdateWorkflowRoleResponse,
+} from '~/generated/proto/leapmux/v1/workflow_pb'
 import type {
   CleanupWorkspaceResponse,
   WatchEventsResponse,
@@ -209,6 +235,16 @@ import {
 import {
   GetWorkerSystemInfoRequestSchema,
   GetWorkerSystemInfoResponseSchema,
+  InspectNativeAgentProcessesRequestSchema,
+  InspectNativeAgentProcessesResponseSchema,
+  InspectNativeSessionControlRequestSchema,
+  InspectNativeSessionControlResponseSchema,
+  InterruptNativeSessionRequestSchema,
+  InterruptNativeSessionResponseSchema,
+  ReadNativeConversationRequestSchema,
+  ReadNativeConversationResponseSchema,
+  SendNativeSessionInputRequestSchema,
+  SendNativeSessionInputResponseSchema,
 } from '~/generated/proto/leapmux/v1/worker_pb'
 import {
   GetTabPayloadRequestSchema,
@@ -218,6 +254,42 @@ import {
   RevokeTabPayloadRequestSchema,
   RevokeTabPayloadResponseSchema,
 } from '~/generated/proto/leapmux/v1/worker_private_pb'
+import {
+  AttachWorkflowLeadRequestSchema,
+  AttachWorkflowLeadResponseSchema,
+  ControlWorkflowRunRequestSchema,
+  ControlWorkflowRunResponseSchema,
+  ControlWorkflowTaskRequestSchema,
+  ControlWorkflowTaskResponseSchema,
+  CreateWorkflowRunRequestSchema,
+  CreateWorkflowRunResponseSchema,
+  DecideWorkflowApprovalRequestSchema,
+  DecideWorkflowApprovalResponseSchema,
+  DeleteAgentProfileRequestSchema,
+  DeleteAgentProfileResponseSchema,
+  DeleteWorkflowTemplateRequestSchema,
+  DeleteWorkflowTemplateResponseSchema,
+  ExportWorkflowTemplateRequestSchema,
+  ExportWorkflowTemplateResponseSchema,
+  GetWorkflowRunRequestSchema,
+  GetWorkflowRunResponseSchema,
+  ImportWorkflowTemplateRequestSchema,
+  ImportWorkflowTemplateResponseSchema,
+  InstallExampleWorkflowRequestSchema,
+  InstallExampleWorkflowResponseSchema,
+  ListWorkflowLibraryRequestSchema,
+  ListWorkflowLibraryResponseSchema,
+  ListWorkflowRunsRequestSchema,
+  ListWorkflowRunsResponseSchema,
+  SaveAgentProfileRequestSchema,
+  SaveAgentProfileResponseSchema,
+  SaveWorkflowTemplateRequestSchema,
+  SaveWorkflowTemplateResponseSchema,
+  SendWorkflowAgentMessageRequestSchema,
+  SendWorkflowAgentMessageResponseSchema,
+  UpdateWorkflowRoleRequestSchema,
+  UpdateWorkflowRoleResponseSchema,
+} from '~/generated/proto/leapmux/v1/workflow_pb'
 import {
   CleanupWorkspaceRequestSchema,
   CleanupWorkspaceResponseSchema,
@@ -362,7 +434,7 @@ async function callWorker<
   reqSchema: ReqSchema,
   respSchema: RespSchema,
   req: MessageInitShape<ReqSchema>,
-  opts?: { timeoutMs?: number, signal?: AbortSignal },
+  opts?: { timeoutMs?: number, signal?: AbortSignal, retryUnavailable?: false },
 ): Promise<MessageShape<RespSchema>> {
   for (let attempt = 0; ; attempt++) {
     emitDevEvent('leapmux:rpc-send', () => ({ method, at: performance.now() }))
@@ -373,7 +445,7 @@ async function callWorker<
     }
     catch (err) {
       emitDevEvent('leapmux:rpc-recv', () => ({ method, at: performance.now(), ok: false }))
-      if (attempt >= UNAVAILABLE_MAX_RETRIES || !isWorkerUnavailable(err) || opts?.signal?.aborted)
+      if (opts?.retryUnavailable === false || attempt >= UNAVAILABLE_MAX_RETRIES || !isWorkerUnavailable(err) || opts?.signal?.aborted)
         throw err
       await sleep(UNAVAILABLE_RETRY_BASE_MS * (2 ** attempt), opts?.signal)
     }
@@ -383,6 +455,54 @@ async function callWorker<
 // ---------------------------------------------------------------------------
 // System Info (via E2EE channel to worker)
 // ---------------------------------------------------------------------------
+
+/** Owner-only read-only observation; never resumes or controls native sessions. */
+export function inspectNativeAgentProcesses(
+  workerId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<InspectNativeAgentProcessesResponse> {
+  return callWorker(workerId, 'InspectNativeAgentProcesses', InspectNativeAgentProcessesRequestSchema, InspectNativeAgentProcessesResponseSchema, {}, opts)
+}
+
+/** Explicit owner-only history read. Never starts, resumes or controls a chat. */
+export function readNativeConversation(
+  workerId: string,
+  req: {
+    agentProvider: AgentProvider
+    sessionId: string
+    cursor?: string
+    direction?: (typeof NATIVE_CONVERSATION_DIRECTION)[keyof typeof NATIVE_CONVERSATION_DIRECTION]
+    limit?: number
+  },
+  opts?: { signal?: AbortSignal },
+): Promise<ReadNativeConversationResponse> {
+  return callWorker(workerId, 'ReadNativeConversation', ReadNativeConversationRequestSchema, ReadNativeConversationResponseSchema, req, opts)
+}
+
+/** Inspect the existing app's control bridge without starting or resuming it. */
+export function inspectNativeSessionControl(
+  workerId: string,
+  req: MessageInitShape<typeof InspectNativeSessionControlRequestSchema>,
+  opts?: { signal?: AbortSignal },
+): Promise<InspectNativeSessionControlResponse> {
+  return callWorker(workerId, 'InspectNativeSessionControl', InspectNativeSessionControlRequestSchema, InspectNativeSessionControlResponseSchema, req, opts)
+}
+
+/** Queue text in the exact live owner identified by its current binding. */
+export function sendNativeSessionInput(
+  workerId: string,
+  req: MessageInitShape<typeof SendNativeSessionInputRequestSchema>,
+): Promise<SendNativeSessionInputResponse> {
+  return callWorker(workerId, 'SendNativeSessionInput', SendNativeSessionInputRequestSchema, SendNativeSessionInputResponseSchema, req, { retryUnavailable: false })
+}
+
+/** Explicitly interrupt the bound owner's exact turn; never kill its process. */
+export function interruptNativeSession(
+  workerId: string,
+  req: MessageInitShape<typeof InterruptNativeSessionRequestSchema>,
+): Promise<InterruptNativeSessionResponse> {
+  return callWorker(workerId, 'InterruptNativeSession', InterruptNativeSessionRequestSchema, InterruptNativeSessionResponseSchema, req, { retryUnavailable: false })
+}
 
 export function getWorkerSystemInfo(workerId: string): Promise<GetWorkerSystemInfoResponse> {
   return callWorker(workerId, 'GetWorkerSystemInfo', GetWorkerSystemInfoRequestSchema, GetWorkerSystemInfoResponseSchema, {})
@@ -708,6 +828,79 @@ export function createBranch(workerId: string, req: MessageInitShape<typeof Crea
 
 export function deleteBranch(workerId: string, req: MessageInitShape<typeof DeleteBranchRequestSchema>): Promise<DeleteBranchResponse> {
   return callWorker(workerId, 'DeleteBranch', DeleteBranchRequestSchema, DeleteBranchResponseSchema, req)
+}
+
+// ---------------------------------------------------------------------------
+// Workflows (workflow.proto). The library lives on the worker the user picks;
+// a run lives on its coordinator, the worker hosting its Lead.
+// ---------------------------------------------------------------------------
+
+export function listWorkflowLibrary(workerId: string, req: MessageInitShape<typeof ListWorkflowLibraryRequestSchema>): Promise<ListWorkflowLibraryResponse> {
+  return callWorker(workerId, 'ListWorkflowLibrary', ListWorkflowLibraryRequestSchema, ListWorkflowLibraryResponseSchema, req)
+}
+
+export function saveAgentProfile(workerId: string, req: MessageInitShape<typeof SaveAgentProfileRequestSchema>): Promise<SaveAgentProfileResponse> {
+  return callWorker(workerId, 'SaveAgentProfile', SaveAgentProfileRequestSchema, SaveAgentProfileResponseSchema, req)
+}
+
+export function deleteAgentProfile(workerId: string, req: MessageInitShape<typeof DeleteAgentProfileRequestSchema>): Promise<DeleteAgentProfileResponse> {
+  return callWorker(workerId, 'DeleteAgentProfile', DeleteAgentProfileRequestSchema, DeleteAgentProfileResponseSchema, req)
+}
+
+export function saveWorkflowTemplate(workerId: string, req: MessageInitShape<typeof SaveWorkflowTemplateRequestSchema>): Promise<SaveWorkflowTemplateResponse> {
+  return callWorker(workerId, 'SaveWorkflowTemplate', SaveWorkflowTemplateRequestSchema, SaveWorkflowTemplateResponseSchema, req)
+}
+
+export function deleteWorkflowTemplate(workerId: string, req: MessageInitShape<typeof DeleteWorkflowTemplateRequestSchema>): Promise<DeleteWorkflowTemplateResponse> {
+  return callWorker(workerId, 'DeleteWorkflowTemplate', DeleteWorkflowTemplateRequestSchema, DeleteWorkflowTemplateResponseSchema, req)
+}
+
+export function exportWorkflowTemplate(workerId: string, req: MessageInitShape<typeof ExportWorkflowTemplateRequestSchema>): Promise<ExportWorkflowTemplateResponse> {
+  return callWorker(workerId, 'ExportWorkflowTemplate', ExportWorkflowTemplateRequestSchema, ExportWorkflowTemplateResponseSchema, req)
+}
+
+export function importWorkflowTemplate(workerId: string, req: MessageInitShape<typeof ImportWorkflowTemplateRequestSchema>): Promise<ImportWorkflowTemplateResponse> {
+  return callWorker(workerId, 'ImportWorkflowTemplate', ImportWorkflowTemplateRequestSchema, ImportWorkflowTemplateResponseSchema, req)
+}
+
+export function installExampleWorkflow(workerId: string, req: MessageInitShape<typeof InstallExampleWorkflowRequestSchema>): Promise<InstallExampleWorkflowResponse> {
+  return callWorker(workerId, 'InstallExampleWorkflow', InstallExampleWorkflowRequestSchema, InstallExampleWorkflowResponseSchema, req)
+}
+
+export function createWorkflowRun(workerId: string, req: MessageInitShape<typeof CreateWorkflowRunRequestSchema>): Promise<CreateWorkflowRunResponse> {
+  return callWorker(workerId, 'CreateWorkflowRun', CreateWorkflowRunRequestSchema, CreateWorkflowRunResponseSchema, req)
+}
+
+export function attachWorkflowLead(workerId: string, req: MessageInitShape<typeof AttachWorkflowLeadRequestSchema>): Promise<AttachWorkflowLeadResponse> {
+  return callWorker(workerId, 'AttachWorkflowLead', AttachWorkflowLeadRequestSchema, AttachWorkflowLeadResponseSchema, req)
+}
+
+export function listWorkflowRuns(workerId: string, req: MessageInitShape<typeof ListWorkflowRunsRequestSchema>): Promise<ListWorkflowRunsResponse> {
+  return callWorker(workerId, 'ListWorkflowRuns', ListWorkflowRunsRequestSchema, ListWorkflowRunsResponseSchema, req)
+}
+
+export function getWorkflowRun(workerId: string, req: MessageInitShape<typeof GetWorkflowRunRequestSchema>): Promise<GetWorkflowRunResponse> {
+  return callWorker(workerId, 'GetWorkflowRun', GetWorkflowRunRequestSchema, GetWorkflowRunResponseSchema, req)
+}
+
+export function controlWorkflowRun(workerId: string, req: MessageInitShape<typeof ControlWorkflowRunRequestSchema>): Promise<ControlWorkflowRunResponse> {
+  return callWorker(workerId, 'ControlWorkflowRun', ControlWorkflowRunRequestSchema, ControlWorkflowRunResponseSchema, req)
+}
+
+export function controlWorkflowTask(workerId: string, req: MessageInitShape<typeof ControlWorkflowTaskRequestSchema>): Promise<ControlWorkflowTaskResponse> {
+  return callWorker(workerId, 'ControlWorkflowTask', ControlWorkflowTaskRequestSchema, ControlWorkflowTaskResponseSchema, req)
+}
+
+export function updateWorkflowRole(workerId: string, req: MessageInitShape<typeof UpdateWorkflowRoleRequestSchema>): Promise<UpdateWorkflowRoleResponse> {
+  return callWorker(workerId, 'UpdateWorkflowRole', UpdateWorkflowRoleRequestSchema, UpdateWorkflowRoleResponseSchema, req)
+}
+
+export function decideWorkflowApproval(workerId: string, req: MessageInitShape<typeof DecideWorkflowApprovalRequestSchema>): Promise<DecideWorkflowApprovalResponse> {
+  return callWorker(workerId, 'DecideWorkflowApproval', DecideWorkflowApprovalRequestSchema, DecideWorkflowApprovalResponseSchema, req)
+}
+
+export function sendWorkflowAgentMessage(workerId: string, req: MessageInitShape<typeof SendWorkflowAgentMessageRequestSchema>): Promise<SendWorkflowAgentMessageResponse> {
+  return callWorker(workerId, 'SendWorkflowAgentMessage', SendWorkflowAgentMessageRequestSchema, SendWorkflowAgentMessageResponseSchema, req)
 }
 
 // ---------------------------------------------------------------------------

@@ -73,6 +73,7 @@ vi.mock('./runDirectory', async importOriginal => ({
 }))
 vi.mock('./ui', async importOriginal => ({
   ...await importOriginal<typeof import('./ui')>(),
+  revealActivityTarget: vi.fn(async () => {}),
   openWorkspace: async (_page: unknown, workspaceId: string) => { opened.events.push(`workspace ${workspaceId}`) },
   toolCallRow: (_page: unknown, callId: string): CodeRowProbe => ({ codeRowProbe: true, callId }),
   assistantBubbles: () => ({ filter: ({ hasText }: { hasText: string }) => ({ first: (): CodeAnswerProbe => ({ codeAnswerProbe: true, text: hasText }) }) }),

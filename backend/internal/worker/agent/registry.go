@@ -26,6 +26,21 @@ type StartFunc func(ctx context.Context, opts Options, sink ProviderServices) (A
 // static catalog, and its option policy. Each provider states one Registration,
 // and NewRegistry collects them; nothing mutates a Registration after that.
 type Registration struct {
+	// NewNativeSessionController connects only to explicitly available live owners.
+	// nil leaves external chats read-only. The Manager owns its bridge lifetime.
+	NewNativeSessionController func(NativeSessionControllerOptions) NativeSessionController
+	// ReadNativeConversation reads saved native history without starting, resuming,
+	// attaching for control, or modifying a provider. nil means unsupported.
+	ReadNativeConversation func(context.Context, NativeConversationQuery) (NativeConversationPage, error)
+	// NewNativeServiceObserver constructs an independently owned passive service watcher.
+	// nil means service observation is unsupported. The Manager closes it on shutdown.
+	NewNativeServiceObserver func() NativeServiceObserver
+	// ObserveNativeSessions queries live, read-only status metadata from an existing provider.
+	// nil means native session status is not supported. It must not start or resume sessions.
+	ObserveNativeSessions func(context.Context) ([]NativeSessionObservation, error)
+	// RecognizeNativeProcess classifies OS executable metadata without reading native sessions.
+	// nil means this provider does not support process observation.
+	RecognizeNativeProcess func(name, executablePath string) leapmuxv1.NativeAgentProcessKind
 	// ShutdownGrace permits the native relay to drain before forced process cleanup.
 	// Zero selects the common process grace.
 	ShutdownGrace time.Duration

@@ -15,7 +15,7 @@ import { bashToolCall, codexEscalatedCommandToolCall, mcpToolCall } from '../hel
 import { newProviderWorkingDir } from '../helpers/providerWorkingDir'
 import { getGlobalState } from '../helpers/server'
 import { quotePosixShellArgument } from '../helpers/shellArguments'
-import { answerControl, chooseSettingsOption, controlActions, controlButton, expectNoControlBanner, expectSettingsOptionChosen, isMaybeVisible, openWorkspace, savedControlAnswer, sendMessage, toolCallRow, toolRows, waitForAgentIdle, waitForControlBanner, waitForSettingsHydrated, waitForSettingsIdle } from '../helpers/ui'
+import { answerControl, chooseSettingsOption, controlActions, controlButton, expectNoControlBanner, expectSettingsOptionChosen, isMaybeVisible, openWorkspace, revealActivityTarget, savedControlAnswer, sendMessage, toolCallRow, toolRows, waitForAgentIdle, waitForControlBanner, waitForSettingsHydrated, waitForSettingsIdle } from '../helpers/ui'
 import { openProviderAgent } from '../helpers/workspace'
 import { readCodexExecResult } from './execResult'
 import { CODEX_AGENT, nativeContext } from './scenarios'
@@ -49,6 +49,7 @@ codexTest.describe('codex permission requests', () => {
     const result = readCodexExecResult(resultRequest, 'safe-command')
     expect(result.text).toContain('codex-safe-42')
     expect(result.failed).not.toBe(true)
+    await revealActivityTarget(page, toolRows(page).filter({ hasText: 'codex-safe-42' }).first())
     await expect(toolRows(page).filter({ hasText: 'codex-safe-42' }).first()).toBeVisible()
     await expectNoControlBanner(page)
   })
@@ -265,6 +266,7 @@ codexTest.describe('codex approval UI', () => {
     // Wait for the agent to finish. The chat then shows the output of the approved command.
     await waitForAgentIdle(page)
     await expectNoControlBanner(page)
+    await revealActivityTarget(page, toolRows(page).filter({ hasText: APPROVAL_OUTPUT }).first())
     await expect(toolRows(page).filter({ hasText: APPROVAL_OUTPUT }).first()).toBeVisible()
   })
 })

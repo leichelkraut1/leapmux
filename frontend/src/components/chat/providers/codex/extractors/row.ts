@@ -36,6 +36,7 @@ import { codexChangeKind } from './fileChange'
 import { codexGeneratedImage, codexItemPath, codexViewedImage } from './image'
 import { extractItem } from './item'
 import { codexMcpFromItem } from './mcp'
+import { codexNativeHistoryFunctionCall } from './nativeHistory'
 import { codexPlanItemMarkdown, codexTurnPlanParams, codexTurnPlanTodos } from './plan'
 import { codexQuestionAnswerRow } from './questionAnswer'
 import { codexWebSearchActionFromItem } from './webSearch'
@@ -48,6 +49,9 @@ import { codexWebSearchActionFromItem } from './webSearch'
  */
 export function codexExtractRow(input: RowExtractionInput): ChatRow | null {
   const { category, resolved: parsed, span } = input
+  const nativeFunction = category.kind === 'tool_use' ? codexNativeHistoryFunctionCall(parsed, span ?? { request: undefined, result: undefined, role: 'other', visibleRows: { request: false, result: false } }) : null
+  if (nativeFunction)
+    return toolCallRow(nativeFunction.call, nativeFunction.role, span?.visibleRows ?? { request: false, result: false })
   switch (category.kind) {
     case 'assistant_text': {
       // The same reader the classifier used, so the two layers state one answer:
@@ -436,6 +440,10 @@ export const CODEX_TOOL_READERS: ToolCallSpecReaderTable<CodexToolFacts> = {
       ...(processId !== undefined ? { processId } : {}),
       ...(actions.length > 0 ? { actions } : {}),
     }
+    // A declined command never ran. Its explanation is a failure result, rather
+    // than a typed command output that the shared declined state cannot carry.
+    if (facts.status === CODEX_STATUS.DECLINED)
+      return { kind: 'execute', request, ...(facts.aggregatedOutput ? { result: failedResult(facts.aggregatedOutput) } : {}) }
     // Only a call that ENDED has an output stream to state. Codex sends the exit code
     // and the aggregated output on the same item, so the result is the item itself.
     const source = facts.finished ? codexCommandFromItem(facts.item) : null
@@ -724,6 +732,15 @@ function codexItemLabel(facts: CodexToolFacts): string | undefined {
   }
 }
 
+/** A reused item ID cannot join rows from different native owners. */
+function sameCodexItemOwner(left: ParsedMessageContent, right: ParsedMessageContent): boolean {
+  if (left.agentSessionId && right.agentSessionId && left.agentSessionId !== right.agentSessionId)
+    return false
+  const own = pickObject(left.parentObject, 'params') ?? left.parentObject
+  const other = pickObject(right.parentObject, 'params') ?? right.parentObject
+  return ['threadId', 'turnId'].every(field => own?.[field] === undefined || other?.[field] === undefined || own[field] === other[field])
+}
+
 /**
  * One Codex tool span as a merged call.
  *
@@ -769,14 +786,25 @@ function codexToolSpanRow(parsed: ParsedMessageContent, sides: RowExtractionInpu
   // A result frame belongs to this call only when both identity fields match. A
   // corrupt span must not mark this call as answered or project another call's data.
   const matchingResultItem = candidateResultItem
+    && pickString(item, 'id') !== ''
     && pickString(candidateResultItem, 'id') === pickString(item, 'id')
     && pickString(candidateResultItem, 'type') === pickString(item, 'type')
+    && sides.result && sameCodexItemOwner(parsed, sides.result)
     ? candidateResultItem
     : null
-  // A closing fileChange is the authoritative full item: it carries the original
-  // change list and states which changes landed. Other Codex item kinds keep their
-  // existing per-frame projections even though the lifecycle sees their result.
-  const projectedResultItem = item.type === CODEX_ITEM.FileChange ? matchingResultItem : null
+  // A closing commandExecution carries its output and exit status. Without it a
+  // request knows a result landed but has no payload, so it stays incomplete.
+  // Preserve requested fields when a closing command omits them. File changes
+  // retain their authoritative complete change list.
+  const projectedResultItem = item.type === CODEX_ITEM.CommandExecution && matchingResultItem
+    ? {
+        ...item,
+        ...matchingResultItem,
+        command: pickString(matchingResultItem, 'command') || pickString(item, 'command'),
+        cwd: pickString(matchingResultItem, 'cwd') || pickString(item, 'cwd'),
+      }
+    : item.type === CODEX_ITEM.FileChange ? matchingResultItem : null
+  const callStatusWord = projectedResultItem ? pickString(projectedResultItem, 'status') : statusWord
   // Read every resolved span side.
   // A request row includes its landed result, so its prompt uses the same compact expansion control.
   const answered = atomicResult || sides.role === 'result' || isCodexFinishedStatus(statusWord) || !!matchingResultItem
@@ -788,8 +816,8 @@ function codexToolSpanRow(parsed: ParsedMessageContent, sides: RowExtractionInpu
   // - The retained outcome.
   // - The landed result.
   const lifecycle: ToolCallLifecycleFacts = {
-    frameStatus: codexFrameStatus(statusWord),
-    providerOutcome: statusWord === 'interrupted' ? 'interrupted' : null,
+    frameStatus: codexFrameStatus(callStatusWord),
+    providerOutcome: callStatusWord === 'interrupted' ? 'interrupted' : null,
     retainedOutcome: outcome,
     rowFinal,
     resultFrameLanded: answered,

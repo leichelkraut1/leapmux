@@ -134,6 +134,7 @@ func Start(ctx context.Context, opts agent.Options, sink agent.ProviderServices)
 		model:             opts.Model(),
 		effort:            opts.Effort(),
 		workingDir:        opts.WorkingDir,
+		attachmentDir:     opts.AttachmentDir,
 		sink:              sink,
 		permissionMode:    cmp.Or(opts.PermissionMode(), DefaultPermissionMode),
 		permissionProfile: cmp.Or(opts.Options[contracts.CodexOptionPermissionProfile], contracts.CodexOptionDefaultPermissionProfile),

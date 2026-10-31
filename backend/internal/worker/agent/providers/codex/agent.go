@@ -44,10 +44,11 @@ type Agent struct {
 	// Response waits for input run after this mutex releases.
 	turnDispatchMu sync.Mutex
 
-	model      string
-	effort     string
-	workingDir string
-	sink       agent.ProviderServices
+	model         string
+	effort        string
+	workingDir    string
+	attachmentDir string
+	sink          agent.ProviderServices
 	// resumingThread is true only while a thread/resume handshake is in flight.
 	//
 	// It is what tells a goal RESTATEMENT from a goal EVENT. Codex marks the
@@ -568,7 +569,10 @@ func (a *Agent) sendInputForSession(expected *string, content string, attachment
 	if err != nil {
 		return err
 	}
-	input := buildCodexInputBlocks(content, agent.ClassifyAttachments(attachments))
+	input, err := buildCodexInputBlocks(content, agent.ClassifyAttachments(attachments), a.attachmentDir)
+	if err != nil {
+		return err
+	}
 	pending, err := a.dispatchInputForSession(expected, input)
 	if pending != nil {
 		a.PublishTurnActive()
@@ -680,8 +684,11 @@ func (a *Agent) steerInput(expected *string, content string, attachments []*leap
 	// Retry acceptance must wait until every earlier steer resolves.
 	a.mainTurn.steers++
 	a.Mu.Unlock()
-	input := buildCodexInputBlocks(content, agent.ClassifyAttachments(attachments))
-	ticket, err := a.sendTurnSteer(threadID, turnID, input, trackEcho)
+	input, err := buildCodexInputBlocks(content, agent.ClassifyAttachments(attachments), a.attachmentDir)
+	var ticket providerkit.SteerTicket
+	if err == nil {
+		ticket, err = a.sendTurnSteer(threadID, turnID, input, trackEcho)
+	}
 	a.outputMu.Lock()
 	defer a.outputMu.Unlock()
 	a.retryOfferMu.Lock()
@@ -737,7 +744,8 @@ func (a *Agent) turnInputRetainedLocked(turnID string) bool {
 
 // buildCodexInputBlocks converts text + classified attachments into Codex's
 // input format. Images use data URI format; text attachments are inlined.
-func buildCodexInputBlocks(content string, classified []agent.ClassifiedAttachment) []map[string]interface{} {
+// Other files are retained privately and referenced as text for native tools.
+func buildCodexInputBlocks(content string, classified []agent.ClassifiedAttachment, attachmentDir string) ([]map[string]interface{}, error) {
 	var input []map[string]interface{}
 	if content != "" {
 		input = append(input, map[string]interface{}{"type": "text", "text": content})
@@ -755,11 +763,14 @@ func buildCodexInputBlocks(content string, classified []agent.ClassifiedAttachme
 				"url":  providerkit.EncodeDataURI(attachment.MIMEType, attachment.Data),
 			})
 		case agent.AttachmentKindPDF, agent.AttachmentKindBinary:
-			// Codex's input items have no representation for either, so the
-			// attachment is omitted from the turn rather than sent as junk text.
+			file, err := providerkit.StageFileAttachment(attachmentDir, attachment)
+			if err != nil {
+				return nil, err
+			}
+			input = append(input, map[string]interface{}{"type": "text", "text": file.ReferenceText()})
 		}
 	}
-	return input
+	return input, nil
 }
 
 // turnSettings is the snapshot of agent state that every later turn uses. turn/start

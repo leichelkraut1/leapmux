@@ -1,9 +1,10 @@
 /// <reference types="vitest/globals" />
-import { createComponent, createRoot } from 'solid-js'
+import { createComponent, createRoot, createSignal } from 'solid-js'
 import { render } from 'solid-js/web'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { HubControlEvent } from '~/generated/proto/leapmux/v1/channel_pb'
 import { createDialogState } from '~/hooks/createDialogState'
+import { deferred, flush as flushMicrotasks, untilTrue } from '~/test-support/async'
 import { useWorkerSection } from './useWorkerSection'
 
 const mockListWorkers = vi.fn()
@@ -237,6 +238,146 @@ describe('useWorkerSection', () => {
       unmount()
       host.remove()
       dispose()
+    })
+  })
+
+  it('distinguishes a pending computer list from a successful empty list', async () => {
+    const pending = deferred<{ workers: ReturnType<typeof worker>[] }>()
+    mockListWorkers.mockReturnValue(pending.promise)
+    await createRoot(async (dispose) => {
+      const s = mount()
+      await flushMicrotasks()
+      expect(s.registryStatus()).toBe('loading')
+      expect(s.workers()).toEqual([])
+      pending.resolve({ workers: [] })
+      await untilTrue(() => s.registryStatus() === 'available')
+      expect(s.workers()).toEqual([])
+      dispose()
+    })
+  })
+
+  it('loads every cursor page before publishing a complete computer list', async () => {
+    mockListWorkers
+      .mockResolvedValueOnce({ workers: [worker('first')], page: { hasMore: true, nextCursor: 'page-two' } })
+      .mockResolvedValueOnce({ workers: [worker('last')], page: { hasMore: false, nextCursor: '' } })
+    await createRoot(async (dispose) => {
+      const s = mount()
+      await untilTrue(() => s.registryStatus() === 'available')
+      expect(s.workers().map(w => w.id)).toEqual(['first', 'last'])
+      expect(mockListWorkers).toHaveBeenNthCalledWith(1, { page: { cursor: '' } }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+      expect(mockListWorkers).toHaveBeenNthCalledWith(2, { page: { cursor: 'page-two' } }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+      dispose()
+    })
+  })
+
+  it('retains an available registry during manual and pushed refreshes without a loading transition', async () => {
+    await createRoot(async (dispose) => {
+      const s = mount()
+      await untilTrue(() => s.registryStatus() === 'available')
+      const original = s.workers()[0]
+      const manual = deferred<{ workers: ReturnType<typeof worker>[] }>()
+      mockListWorkers.mockReturnValueOnce(manual.promise)
+      const refresh = s.refreshWorkers()
+      expect(s.registryStatus()).toBe('available')
+      expect(s.workers()[0]).toBe(original)
+      manual.resolve({ workers: [worker('w1')] })
+      await refresh
+      expect(s.workers()[0]).toBe(original)
+
+      const pushed = deferred<{ workers: ReturnType<typeof worker>[] }>()
+      mockListWorkers.mockReturnValueOnce(pushed.promise)
+      invokeHubControl({ events: [HubControlEvent.WORKERS_CHANGED] })
+      expect(s.registryStatus()).toBe('available')
+      expect(s.workers()[0]).toBe(original)
+      pushed.reject(new Error('connection unavailable'))
+      await untilTrue(() => s.registryStatus() === 'unavailable')
+      expect(s.workers()[0]).toBe(original)
+      expect(mockListWorkers).toHaveBeenCalledTimes(3)
+      dispose()
+    })
+  })
+
+  it('clears the retained registry when the authenticated account changes', async () => {
+    await createRoot(async (dispose) => {
+      const [userId, setUserId] = createSignal('u1')
+      const s = mount(userId)
+      await untilTrue(() => s.registryStatus() === 'available')
+      const nextUser = deferred<{ workers: ReturnType<typeof worker>[] }>()
+      mockListWorkers.mockReturnValueOnce(nextUser.promise)
+      setUserId('u2')
+      expect(s.registryStatus()).toBe('loading')
+      expect(s.workers()).toEqual([])
+      nextUser.resolve({ workers: [worker('other-account')] })
+      await untilTrue(() => s.registryStatus() === 'available')
+      expect(s.workers().map(w => w.id)).toEqual(['other-account'])
+      expect(mockListWorkers).toHaveBeenCalledTimes(2)
+      dispose()
+    })
+  })
+
+  it('keeps the previous sidebar list when a later page fails and recovers through refresh', async () => {
+    await createRoot(async (dispose) => {
+      const s = mount()
+      await untilTrue(() => s.registryStatus() === 'available')
+      mockListWorkers
+        .mockResolvedValueOnce({ workers: [worker('partial')], page: { hasMore: true, nextCursor: 'next' } })
+        .mockRejectedValueOnce(new Error('page unavailable'))
+      await s.refreshWorkers()
+      expect(s.registryStatus()).toBe('unavailable')
+      expect(s.workers().map(w => w.id)).toEqual(['w1'])
+      expect(mockFetchWorkerInfo).not.toHaveBeenCalledWith('partial')
+      mockListWorkers.mockResolvedValueOnce({ workers: [worker('recovered')] })
+      await s.refreshWorkers()
+      expect(s.registryStatus()).toBe('available')
+      expect(s.workers().map(w => w.id)).toEqual(['recovered'])
+      dispose()
+    })
+  })
+
+  it('stops a repeated pagination cursor without publishing a partial list', async () => {
+    mockListWorkers.mockResolvedValue({
+      workers: [worker('partial')],
+      page: { hasMore: true, nextCursor: 'repeated' },
+    })
+    await createRoot(async (dispose) => {
+      const s = mount()
+      await untilTrue(() => s.registryStatus() === 'unavailable')
+      expect(mockListWorkers).toHaveBeenCalledTimes(2)
+      expect(s.workers()).toEqual([])
+      dispose()
+    })
+  })
+
+  it('ignores a superseded response even when the transport ignores abort', async () => {
+    const pending = deferred<{ workers: ReturnType<typeof worker>[] }>()
+    mockListWorkers.mockReturnValueOnce(pending.promise).mockResolvedValueOnce({ workers: [worker('current')] })
+    await createRoot(async (dispose) => {
+      const s = mount()
+      await flushMicrotasks()
+      const signal = mockListWorkers.mock.calls[0]![1].signal as AbortSignal
+      await s.refreshWorkers()
+      expect(signal.aborted).toBe(true)
+      pending.resolve({ workers: [worker('stale')] })
+      await flushMicrotasks()
+      expect(s.registryStatus()).toBe('available')
+      expect(s.workers().map(w => w.id)).toEqual(['current'])
+      dispose()
+    })
+  })
+
+  it('aborts the pending registry request and ignores its reply after disposal', async () => {
+    const pending = deferred<{ workers: ReturnType<typeof worker>[] }>()
+    mockListWorkers.mockReturnValue(pending.promise)
+    await createRoot(async (dispose) => {
+      const s = mount()
+      await flushMicrotasks()
+      const signal = mockListWorkers.mock.calls[0]![1].signal as AbortSignal
+      dispose()
+      expect(signal.aborted).toBe(true)
+      pending.resolve({ workers: [worker('late')] })
+      await flushMicrotasks()
+      expect(s.workers()).toEqual([])
+      expect(mockFetchWorkerInfo).not.toHaveBeenCalled()
     })
   })
 })

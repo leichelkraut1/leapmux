@@ -1,9 +1,9 @@
-import type { Component } from 'solid-js'
+import type { Component, JSX } from 'solid-js'
 import type { SpanLine } from './SpanLines'
 import { createMemo, For, Index, Show } from 'solid-js'
 import { bodySpanKey, shouldConnectSpanLineTop, spanColorClassFor } from './SpanLines'
 import { spanGapBridge, spanGapBridgeRow } from './SpanLines.css'
-import { LINE_THICKNESS, SPAN_BRIDGE_GAP_VAR, spanColumnCenterX } from './SpanLines.geometry'
+import { BRIDGE_SEAM, LINE_THICKNESS, SPAN_BRIDGE_GAP_VAR, spanColumnCenterX, spanLinesReservedWidth, TOOL_BODY_INDENT } from './SpanLines.geometry'
 
 /**
  * The slice of a classified chat entry the bridge overlay reads. Structural
@@ -45,7 +45,8 @@ export interface SpanLineGapBridgesProps {
  * edge; this overlay paints the continuation across the gap above each row
  * whose column connects to the row above, sized from that row's own gap (see
  * `gapAboveOf`), so a merged band pair -- which has no gap -- gets a segment of
- * zero height instead of one drawn for a gap that does not exist. Living
+ * zero height when its endpoints share x. A depth change joins the two rail
+ * centers across the actual gap, including an overlap. Living
  * outside the rows is what
  * lets every virtualized row take `contain: layout paint` — the one thing
  * that used to overflow a row's box was this bridge segment.
@@ -64,6 +65,26 @@ export const SpanLineGapBridges: Component<SpanLineGapBridgesProps> = props => (
       const connecting = createMemo(() => entry.parsedSpanLines.map(
         (line, col) => shouldConnectSpanLineTop(line, previousLines()[col] ?? null, previousBodyKey()),
       ))
+      const bridgeStyle = (col: number): JSX.CSSProperties => {
+        const line = entry.parsedSpanLines[col]
+        const bodyKey = previousBodyKey()
+        const fromBody = bodyKey !== undefined && line != null
+          && bodySpanKey(line.span_id, line.color) === bodyKey
+        const fromX = fromBody
+          ? spanLinesReservedWidth(previousLines().length) + TOOL_BODY_INDENT + LINE_THICKNESS / 2
+          : spanColumnCenterX(col, previousLines().length)
+        const toX = spanColumnCenterX(col, entry.parsedSpanLines.length)
+        if (fromX === toX)
+          return { left: `${toX - LINE_THICKNESS / 2}px` }
+        const gap = props.gapAboveOf(entry.message.id)
+        const deltaX = toX - fromX
+        return {
+          'left': `${fromX - LINE_THICKNESS / 2}px`,
+          'height': `${Math.hypot(deltaX, gap) + BRIDGE_SEAM}px`,
+          'transform': `rotate(${-Math.atan2(deltaX, gap)}rad)`,
+          'transform-origin': 'top center',
+        }
+      }
       return (
         <Show when={entry.parsedSpanLines.length > 0 && connecting().some(Boolean)}>
           <div
@@ -82,7 +103,7 @@ export const SpanLineGapBridges: Component<SpanLineGapBridgesProps> = props => (
                 <Show when={isConnecting()}>
                   <div
                     class={`${spanGapBridge} ${spanColorClassFor(entry.parsedSpanLines[col]?.color)}`}
-                    style={{ left: `${spanColumnCenterX(col) - LINE_THICKNESS / 2}px` }}
+                    style={bridgeStyle(col)}
                     data-span-gap-bridge-segment={col}
                   />
                 </Show>
