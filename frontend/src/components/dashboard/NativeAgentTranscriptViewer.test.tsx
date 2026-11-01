@@ -102,6 +102,35 @@ function approvalFixture() {
 }
 
 describe('NativeAgentTranscriptViewer', () => {
+  it('shows a saved-history estimate before the original-chat composer without sending', () => {
+    fixture()
+    const state = controlFixture(true)
+    const transcript = hooks.transcript()
+    const message = create(AgentChatMessageSchema, {
+      id: 'generated-native-usage',
+      contentCompression: ContentCompression.NONE,
+      seq: 1n,
+      createdAt: new Date(Date.now() - 600_000).toISOString(),
+      content: new TextEncoder().encode(JSON.stringify({ type: 'assistant', message: {
+        id: 'generated-native-cache',
+        model: 'generated-model',
+        usage: { input_tokens: 100, cache_read_input_tokens: 899, cache_creation_input_tokens: 1, cache_creation: { ephemeral_5m_input_tokens: 1 } },
+      } })),
+    })
+    const observedAt = new Date(Date.now() - 1000).toISOString()
+    hooks.transcript.mockReturnValue({ ...transcript, messages: () => [message], observedAt: () => observedAt })
+    render(() => <PreferencesProvider><NativeAgentTranscriptViewer conversation={conversation} online onClose={() => {}} /></PreferencesProvider>)
+    const notice = screen.getByTestId('prompt-cache-notice')
+    const editor = screen.getByRole('textbox', { name: 'Message to original chat' })
+    expect(notice.textContent).toContain('Saved-history estimate: Context idle')
+    expect(notice.textContent).toContain('about 1k input tokens')
+    expect(notice.compareDocumentPosition(editor)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    fireEvent.input(editor, { target: { value: 'Generated retained draft' } })
+    expect(editor).toHaveValue('Generated retained draft')
+    expect(state.send).not.toHaveBeenCalled()
+    expect(state.answerApproval).not.toHaveBeenCalled()
+  })
+
   it('shows source identity and read-only history without any chat mutation affordance', () => {
     const state = fixture()
     const [name, setName] = createSignal('Fixture PC')

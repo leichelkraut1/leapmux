@@ -9,7 +9,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { compactControl } from '~/components/common/CompactControl.css'
 import { PreferencesProvider } from '~/context/PreferencesContext'
 import { CLAUDE_MODE } from '~/generated/contracts/claude-protocol'
-import { AgentActivityState, AgentInfoSchema, AgentInputKind, AgentInputQueuePauseReason, AgentInputQueueSnapshotSchema, AgentInputState, AgentProvider, AvailableOptionGroupSchema } from '~/generated/proto/leapmux/v1/agent_pb'
+import { AgentActivityState, AgentChatMessageSchema, AgentInfoSchema, AgentInputKind, AgentInputQueuePauseReason, AgentInputQueueSnapshotSchema, AgentInputState, AgentProvider, AvailableOptionGroupSchema, ContentCompression } from '~/generated/proto/leapmux/v1/agent_pb'
 import { flushStorageWrites, localStorageLoad, localStorageStore, PREFIX_CONTROL_STATE, setStorageAccountForTests } from '~/lib/browserStorage'
 import { clearDraft, loadDraft, saveDraft } from '~/lib/editor/draftPersistence'
 import { formatResetTimestamp } from '~/lib/rateLimitUtils'
@@ -84,6 +84,7 @@ function agent(overrides: MessageInitShape<typeof AgentInfoSchema> = {}): AgentI
 }
 
 interface RenderPanelOptions {
+  messages?: AgentEditorPanelProps['messages']
   agentSessionInfo?: AgentEditorPanelProps['agentSessionInfo']
   workerId?: string
   agentProvider?: AgentProvider
@@ -125,6 +126,7 @@ function renderPanel(options: RenderPanelOptions = {}) {
           ...(options.optionGroups !== undefined ? { optionGroups: options.optionGroups } : {}),
         })}
         repoGitStore={repoGitStore}
+        {...(options.messages !== undefined ? { messages: options.messages } : {})}
         gitTab={gitTab}
         onSendMessage={options.onSendMessage ?? (() => {})}
         {...(options.agentSessionInfo !== undefined ? { agentSessionInfo: options.agentSessionInfo } : {})}
@@ -156,6 +158,33 @@ function renderPanel(options: RenderPanelOptions = {}) {
 function toolRequestPayload(toolName: string): Record<string, unknown> {
   return { request: { tool_name: toolName, input: {} } }
 }
+
+describe('prompt cache notice in the managed editor', () => {
+  it('shows the expired-context estimate above the composer without sending or changing a draft', async () => {
+    const send = vi.fn()
+    const message = create(AgentChatMessageSchema, {
+      id: 'generated-cache-usage',
+      contentCompression: ContentCompression.NONE,
+      seq: 1n,
+      createdAt: new Date(Date.now() - 600_000).toISOString(),
+      content: new TextEncoder().encode(JSON.stringify({ type: 'assistant', message: {
+        id: 'generated-cache-response',
+        model: 'generated-model',
+        usage: { input_tokens: 100, cache_read_input_tokens: 899, cache_creation_input_tokens: 1, cache_creation: { ephemeral_5m_input_tokens: 1 } },
+      } })),
+    })
+    const view = renderPanel({ messages: [message], onSendMessage: send })
+    const notice = screen.getByTestId('prompt-cache-notice')
+    expect(notice.textContent).toContain('about 1k input tokens')
+    const editor = await vi.waitFor(() => {
+      const element = view.container.querySelector('[contenteditable="true"]')
+      expect(element).not.toBeNull()
+      return element!
+    })
+    expect(notice.compareDocumentPosition(editor)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(send).not.toHaveBeenCalled()
+  })
+})
 
 /**
  * A two-question AskUserQuestion payload, so the paging and the per-page draft

@@ -7,7 +7,7 @@ import type { PermissionPresetController, ProviderSettingChangeHandler } from '.
 import type { BeginQueueEdit } from './queueEditSession'
 import type { WorkingTreeInfo } from '~/components/common/WorkingTree'
 import type { BranchMenuActions } from '~/components/workspace/branchActions'
-import type { AgentInfo, AgentInputQueueSnapshot, QueuedAgentInput } from '~/generated/proto/leapmux/v1/agent_pb'
+import type { AgentChatMessage, AgentInfo, AgentInputQueueSnapshot, QueuedAgentInput } from '~/generated/proto/leapmux/v1/agent_pb'
 import type { AgentSessionInfo } from '~/stores/agentSession.store'
 import type { PromptSuggestion } from '~/stores/chatPromptSuggestion'
 import type { TurnRetryOffer } from '~/stores/chatTurnRetryOffer'
@@ -59,6 +59,7 @@ import { actionButtonClass } from './controls/ControlActionRow'
 import { createControlAnswerState } from './controls/types'
 import { MarkdownEditor } from './markdownEditor/MarkdownEditor'
 import { PendingQuestionsBanner } from './PendingQuestionsBanner'
+import { PromptCacheNotice } from './PromptCacheNotice'
 import { PromptSuggestionChip } from './PromptSuggestionChip'
 import { providerFor } from './providers/registry'
 import { activePermissionPreset, usablePresets } from './providerSettings'
@@ -81,6 +82,9 @@ export interface AgentEditorPanelProps {
   /** Shell-owned request state that survives focus changes and retires with the agent tab. */
   actionStateStore?: AgentComposerActionStateStore
   agent?: AgentInfo
+  messages?: readonly AgentChatMessage[]
+  messageVersion?: number
+  cacheHistoryCurrent?: boolean
   /**
    * Why the composer accepts no input, when it does not (e.g. a non-steerable
    * subagent). Its PRESENCE is what disables the composer, so a dead box with no
@@ -778,6 +782,14 @@ export const AgentEditorPanel: Component<AgentEditorPanelProps> = (props) => {
         class={styles.inputArea}
         data-no-status-bar={preferences.showComposerStatusBar() ? undefined : ''}
       >
+        <Show when={props.agent && !ctrl.activeControlRequest()}>
+          <PromptCacheNotice
+            provider={props.agent?.agentProvider ?? AgentProvider.UNSPECIFIED}
+            messages={props.messages ?? []}
+            {...(props.messageVersion !== undefined ? { messageVersion: props.messageVersion } : {})}
+            current={props.cacheHistoryCurrent ?? true}
+          />
+        </Show>
         <AgentInputQueuePauseBanner
           paused={queuePaused() && queueControlsShown()}
           busy={pauseInFlight()}

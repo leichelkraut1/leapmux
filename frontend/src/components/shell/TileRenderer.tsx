@@ -1333,6 +1333,9 @@ export function createTileRenderer(opts: TileRendererOpts) {
         suppressAutoFocus={isTabEditing}
         agentId={agentId()}
         actionStateStore={opts.agentComposerActionStates}
+        messages={chatStore.getMessages(agentId())}
+        messageVersion={chatStore.getMessageVersion(agentId())}
+        cacheHistoryCurrent={!chatStore.hasNewerMessages(agentId())}
         {...editorOptionalProps()}
         {...optionalProp('messageContext', messageContext(focusedAgentTab()?.workerId ?? '', agentId()))}
         queueClientId={opts.clientId()}

@@ -3,6 +3,7 @@ import type { NativeConversationRef } from '~/components/chat/nativeConversation
 import { createEffect, createMemo, createSignal, createUniqueId, For, on, Show } from 'solid-js'
 import { ChatView } from '~/components/chat/ChatView'
 import { nativeConversationKey } from '~/components/chat/nativeConversation'
+import { PromptCacheNotice } from '~/components/chat/PromptCacheNotice'
 import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
 import { Dialog } from '~/components/common/Dialog'
 import { NATIVE_SESSION_CONTROL } from '~/generated/contracts/native-session-control'
@@ -205,6 +206,14 @@ export const NativeAgentTranscriptViewer: Component<{
             }}
           >
             <Show when={control.hasComposer()}>
+              <PromptCacheNotice
+                provider={props.conversation.agentProvider}
+                messages={transcript.messages()}
+                messageVersion={transcript.version()}
+                savedHistory
+                current={props.online && transcript.loaded() && !transcript.hasNewer() && !transcript.sourceChanged() && !transcript.error()}
+                observedAt={transcript.observedAt()}
+              />
               <label class={styles.description} for={editorId}>Continue this conversation</label>
               <textarea
                 id={editorId}

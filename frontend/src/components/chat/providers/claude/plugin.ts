@@ -10,6 +10,7 @@ import { claudeResultDivider } from './extractors/resultDivider'
 import { claudeExtractRow } from './extractors/row'
 import { projectClaudeNativeConversation } from './nativeConversation'
 import { claudeControls } from './pluginControls'
+import { claudePromptCacheFromMessages } from './promptCache'
 import { claudeRateLimitsFromMessage } from './rateLimits'
 import { claudeContextUsageFromMessage } from './sessionMetadata'
 import { claudeRelatedMessages, claudeSpanRole } from './spanRole'
@@ -36,6 +37,7 @@ const claudeCodePlugin: ProviderPlugin = {
     goalStatusUnconfirmed: true,
     rateLimitsFromMessage: claudeRateLimitsFromMessage,
     contextUsageFromMessage: claudeContextUsageFromMessage,
+    promptCacheFromMessages: claudePromptCacheFromMessages,
     compactionBoundaryFromMessage: claudeCompactionBoundary,
     contextBufferPct: CLAUDE_AUTOCOMPACT_BUFFER_PCT,
   },

@@ -33,6 +33,7 @@ import type { AgentChatMessage, AgentProvider, AssembledMessageKind, MessageComp
 import type { ParsedMessageContent } from '~/lib/messageParser'
 import type { ToolSpanRole, ToolSpanSide } from '~/lib/messageSpan'
 import type { ContextUsageInfo, RateLimitUpdate } from '~/models/agentSession'
+import type { PromptCacheSnapshot } from '~/models/promptCache'
 import type { ControlRequest } from '~/stores/control.store'
 
 export interface AttachmentCapabilities {
@@ -412,6 +413,9 @@ export interface ProviderSessionCapability {
    *     (`handleUsageUpdated` in `providers/cline/output.go`).
    */
   contextUsageFromMessage?: (parsed: ParsedMessageContent) => ContextUsageInfo | null
+
+  /** Estimate request-cache state from native usage; missing evidence stays unknown. */
+  promptCacheFromMessages?: (messages: readonly AgentChatMessage[], options?: { savedHistory?: boolean }) => PromptCacheSnapshot | undefined
 
   /**
    * Read a native compaction boundary, or null for another frame.
