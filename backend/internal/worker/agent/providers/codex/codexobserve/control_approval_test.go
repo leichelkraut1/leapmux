@@ -104,6 +104,31 @@ func TestNativeControlApprovalOfferedChoicesAndCompleteDetails(t *testing.T) {
 	require.Contains(t, prompt.Detail, "execpolicy_amendment")
 }
 
+func TestNativeControlApprovalUsesNativeCancelWhenDeclineIsNotOffered(t *testing.T) {
+	for _, method := range []string{"item/commandExecution/requestApproval", "item/fileChange/requestApproval"} {
+		t.Run(method, func(t *testing.T) {
+			request := generatedApproval(method, 51, map[string]any{
+				"availableDecisions": []any{"accept", map[string]any{"acceptWithExecpolicyAmendment": map[string]any{"execpolicy_amendment": []string{"echo"}}}, "cancel"},
+			})
+			c, server, state, _, _ := approvalFixture(t, request)
+			prompt := state.PendingApprovals[0]
+			require.Len(t, prompt.Options, 2)
+			require.Equal(t, "allow_once", prompt.Options[0].ID)
+			require.Equal(t, "cancel", prompt.Options[1].ID)
+			require.Contains(t, prompt.Options[1].Description, "stop its current turn")
+			require.ErrorIs(t, c.AnswerApproval(t.Context(), approvalAnswer(state, "deny")), agent.ErrNativeControlInvalid)
+			answer := approvalAnswer(state, "cancel")
+			answer.RequestID = "88888888-8888-4888-8888-888888888888"
+			require.NoError(t, c.AnswerApproval(t.Context(), answer))
+			require.NoError(t, c.AnswerApproval(t.Context(), answer))
+			server.mu.Lock()
+			defer server.mu.Unlock()
+			require.Equal(t, 1, server.mutations)
+			require.Equal(t, "cancel", testString(server.approvalParams[0]["decision"]))
+		})
+	}
+}
+
 func TestNativeControlApprovalRejectsChangedPromptOwnerTurnAndChoice(t *testing.T) {
 	for _, change := range []string{"changed-content", "resolved", "changed-owner", "changed-turn", "unoffered-choice", "duplicate-native-id", "equivalent-escaped-id"} {
 		t.Run(change, func(t *testing.T) {

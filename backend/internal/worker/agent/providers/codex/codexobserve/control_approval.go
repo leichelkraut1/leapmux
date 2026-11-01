@@ -118,11 +118,7 @@ func (c *Controller) approvalAction(snapshot controlSnapshot, request controlApp
 	}
 	action.prompt.PromptID = controlBindingHash(c.epoch + "\x00" + snapshot.ownerGeneration + "\x00" + snapshot.ID + "\x00" + string(raw))
 	action.journalID = controlBindingHash(snapshot.ownerGeneration + "\x00" + snapshot.ID + "\x00" + string(raw))
-	detail, detailErr := json.MarshalIndent(struct {
-		Method     string          `json:"method"`
-		Params     json.RawMessage `json:"params"`
-		FileChange json.RawMessage `json:"proposedFileChanges,omitempty"`
-	}{request.Method, request.Params, fileChange}, "", "  ")
+	detail, detailErr := controlApprovalReview(request, fileChange)
 	if detailErr != nil || len(detail) > contracts.NativeSessionControlMaxApprovalDetailBytes {
 		action.prompt.Detail = "This native prompt exceeds the complete-preview limit. Review it in the original Codex app."
 		action.prompt.UnavailableReason = "The complete prompt cannot be displayed safely here."
@@ -174,7 +170,7 @@ func (c *Controller) approvalAction(snapshot controlSnapshot, request controlApp
 			allowed = make(map[string]bool)
 			for _, raw := range params.AvailableDecisions {
 				var decision string
-				if json.Unmarshal(raw, &decision) == nil && (decision == "accept" || decision == "decline") {
+				if json.Unmarshal(raw, &decision) == nil && (decision == "accept" || decision == "decline" || decision == "cancel") {
 					allowed[decision] = true
 				}
 			}
@@ -184,6 +180,9 @@ func (c *Controller) approvalAction(snapshot controlSnapshot, request controlApp
 		}
 		if allowed["decline"] {
 			add("deny", "Deny", "Decline this pending native request.", "decline")
+		}
+		if allowed["cancel"] {
+			add("cancel", "Cancel", "Cancel this pending request and stop its current turn.", "cancel")
 		}
 	case "item/permissions/requestApproval":
 		action.prompt.Title = "Approve requested permissions"
