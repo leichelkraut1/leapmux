@@ -20,6 +20,7 @@ import (
 var nativeControlRequestID = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
 var nativeControlBinding = regexp.MustCompile(`^[A-Za-z0-9_.-]{16,256}$`)
 var nativeControlTurnID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,256}$`)
+var nativeApprovalOptionID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 func registerNativeControlHandlers(d registrar, svc *Service) {
 	registerOwnerGuarded(d, "InspectNativeSessionControl", leapmuxv1.Scope_SCOPE_AGENT_READ, dispatchPlain,
@@ -46,6 +47,7 @@ func registerNativeControlHandlers(d registrar, svc *Service) {
 				state.CanSend, state.CanInterrupt = false, false
 				state.BindingToken, state.ActiveTurnID = "", ""
 				state.ExpiresAt = time.Time{}
+				state.PendingApprovals = nil
 				state.ActivityState = leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_UNSPECIFIED
 				state.UnavailableReason = "This chat has no available connection to its original app."
 			} else if err != nil {
@@ -118,6 +120,38 @@ func registerNativeControlHandlers(d registrar, svc *Service) {
 			}
 			sendProtoResponse(sender, &leapmuxv1.InterruptNativeSessionResponse{SessionId: req.SessionId, RequestId: req.RequestId, Detail: "Interruption accepted by the original app."})
 		})
+	registerOwnerGuarded(d, "AnswerNativeSessionApproval", leapmuxv1.Scope_SCOPE_AGENT_WRITE, dispatchPlain,
+		func(ctx context.Context, _ channel.Caller, req *leapmuxv1.AnswerNativeSessionApprovalRequest, sender channel.ResponseWriter) {
+			if !validNativeControlMutation(req.SessionId, req.BindingToken, req.RequestId) ||
+				!nativeControlTurnID.MatchString(req.PromptId) || !nativeApprovalOptionID.MatchString(req.OptionId) ||
+				(req.ExpectedTurnId != "" && !nativeControlTurnID.MatchString(req.ExpectedTurnId)) {
+				sendInvalidArgument(sender, "invalid native chat approval answer")
+				return
+			}
+			ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+			defer cancel()
+			releaseNative, err := svc.nativeControlAdmissions.acquire(ctx, req.AgentProvider, req.SessionId)
+			if err != nil {
+				sendNativeControlError(sender, err)
+				return
+			}
+			defer releaseNative()
+			if !svc.requireExternalNativeControl(ctx, sender, req.AgentProvider, req.SessionId) {
+				return
+			}
+			err = svc.Agents.AnswerNativeSessionApproval(ctx, req.AgentProvider, agent.NativeSessionApprovalAnswer{
+				SessionID: req.SessionId, BindingToken: req.BindingToken, RequestID: req.RequestId,
+				PromptID: req.PromptId, OptionID: req.OptionId, ExpectedTurnID: req.ExpectedTurnId,
+			})
+			if err != nil {
+				sendNativeControlError(sender, err)
+				return
+			}
+			sendProtoResponse(sender, &leapmuxv1.AnswerNativeSessionApprovalResponse{
+				SessionId: req.SessionId, RequestId: req.RequestId, PromptId: req.PromptId,
+				Detail: "Answer submitted to the original app. Its permission rules still apply.",
+			})
+		})
 }
 
 func validNativeControlMutation(session, binding, request string) bool {
@@ -135,7 +169,7 @@ func validNativeInputBehavior(behavior leapmuxv1.NativeSessionInputBehavior) boo
 }
 
 func nativeControlResponse(session string, state agent.NativeSessionControlState, now time.Time) (*leapmuxv1.InspectNativeSessionControlResponse, error) {
-	if state.SessionID != session || len(state.OwnerLabel) > 256 || len(state.TransportLabel) > 256 || len(state.UnavailableReason) > 1024 || len(state.RecentInputs) > 20 {
+	if state.SessionID != session || len(state.OwnerLabel) > 256 || len(state.TransportLabel) > 256 || len(state.UnavailableReason) > 1024 || len(state.RecentInputs) > 20 || len(state.PendingApprovals) > contracts.NativeSessionControlMaxPendingApprovals {
 		return nil, agent.ErrNativeControlInvalid
 	}
 	if state.ActiveTurnID != "" && !nativeControlTurnID.MatchString(state.ActiveTurnID) {
@@ -144,7 +178,11 @@ func nativeControlResponse(session string, state agent.NativeSessionControlState
 	if state.BindingToken != "" && !nativeControlBinding.MatchString(state.BindingToken) {
 		return nil, agent.ErrNativeControlInvalid
 	}
-	if state.CanSend || state.CanInterrupt {
+	hasAnswerableApproval := false
+	for _, approval := range state.PendingApprovals {
+		hasAnswerableApproval = hasAnswerableApproval || approval.CanAnswer
+	}
+	if state.CanSend || state.CanInterrupt || hasAnswerableApproval {
 		if !nativeControlBinding.MatchString(state.BindingToken) || !agent.ValidNativeControlLease(state, state.BindingToken, now) ||
 			state.ExpiresAt.After(now.Add(contracts.NativeSessionControlLeaseSeconds*time.Second+5*time.Second)) ||
 			(state.CanInterrupt && state.ActiveTurnID == "") {
@@ -181,7 +219,39 @@ func nativeControlResponse(session string, state agent.NativeSessionControlState
 			RequestId: input.RequestID, State: input.State, Detail: input.Detail, TurnId: input.TurnID,
 		})
 	}
+	seenPrompts := make(map[string]bool, len(state.PendingApprovals))
+	for _, approval := range state.PendingApprovals {
+		if !nativeControlTurnID.MatchString(approval.PromptID) || seenPrompts[approval.PromptID] ||
+			(approval.TurnID != "" && !nativeControlTurnID.MatchString(approval.TurnID)) ||
+			!validNativeApprovalDisplay(approval.Title, contracts.NativeSessionControlMaxApprovalTextBytes) ||
+			!validNativeApprovalDisplay(approval.Detail, contracts.NativeSessionControlMaxApprovalDetailBytes) ||
+			!validNativeApprovalDisplay(approval.UnavailableReason, contracts.NativeSessionControlMaxApprovalTextBytes) ||
+			len(approval.Options) > contracts.NativeSessionControlMaxApprovalOptions ||
+			(approval.CanAnswer && (strings.TrimSpace(approval.Title) == "" || strings.TrimSpace(approval.Detail) == "" || len(approval.Options) == 0 || approval.UnavailableReason != "")) {
+			return nil, agent.ErrNativeControlInvalid
+		}
+		seenPrompts[approval.PromptID] = true
+		prompt := &leapmuxv1.NativeSessionApproval{
+			PromptId: approval.PromptID, TurnId: approval.TurnID, Title: approval.Title, Detail: approval.Detail,
+			CanAnswer: approval.CanAnswer, UnavailableReason: approval.UnavailableReason,
+		}
+		seenOptions := make(map[string]bool, len(approval.Options))
+		for _, option := range approval.Options {
+			if !nativeApprovalOptionID.MatchString(option.ID) || seenOptions[option.ID] || strings.TrimSpace(option.Label) == "" ||
+				!validNativeApprovalDisplay(option.Label, contracts.NativeSessionControlMaxApprovalTextBytes) ||
+				!validNativeApprovalDisplay(option.Description, contracts.NativeSessionControlMaxApprovalTextBytes) {
+				return nil, agent.ErrNativeControlInvalid
+			}
+			seenOptions[option.ID] = true
+			prompt.Options = append(prompt.Options, &leapmuxv1.NativeSessionApprovalOption{Id: option.ID, Label: option.Label, Description: option.Description})
+		}
+		response.PendingApprovals = append(response.PendingApprovals, prompt)
+	}
 	return response, nil
+}
+
+func validNativeApprovalDisplay(value string, limit int) bool {
+	return len(value) <= limit && utf8.ValidString(value) && !strings.ContainsRune(value, '\x00')
 }
 
 // An external viewer cannot bypass the control path of a live LeapMux agent.

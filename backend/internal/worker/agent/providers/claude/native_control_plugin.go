@@ -38,6 +38,9 @@ func (c *nativeControlController) writePlugin(descriptorPath string) error {
 		text := strings.ReplaceAll(string(data), "__LEAPMUX_DESCRIPTOR_JSON__", string(descriptorJSON))
 		text = strings.ReplaceAll(text, "__LEAPMUX_POLL_MS__", strconv.Itoa(contracts.NativeSessionControlPollMilliseconds))
 		text = strings.ReplaceAll(text, "__LEAPMUX_RETENTION_MS__", strconv.Itoa(2*contracts.NativeSessionControlLeaseSeconds*1000))
+		text = strings.ReplaceAll(text, "__LEAPMUX_APPROVAL_TEXT_BYTES__", strconv.Itoa(contracts.NativeSessionControlMaxApprovalTextBytes))
+		text = strings.ReplaceAll(text, "__LEAPMUX_APPROVAL_DETAIL_BYTES__", strconv.Itoa(contracts.NativeSessionControlMaxApprovalDetailBytes))
+		text = strings.ReplaceAll(text, "__LEAPMUX_MAX_APPROVALS__", strconv.Itoa(contracts.NativeSessionControlMaxPendingApprovals))
 		if info, err := os.Lstat(destination); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular()) {
 			return fs.ErrPermission
 		} else if err != nil && !os.IsNotExist(err) {

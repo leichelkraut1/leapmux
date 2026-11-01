@@ -48,6 +48,7 @@ type nativeControlPeer struct {
 	commands   []*nativeControlCommand
 	byRequest  map[string]*nativeControlCommand
 	recent     []agent.NativeSessionInputOutcome
+	approvals  map[string]*nativeControlPendingApproval
 }
 
 type nativeControlCommand struct {
@@ -57,6 +58,8 @@ type nativeControlCommand struct {
 	Text        string `json:"text,omitempty"`
 	TurnID      string `json:"turnId,omitempty"`
 	InstanceID  string `json:"instanceId"`
+	PromptID    string `json:"promptId,omitempty"`
+	OptionID    string `json:"optionId,omitempty"`
 	state       leapmuxv1.NativeSessionInputState
 	detail      string
 	fingerprint [32]byte
@@ -254,6 +257,7 @@ func (c *nativeControlController) Inspect(ctx context.Context, sessionID string)
 	c.pruneCommands(now)
 	peer.owner, peer.verifiedAt = owner, now
 	state.RecentInputs = c.outcomes(peer)
+	state.PendingApprovals = c.pendingApprovals(peer, now)
 	if !c.peerFresh(peer, now) {
 		c.markUncertain(peer)
 		state.RecentInputs = c.outcomes(peer)
@@ -264,6 +268,9 @@ func (c *nativeControlController) Inspect(ctx context.Context, sessionID string)
 	state.ExpiresAt = now.Add(time.Duration(contracts.NativeSessionControlLeaseSeconds) * time.Second)
 	state.BindingToken = c.binding(peer, state.ExpiresAt)
 	state.ActivityState = owner.activity
+	if len(state.PendingApprovals) > 0 {
+		state.ActivityState = leapmuxv1.AgentActivityState_AGENT_ACTIVITY_STATE_WAITING_FOR_USER
+	}
 	state.ActiveTurnID = peer.activeTurn
 	state.CanSend = !peer.stopped
 	state.CanInterrupt = peer.activeTurn != ""
@@ -411,7 +418,7 @@ func (c *nativeControlController) enqueue(ctx context.Context, sessionID, bindin
 	if c.closed || peer == nil || !c.validBinding(peer, binding, c.clock.Now()) || !c.peerFresh(peer, c.clock.Now()) {
 		return nil, agent.ErrNativeControlStale
 	}
-	encoded, _ := json.Marshal([]string{command.Kind, command.Text, command.TurnID, binding})
+	encoded, _ := json.Marshal([]string{command.Kind, command.Text, command.TurnID, binding, command.PromptID, command.OptionID})
 	command.fingerprint = sha256.Sum256(encoded)
 	if previous := peer.byRequest[command.RequestID]; previous != nil {
 		if previous.fingerprint != command.fingerprint {
@@ -428,6 +435,13 @@ func (c *nativeControlController) enqueue(ctx context.Context, sessionID, bindin
 	if command.Kind == "interrupt" && (!state.CanInterrupt || peer.activeTurn != command.TurnID) {
 		return nil, agent.ErrNativeControlStale
 	}
+	if command.Kind == "approval" {
+		pending := peer.approvals[command.PromptID]
+		if pending == nil || pending.command != nil || pending.turnID != command.TurnID ||
+			peer.activeTurn != command.TurnID || !c.clock.Now().Before(pending.deadline) || peer.stopped {
+			return nil, agent.ErrNativeControlStale
+		}
+	}
 	deliveryID, err := nativeControlRandom()
 	if err != nil {
 		return nil, agent.ErrNativeControlUnavailable
@@ -440,6 +454,11 @@ func (c *nativeControlController) enqueue(ctx context.Context, sessionID, bindin
 	peer.byRequest[command.RequestID] = command
 	c.commandCount++
 	c.rememberOutcome(peer, command, true)
+	if command.Kind == "approval" {
+		pending := peer.approvals[command.PromptID]
+		pending.command = command
+		close(pending.wake)
+	}
 	return command, nil
 }
 
@@ -451,6 +470,7 @@ func (c *nativeControlController) Close() error {
 	}
 	c.closed = true
 	for _, peer := range c.peers {
+		c.cancelApprovals(peer, nil)
 		for _, command := range peer.commands {
 			if !command.finished {
 				command.state = leapmuxv1.NativeSessionInputState_NATIVE_SESSION_INPUT_STATE_UNCERTAIN

@@ -59,20 +59,22 @@ describe('inspectNativeSessionControl', () => {
 })
 
 describe('native session control writes', () => {
-  it.each(['send', 'interrupt'] as const)('does not automatically retry an unconfirmed %s', async (action) => {
+  it.each(['send', 'interrupt', 'approval'] as const)('does not automatically retry an unconfirmed %s', async (action) => {
     vi.useFakeTimers()
-    const { sendNativeSessionInput, interruptNativeSession } = await import('./workerRpc')
+    const { sendNativeSessionInput, interruptNativeSession, answerNativeSessionApproval } = await import('./workerRpc')
     const { AgentProvider } = await import('~/generated/proto/leapmux/v1/agent_pb')
     const failure = unavailable()
     callWorkerMock.mockRejectedValue(failure)
     const identity = { agentProvider: AgentProvider.CODEX, sessionId: 'generated-session', bindingToken: 'generated-binding', requestId: 'generated-request' }
     const result = (action === 'send'
       ? sendNativeSessionInput('generated-worker', { ...identity, text: 'generated text' })
-      : interruptNativeSession('generated-worker', { ...identity, expectedTurnId: 'generated-turn' })).catch(error => error)
+      : action === 'interrupt'
+        ? interruptNativeSession('generated-worker', { ...identity, expectedTurnId: 'generated-turn' })
+        : answerNativeSessionApproval('generated-worker', { ...identity, promptId: 'generated-prompt', optionId: 'generated-option', expectedTurnId: 'generated-turn' })).catch(error => error)
     await vi.advanceTimersByTimeAsync(10_000)
     expect(await result).toBe(failure)
     expect(callWorkerMock).toHaveBeenCalledOnce()
-    expect(callWorkerMock.mock.calls[0]![1]).toBe(action === 'send' ? 'SendNativeSessionInput' : 'InterruptNativeSession')
+    expect(callWorkerMock.mock.calls[0]![1]).toBe(action === 'send' ? 'SendNativeSessionInput' : action === 'interrupt' ? 'InterruptNativeSession' : 'AnswerNativeSessionApproval')
   })
 })
 

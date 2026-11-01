@@ -169,13 +169,17 @@ func (c *Controller) Inspect(ctx context.Context, id string) (agent.NativeSessio
 	state := agent.NativeSessionControlState{SessionID: id, OwnerLabel: "Codex native owner", TransportLabel: "Codex local IPC",
 		InputBehavior: leapmuxv1.NativeSessionInputBehavior_NATIVE_SESSION_INPUT_BEHAVIOR_SEND_NOW, ObservedAt: now, OwnerPresent: true}
 	state.ActivityState, state.UnavailableReason = snapshot.activity()
+	state.PendingApprovals = c.pendingApprovals(snapshot)
 	if state.UnavailableReason != "" {
+		controlApprovalsUnavailable(state.PendingApprovals, state.UnavailableReason)
 		return state, nil
 	}
 	if c.prepareJournal() != nil {
 		state.UnavailableReason = "Private delivery tracking is unavailable on this Worker."
+		controlApprovalsUnavailable(state.PendingApprovals, state.UnavailableReason)
 		return state, nil
 	}
+	c.approvalTombstones(snapshot, state.PendingApprovals)
 	for token, lease := range c.leases {
 		if !now.Before(lease.expires) || (lease.thread == id && (lease.owner != s.owner || lease.peer != s.peer)) {
 			delete(c.leases, token)
@@ -183,6 +187,7 @@ func (c *Controller) Inspect(ctx context.Context, id string) (agent.NativeSessio
 	}
 	if len(c.leases) >= 256 {
 		state.UnavailableReason = "Too many native chat leases are active."
+		controlApprovalsUnavailable(state.PendingApprovals, state.UnavailableReason)
 		return state, nil
 	}
 	state.BindingToken = c.epoch + "-" + newID()

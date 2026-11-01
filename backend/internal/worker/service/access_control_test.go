@@ -380,6 +380,9 @@ var ownerGuardedProbes = func() []ownerGuardedProbe {
 		ownerGuardedProbe{"InterruptNativeSession", "InterruptNativeSession", func() proto.Message {
 			return &leapmuxv1.InterruptNativeSessionRequest{AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, SessionId: "generated-session", BindingToken: "generated-opaque-binding", RequestId: "generated-request", ExpectedTurnId: "generated-turn"}
 		}},
+		ownerGuardedProbe{"AnswerNativeSessionApproval", "AnswerNativeSessionApproval", func() proto.Message {
+			return &leapmuxv1.AnswerNativeSessionApprovalRequest{AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, SessionId: "generated-session", BindingToken: "generated-opaque-binding", RequestId: "generated-request", PromptId: "generated-prompt", OptionId: "allow-once", ExpectedTurnId: "generated-turn"}
+		}},
 		ownerGuardedProbe{"ListAgentSessions", "ListAgentSessions", func() proto.Message {
 			return &leapmuxv1.ListAgentSessionsRequest{
 				AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE,

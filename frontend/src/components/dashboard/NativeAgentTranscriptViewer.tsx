@@ -1,6 +1,6 @@
 import type { Component } from 'solid-js'
 import type { NativeConversationRef } from '~/components/chat/nativeConversation'
-import { createEffect, createMemo, createSignal, createUniqueId, on, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, createUniqueId, For, on, Show } from 'solid-js'
 import { ChatView } from '~/components/chat/ChatView'
 import { nativeConversationKey } from '~/components/chat/nativeConversation'
 import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
@@ -65,7 +65,7 @@ export const NativeAgentTranscriptViewer: Component<{
           </button>
         </div>
         <Show
-          when={control.canSend()}
+          when={control.connected()}
           fallback={(
             <p class={styles.banner}>
               Read only · This chat remains controlled by its original app.
@@ -77,7 +77,7 @@ export const NativeAgentTranscriptViewer: Component<{
             Connected to the original conversation ·
             {' '}
             {activity()}
-            <span class={styles.connectionDescription}>{sendDescription()}</span>
+            <Show when={control.hasComposer()}><span class={styles.connectionDescription}>{sendDescription()}</span></Show>
           </p>
         </Show>
         <Show when={control.capabilities()?.ownerLabel}>
@@ -140,6 +140,62 @@ export const NativeAgentTranscriptViewer: Component<{
             />
           </Show>
         </div>
+        <Show when={control.pendingApprovals().length > 0}>
+          <div class={styles.approvals} aria-label="Pending approvals" data-testid="native-approval-prompts">
+            <For each={control.pendingApprovals().map(approval => approval.promptId)}>
+              {promptId => (
+                <Show when={control.pendingApprovals().find(approval => approval.promptId === promptId)}>
+                  {approval => (
+                    <section class={styles.approval} aria-label={`Approval: ${approval().title}`} data-testid="native-approval-prompt" data-prompt-id={promptId}>
+                      <p class={styles.description}>Waiting for your approval</p>
+                      <h3 class={styles.approvalTitle}>{approval().title}</h3>
+                      <pre class={styles.approvalDetail}>{approval().detail}</pre>
+                      <div class={styles.approvalOptions}>
+                        <For each={approval().options.map(option => option.id)}>
+                          {optionId => (
+                            <Show when={approval().options.find(option => option.id === optionId)}>
+                              {option => (
+                                <div class={styles.approvalOption}>
+                                  <button
+                                    class={styles.approvalChoice}
+                                    type="button"
+                                    disabled={!control.canAnswerApproval(promptId)}
+                                    onClick={() => void control.answerApproval(promptId, optionId)}
+                                  >
+                                    {option().label}
+                                  </button>
+                                  <Show when={option().description}>{description => <p class={styles.description}>{description()}</p>}</Show>
+                                </div>
+                              )}
+                            </Show>
+                          )}
+                        </For>
+                      </div>
+                      <Show
+                        when={control.approvalAnswerState(promptId)}
+                        fallback={(
+                          <Show when={!control.canAnswerApproval(promptId)}>
+                            <p class={styles.description} role="status">{approval().unavailableReason || control.unavailableReason() || 'Refresh the connection to answer this prompt.'}</p>
+                          </Show>
+                        )}
+                      >
+                        {state => (
+                          <p class={styles.description} role="status">
+                            {state() === 'sending'
+                              ? 'Sending your answer…'
+                              : state() === 'accepted'
+                                ? 'Answer submitted to the original app. Waiting for the prompt to close.'
+                                : 'Answer unconfirmed. It will not be resent; check the original app.'}
+                          </p>
+                        )}
+                      </Show>
+                    </section>
+                  )}
+                </Show>
+              )}
+            </For>
+          </div>
+        </Show>
         <Show when={control.hasComposer() || control.capabilities()?.canInterrupt}>
           <form
             class={styles.composer}

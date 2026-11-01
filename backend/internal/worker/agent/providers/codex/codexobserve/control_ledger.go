@@ -27,6 +27,9 @@ type controlRecord struct {
 	Status       string `json:"status"`
 	LeaseHash    string `json:"leaseHash"`
 	LeaseExpires int64  `json:"leaseExpires"`
+	// A native approval acknowledgment may only confirm routing. Retain its
+	// one-shot tombstone across fresh browser leases and Worker restarts.
+	RetainApproval bool `json:"retainApproval,omitempty"`
 }
 
 type controlJournal struct {
@@ -113,7 +116,7 @@ func (j controlJournal) prune(now time.Time, live map[string]bool) error {
 		if err != nil {
 			return err
 		}
-		if record.Status == "attempted" || record.Status == "uncertain" || live[record.LeaseHash] || record.LeaseExpires > now.UnixNano() {
+		if record.RetainApproval || record.Status == "attempted" || record.Status == "uncertain" || live[record.LeaseHash] || record.LeaseExpires > now.UnixNano() {
 			continue
 		}
 		if os.Remove(path) != nil {
@@ -152,6 +155,14 @@ func (j controlJournal) existing(id, fingerprint string) (*controlRecord, error)
 }
 
 func (j controlJournal) claim(id, fingerprint, binding string, expires time.Time) error {
+	return j.claimRecord(id, fingerprint, binding, expires, false)
+}
+
+func (j controlJournal) claimApproval(id, fingerprint, binding string, expires time.Time) error {
+	return j.claimRecord(id, fingerprint, binding, expires, true)
+}
+
+func (j controlJournal) claimRecord(id, fingerprint, binding string, expires time.Time, retainApproval bool) error {
 	entries, err := os.ReadDir(j.directory)
 	if err != nil || len(entries) > maxControlRecords {
 		return agent.ErrNativeControlUnavailable
@@ -160,7 +171,7 @@ func (j controlJournal) claim(id, fingerprint, binding string, expires time.Time
 	if err != nil {
 		return agent.ErrNativeControlUncertain
 	}
-	raw, _ := json.Marshal(controlRecord{Version: 1, Fingerprint: fingerprint, Status: "attempted", LeaseHash: controlBindingHash(binding), LeaseExpires: expires.UnixNano()})
+	raw, _ := json.Marshal(controlRecord{Version: 1, Fingerprint: fingerprint, Status: "attempted", LeaseHash: controlBindingHash(binding), LeaseExpires: expires.UnixNano(), RetainApproval: retainApproval})
 	_, writeErr := f.Write(raw)
 	syncErr := f.Sync()
 	closeErr := f.Close()
@@ -171,6 +182,10 @@ func (j controlJournal) claim(id, fingerprint, binding string, expires time.Time
 }
 
 func (j controlJournal) finish(id, fingerprint, binding string, expires time.Time, result error) error {
+	previous, err := j.read(j.path(id))
+	if err != nil || previous.Fingerprint != fingerprint || previous.LeaseHash != controlBindingHash(binding) || previous.LeaseExpires != expires.UnixNano() {
+		return agent.ErrNativeControlUncertain
+	}
 	status := "accepted"
 	switch {
 	case errors.Is(result, agent.ErrNativeControlStale):
@@ -180,7 +195,7 @@ func (j controlJournal) finish(id, fingerprint, binding string, expires time.Tim
 	case result != nil:
 		status = "uncertain"
 	}
-	raw, _ := json.Marshal(controlRecord{Version: 1, Fingerprint: fingerprint, Status: status, LeaseHash: controlBindingHash(binding), LeaseExpires: expires.UnixNano()})
+	raw, _ := json.Marshal(controlRecord{Version: 1, Fingerprint: fingerprint, Status: status, LeaseHash: controlBindingHash(binding), LeaseExpires: expires.UnixNano(), RetainApproval: previous.RetainApproval})
 	f, err := os.CreateTemp(j.directory, ".codex-control-result-")
 	if err != nil {
 		return agent.ErrNativeControlUncertain

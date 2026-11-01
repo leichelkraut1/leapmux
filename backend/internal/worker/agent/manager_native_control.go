@@ -77,7 +77,7 @@ func (m *Manager) InspectNativeSessionControl(ctx context.Context, provider leap
 		return NativeSessionControlState{}, err
 	}
 	state, err := entry.controller.Inspect(ctx, sessionID)
-	if state.OwnerPresent || state.BindingToken != "" || state.CanSend || state.CanInterrupt {
+	if state.OwnerPresent || state.BindingToken != "" || state.CanSend || state.CanInterrupt || len(state.PendingApprovals) != 0 {
 		entry.mu.Lock()
 		entry.sessions[sessionID] = true
 		entry.mu.Unlock()
@@ -167,6 +167,24 @@ func (m *Manager) InterruptNativeSession(ctx context.Context, provider leapmuxv1
 		NativeSessionInterrupt
 	}{"interrupt", input}, func() (NativeSessionInputReceipt, error) {
 		return NativeSessionInputReceipt{}, entry.controller.Interrupt(ctx, input)
+	})
+	return err
+}
+
+func (m *Manager) AnswerNativeSessionApproval(ctx context.Context, provider leapmuxv1.AgentProvider, input NativeSessionApprovalAnswer) error {
+	entry, err := m.nativeController(ctx, provider)
+	if err != nil {
+		return err
+	}
+	controller, ok := entry.controller.(NativeSessionApprovalController)
+	if !ok {
+		return ErrNativeControlUnavailable
+	}
+	_, err = entry.mutate(ctx, input.RequestID, struct {
+		Kind string
+		NativeSessionApprovalAnswer
+	}{"approval", input}, func() (NativeSessionInputReceipt, error) {
+		return NativeSessionInputReceipt{}, controller.AnswerApproval(ctx, input)
 	})
 	return err
 }

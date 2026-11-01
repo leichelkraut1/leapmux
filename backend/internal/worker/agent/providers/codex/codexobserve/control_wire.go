@@ -38,19 +38,22 @@ type controlFrame struct {
 }
 
 type controlTurn struct {
-	ID     string `json:"turnId"`
-	Status string `json:"status"`
+	ID     string            `json:"turnId"`
+	Status string            `json:"status"`
+	Items  []json.RawMessage `json:"items"`
 }
 
 type controlSnapshot struct {
-	ID        string `json:"id"`
-	SessionID string `json:"sessionId"`
-	Resume    string `json:"resumeState"`
-	Runtime   struct {
+	ownerGeneration string
+	ID              string `json:"id"`
+	SessionID       string `json:"sessionId"`
+	Resume          string `json:"resumeState"`
+	Runtime         struct {
 		Type  string   `json:"type"`
 		Flags []string `json:"activeFlags"`
 	} `json:"threadRuntimeStatus"`
-	Turns       []controlTurn `json:"turns"`
+	Turns       []controlTurn            `json:"turns"`
+	Requests    []controlApprovalRequest `json:"requests"`
 	TurnHistory struct {
 		Kind    string `json:"kind"`
 		History struct {
@@ -148,7 +151,7 @@ func (s *controlConnection) request(ctx context.Context, method string, version 
 	// that delivery failed. In particular a closed pipe can fail SetDeadline
 	// before Read begins. Keep that outcome uncertain and never replay it.
 	afterWriteError := func(err error) error {
-		if method == "thread-follower-start-turn" || method == "thread-follower-interrupt-turn" {
+		if controlMutationMethod(method) {
 			return agent.ErrNativeControlUncertain
 		}
 		return err
@@ -245,6 +248,11 @@ func (s *controlConnection) snapshot(ctx context.Context) (controlSnapshot, erro
 		if params.Change.Revision == nil || *params.Change.Revision < 0 || params.Change.State.ID != s.thread || params.Change.State.SessionID != s.thread || params.Change.State.Resume != "resumed" {
 			return controlSnapshot{}, agent.ErrNativeControlUnavailable
 		}
+		identity, err := json.Marshal(s.peer)
+		if err != nil {
+			return controlSnapshot{}, agent.ErrNativeControlUnavailable
+		}
+		params.Change.State.ownerGeneration = controlBindingHash(s.owner + "\x00" + string(identity))
 		return params.Change.State, nil
 	}
 	return controlSnapshot{}, agent.ErrNativeControlUnavailable

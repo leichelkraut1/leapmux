@@ -750,8 +750,9 @@ func TestWorkspaceArchive_RefusesEveryWriteRPCOnAnArchivedTab(t *testing.T) {
 	// The separate owner gate and durable managed-session claim check prevent
 	// using this surface to bypass an archived LeapMux tab's controls.
 	externalNativeWrites := map[string]string{
-		"SendNativeSessionInput": "machine-owner-scoped input to an external native session, not a workspace tab",
-		"InterruptNativeSession": "machine-owner-scoped interruption of an external native turn, not a workspace tab",
+		"SendNativeSessionInput":      "machine-owner-scoped input to an external native session, not a workspace tab",
+		"InterruptNativeSession":      "machine-owner-scoped interruption of an external native turn, not a workspace tab",
+		"AnswerNativeSessionApproval": "machine-owner-scoped answer to an external native prompt, not a workspace tab",
 	}
 	for method, reason := range externalNativeWrites {
 		assert.Equal(t, leapmuxv1.Scope_SCOPE_AGENT_WRITE, scopes[method], reason)
@@ -792,6 +793,7 @@ func TestWorkspaceArchive_RefusesEveryWriteRPCOnAnArchivedTab(t *testing.T) {
 type archiveExternalNativeController struct {
 	sends      atomic.Int32
 	interrupts atomic.Int32
+	approvals  atomic.Int32
 }
 
 func (*archiveExternalNativeController) Inspect(context.Context, string) (agent.NativeSessionControlState, error) {
@@ -803,6 +805,10 @@ func (f *archiveExternalNativeController) Send(context.Context, agent.NativeSess
 }
 func (f *archiveExternalNativeController) Interrupt(context.Context, agent.NativeSessionInterrupt) error {
 	f.interrupts.Add(1)
+	return nil
+}
+func (f *archiveExternalNativeController) AnswerApproval(context.Context, agent.NativeSessionApprovalAnswer) error {
+	f.approvals.Add(1)
 	return nil
 }
 func (*archiveExternalNativeController) Close() error { return nil }
@@ -845,6 +851,11 @@ func TestWorkspaceArchive_ExternalNativeControlsRemainOwnerScopedAndCannotTarget
 			return &leapmuxv1.InterruptNativeSessionRequest{AgentProvider: provider, SessionId: session,
 				BindingToken: "generated-opaque-owner-binding", RequestId: "generated-interrupt-request", ExpectedTurnId: "generated-turn"}
 		}},
+		{"AnswerNativeSessionApproval", func(session string) proto.Message {
+			return &leapmuxv1.AnswerNativeSessionApprovalRequest{AgentProvider: provider, SessionId: session,
+				BindingToken: "generated-opaque-owner-binding", RequestId: "generated-approval-request",
+				PromptId: "generated-prompt", OptionId: "allow-once", ExpectedTurnId: "generated-turn"}
+		}},
 	}
 	for _, request := range requests {
 		t.Run(request.method, func(t *testing.T) {
@@ -862,6 +873,7 @@ func TestWorkspaceArchive_ExternalNativeControlsRemainOwnerScopedAndCannotTarget
 	assert.Zero(t, factories.Load(), "neither a foreign owner nor a managed UUID may reach a native controller")
 	assert.Zero(t, fixture.sends.Load())
 	assert.Zero(t, fixture.interrupts.Load())
+	assert.Zero(t, fixture.approvals.Load())
 	// An unrelated archived workspace cannot freeze another app's external chat.
 	// Only the harmless controller fixture is called; no provider process starts.
 	for _, request := range requests {
@@ -872,6 +884,7 @@ func TestWorkspaceArchive_ExternalNativeControlsRemainOwnerScopedAndCannotTarget
 	}
 	assert.Equal(t, int32(1), fixture.sends.Load())
 	assert.Equal(t, int32(1), fixture.interrupts.Load())
+	assert.Equal(t, int32(1), fixture.approvals.Load())
 }
 
 // TestWorkspaceArchive_SkipsAClosedRow pins the closed_at predicate on both

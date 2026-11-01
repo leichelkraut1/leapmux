@@ -41,6 +41,10 @@ type controlTestServer struct {
 	mutations         int
 	targets           []string
 	threads           []string
+	requests          []controlApprovalRequest
+	approvalMethods   []string
+	approvalParams    []map[string]json.RawMessage
+	approvalItems     []json.RawMessage
 }
 
 func (s *controlTestServer) read(conn net.Conn) (map[string]json.RawMessage, error) {
@@ -67,6 +71,25 @@ func testString(raw json.RawMessage) string {
 	return value
 }
 
+// The simulated native owner sends snapshots under the controller's existing
+// inbound bound. Production writeFrame intentionally has a smaller 8 KiB bound
+// for observer metadata requests and must not be used as a native-server writer.
+func writeControlTestFrame(w io.Writer, value any) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	if len(raw) == 0 || len(raw) > controlWireLimit {
+		return io.ErrShortBuffer
+	}
+	var header [4]byte
+	binary.LittleEndian.PutUint32(header[:], uint32(len(raw)))
+	if err := writeAll(w, header[:]); err != nil {
+		return err
+	}
+	return writeAll(w, raw)
+}
+
 func (s *controlTestServer) serve(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	client := "44444444-4444-4444-8444-444444444444"
@@ -90,6 +113,8 @@ func (s *controlTestServer) serve(conn net.Conn) {
 			s.mu.Lock()
 			sessionID, gate, requested := s.sessionID, s.snapshotGate, s.snapshotRequested
 			runtimeType, runtimeFlags := s.runtimeType, append([]string{}, s.runtimeFlags...)
+			requests := append([]controlApprovalRequest{}, s.requests...)
+			approvalItems := append([]json.RawMessage{}, s.approvalItems...)
 			s.mu.Unlock()
 			if sessionID == "" {
 				sessionID = controlTestThread
@@ -110,14 +135,15 @@ func (s *controlTestServer) serve(conn net.Conn) {
 				runtime = runtimeType
 			}
 			state := map[string]any{"id": controlTestThread, "sessionId": sessionID, "resumeState": "resumed",
+				"requests":            requests,
 				"threadRuntimeStatus": map[string]any{"type": runtime, "activeFlags": runtimeFlags},
 				"turnHistory": map[string]any{"kind": "canonical", "history": map[string]any{"entitiesByKey": map[string]any{
 					"generated-turn": map[string]any{"turnId": controlTestTurn, "status": turnStatus,
-						"items": []any{map[string]any{"type": "agentMessage", "text": "PRIVATE_GENERATED_TRANSCRIPT"}}}}}}}
+						"items": append([]json.RawMessage{json.RawMessage(`{"type":"agentMessage","text":"PRIVATE_GENERATED_TRANSCRIPT"}`)}, approvalItems...)}}}}}
 			frame := map[string]any{"type": "broadcast", "method": "thread-stream-state-changed", "sourceClientId": owner,
 				"targetClientIds": []string{client}, "version": version, "params": map[string]any{"hostId": "local", "conversationId": controlTestThread,
 					"change": map[string]any{"type": "snapshot", "revision": 1, "conversationState": state}}}
-			if writeFrame(conn, frame) != nil {
+			if writeControlTestFrame(conn, frame) != nil {
 				return
 			}
 			continue
@@ -168,10 +194,22 @@ func (s *controlTestServer) serve(conn net.Conn) {
 				}
 				response["result"] = result
 			}
+		case "thread-follower-command-approval-decision", "thread-follower-file-approval-decision", "thread-follower-permissions-request-approval-response":
+			s.mu.Lock()
+			s.mutations++
+			s.targets = append(s.targets, testString(request["targetClientId"]))
+			s.threads = append(s.threads, testString(params["conversationId"]))
+			s.approvalMethods = append(s.approvalMethods, method)
+			s.approvalParams = append(s.approvalParams, params)
+			s.mu.Unlock()
+			if cut {
+				return
+			}
+			response["result"] = map[string]any{"ok": !noop}
 		default:
 			return
 		}
-		if writeFrame(conn, response) != nil {
+		if writeControlTestFrame(conn, response) != nil {
 			return
 		}
 	}

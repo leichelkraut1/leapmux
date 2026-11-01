@@ -26,6 +26,40 @@ type NativeSessionController interface {
 	Close() error
 }
 
+// NativeSessionApprovalController answers a pending request held by the original
+// owner. Providers must revalidate its exact prompt, payload, owner and offered
+// choice before writing. It never changes the chat's approval policy.
+type NativeSessionApprovalController interface {
+	AnswerApproval(context.Context, NativeSessionApprovalAnswer) error
+}
+
+type NativeSessionApproval struct {
+	// PromptID binds the complete provider request and its owner generation;
+	// reusing a native request ID with changed content must change this ID.
+	PromptID          string
+	TurnID            string
+	Title             string
+	Detail            string
+	Options           []NativeSessionApprovalOption
+	CanAnswer         bool
+	UnavailableReason string
+}
+
+type NativeSessionApprovalOption struct {
+	ID          string
+	Label       string
+	Description string
+}
+
+type NativeSessionApprovalAnswer struct {
+	SessionID      string
+	BindingToken   string
+	RequestID      string
+	PromptID       string
+	OptionID       string
+	ExpectedTurnID string
+}
+
 // Directory is a Worker-selected private leaf, never a browser-supplied path.
 // A provider needing a local endpoint must fail closed when it is empty.
 type NativeSessionControllerOptions struct {
@@ -52,6 +86,7 @@ type NativeSessionControlState struct {
 	ExpiresAt         time.Time
 	RecentInputs      []NativeSessionInputOutcome
 	InputBehavior     leapmuxv1.NativeSessionInputBehavior
+	PendingApprovals  []NativeSessionApproval
 }
 
 type NativeSessionInputOutcome struct {

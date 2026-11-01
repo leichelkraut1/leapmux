@@ -1591,7 +1591,7 @@ type protoJSONValue struct{ msg proto.Message }
 // LogValue implements slog.LogValuer.
 func (p protoJSONValue) LogValue() slog.Value {
 	switch p.msg.(type) {
-	case *leapmuxv1.SendNativeSessionInputRequest, *leapmuxv1.InterruptNativeSessionRequest, *leapmuxv1.InspectNativeSessionControlResponse:
+	case *leapmuxv1.SendNativeSessionInputRequest, *leapmuxv1.InterruptNativeSessionRequest, *leapmuxv1.AnswerNativeSessionApprovalRequest, *leapmuxv1.InspectNativeSessionControlResponse:
 		return slog.StringValue("[native chat control payload omitted]")
 	}
 	return slog.StringValue(protojson.Format(p.msg))

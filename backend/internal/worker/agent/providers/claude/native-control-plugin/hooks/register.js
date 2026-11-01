@@ -1,4 +1,4 @@
-// Claude Mods API; network work runs only in the timer, never hook chains.
+// Claude Mods API; background control polling and exact permission-request waits.
 let sessionId = null
 let instanceId = null
 let version = null
@@ -10,6 +10,7 @@ let stopped = false
 const outcomes = []
 const seen = new Map()
 const remoteAborts = new Set()
+const heldApprovals = new Map()
 
 function validId(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value)
@@ -93,13 +94,15 @@ async function tick($) {
       registered = false
       // Old controller mutations are never replayed into a restarted Worker.
       outcomes.length = 0
+      heldApprovals.clear()
     }
     if (!registered) {
       await post($, '/register', { version, activeTurn: activeTurn ?? '', stopped })
       registered = true
     }
     const batch = outcomes.slice(0, 64)
-    const response = await post($, '/poll', { activeTurn: activeTurn ?? '', stopped, outcomes: batch })
+    const response = await post($, '/poll', { activeTurn: activeTurn ?? '', stopped, outcomes: batch,
+      approvalIds: [...heldApprovals.keys()] })
     outcomes.splice(0, batch.length)
     const acknowledgedAt = await $.clock.now()
     for (const sent of batch) {
@@ -111,6 +114,60 @@ async function tick($) {
     // Keep the original chat running. Retain outcomes, but never replay sends.
     registered = false
   } finally { polling = false }
+}
+
+// This event is the real permission request, after Claude's normal checks. It
+// is not tool.check, and it does not create permission rules or change modes.
+// Each bounded HTTP wait is a Mods API call, so it does not consume hook CPU
+// time. A healthy bridge keeps the same invocation pending until answered.
+// Bridge loss returns no decision and keeps the native flow.
+async function approval($, e, next) {
+  if (!sessionId || !registered || !bridge || !activeTurn || stopped || e.agent_id !== undefined ||
+      e.session_id !== sessionId || heldApprovals.size >= __LEAPMUX_MAX_APPROVALS__) return next(e)
+  const title = 'Tool approval: ' + e.tool_name
+  const detail = JSON.stringify({ tool: e.tool_name, input: e.tool_input, cwd: e.cwd }, null, 2)
+  if (new TextEncoder().encode(title).length > __LEAPMUX_APPROVAL_TEXT_BYTES__ ||
+      new TextEncoder().encode(detail).length > __LEAPMUX_APPROVAL_DETAIL_BYTES__ ||
+      title.includes('\0') || detail.includes('\0')) return next(e)
+  const id = crypto.randomUUID()
+  const turnId = activeTurn
+  const epoch = bridge.epoch
+  heldApprovals.set(id, { turnId, epoch })
+  const abandoned = () => {
+    heldApprovals.delete(id)
+    void tick($)
+  }
+  next.signal.addEventListener('abort', abandoned, { once: true })
+  try {
+    let result
+    do {
+      result = await post($, '/approval', {
+        activeTurn: turnId, stopped,
+        approval: { protocol: 1, id, turnId, title, detail },
+      })
+      if (next.signal.aborted || !heldApprovals.has(id) || bridge.epoch !== epoch || activeTurn !== turnId) return next(e)
+    } while (result.waiting === true)
+    const command = result.command
+    if (next.signal.aborted || !heldApprovals.has(id) || bridge.epoch !== epoch || activeTurn !== turnId ||
+        !command || command.kind !== 'approval' || command.instanceId !== instanceId || command.turnId !== turnId ||
+        !validId(command.requestId) || !validId(command.deliveryId) || command.deliveryId.length !== 43 ||
+        !validId(command.promptId) || seen.has(command.deliveryId) ||
+        (command.optionId !== 'allow_once' && command.optionId !== 'deny' && command.optionId !== 'original_app')) return next(e)
+    seen.set(command.deliveryId, { terminal: false, ackedAt: null })
+    // A delivery acknowledgement means this hook returned the explicit answer,
+    // not that Claude allowed it against policy or that the tool ran.
+    outcome(command, 'answered', undefined, turnId)
+    if (command.optionId === 'original_app') return next(e)
+    return { decision: command.optionId === 'allow_once'
+      ? { behavior: 'allow' }
+      : { behavior: 'deny', message: 'The user declined this tool request in LeapMux.' } }
+  } catch {
+    return next(e)
+  } finally {
+    next.signal.removeEventListener('abort', abandoned)
+    heldApprovals.delete(id)
+    void tick($)
+  }
 }
 
 async function begin($) {
@@ -142,7 +199,11 @@ export function register(on) {
       if (activeTurn === e.turnId) activeTurn = null
       if (e.isAborted && !remoteAborts.has(e.turnId)) stopped = true
       remoteAborts.delete(e.turnId)
+      for (const [id, pending] of heldApprovals) {
+        if (pending.turnId === e.turnId) heldApprovals.delete(id)
+      }
     }
     return next(e)
   })
+  on('classic.PermissionRequest', approval).catch(($, e, next) => next(e))
 }

@@ -73,6 +73,7 @@ import type {
   UpdateTerminalTitleResponse,
 } from '~/generated/proto/leapmux/v1/terminal_pb'
 import type {
+  AnswerNativeSessionApprovalResponse,
   GetWorkerSystemInfoResponse,
   InspectNativeAgentProcessesResponse,
   InspectNativeSessionControlResponse,
@@ -233,6 +234,8 @@ import {
   UpdateTerminalTitleResponseSchema,
 } from '~/generated/proto/leapmux/v1/terminal_pb'
 import {
+  AnswerNativeSessionApprovalRequestSchema,
+  AnswerNativeSessionApprovalResponseSchema,
   GetWorkerSystemInfoRequestSchema,
   GetWorkerSystemInfoResponseSchema,
   InspectNativeAgentProcessesRequestSchema,
@@ -502,6 +505,14 @@ export function interruptNativeSession(
   req: MessageInitShape<typeof InterruptNativeSessionRequestSchema>,
 ): Promise<InterruptNativeSessionResponse> {
   return callWorker(workerId, 'InterruptNativeSession', InterruptNativeSessionRequestSchema, InterruptNativeSessionResponseSchema, req, { retryUnavailable: false })
+}
+
+/** Answer only the displayed prompt on its bound native owner; never retry. */
+export function answerNativeSessionApproval(
+  workerId: string,
+  req: MessageInitShape<typeof AnswerNativeSessionApprovalRequestSchema>,
+): Promise<AnswerNativeSessionApprovalResponse> {
+  return callWorker(workerId, 'AnswerNativeSessionApproval', AnswerNativeSessionApprovalRequestSchema, AnswerNativeSessionApprovalResponseSchema, req, { retryUnavailable: false })
 }
 
 export function getWorkerSystemInfo(workerId: string): Promise<GetWorkerSystemInfoResponse> {

@@ -406,6 +406,42 @@ message InspectNativeSessionControlResponse {
   AgentActivityState activity_state = 11;
   repeated NativeSessionInputOutcome recent_inputs = 12;
   NativeSessionInputBehavior input_behavior = 13;
+  repeated NativeSessionApproval pending_approvals = 14;
+}
+
+// Plain review text and only the original owner's currently offered choices.
+// A prompt ID identifies the full pending request, not merely a reusable tool ID.
+message NativeSessionApproval {
+  string prompt_id = 1;
+  string turn_id = 2;
+  string title = 3;
+  string detail = 4;
+  repeated NativeSessionApprovalOption options = 5;
+  bool can_answer = 6;
+  string unavailable_reason = 7;
+}
+
+message NativeSessionApprovalOption {
+  string id = 1;
+  string label = 2;
+  string description = 3;
+}
+
+message AnswerNativeSessionApprovalRequest {
+  AgentProvider agent_provider = 1;
+  string session_id = 2;
+  string binding_token = 3;
+  string request_id = 4;
+  string prompt_id = 5;
+  string option_id = 6;
+  string expected_turn_id = 7;
+}
+
+message AnswerNativeSessionApprovalResponse {
+  string session_id = 1;
+  string request_id = 2;
+  string prompt_id = 3;
+  string detail = 4;
 }
 
 // The caller explicitly accepts the native owner's delivery semantics. Sending

@@ -8,16 +8,19 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/leapmux/leapmux/generated/contracts"
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 )
 
 type nativeControlFrame struct {
-	SessionID  string                 `json:"sessionId"`
-	InstanceID string                 `json:"instanceId"`
-	Version    string                 `json:"version,omitempty"`
-	ActiveTurn string                 `json:"activeTurn,omitempty"`
-	Stopped    bool                   `json:"stopped"`
-	Outcomes   []nativeControlOutcome `json:"outcomes,omitempty"`
+	SessionID   string                      `json:"sessionId"`
+	InstanceID  string                      `json:"instanceId"`
+	Version     string                      `json:"version,omitempty"`
+	ActiveTurn  string                      `json:"activeTurn,omitempty"`
+	Stopped     bool                        `json:"stopped"`
+	Outcomes    []nativeControlOutcome      `json:"outcomes,omitempty"`
+	Approval    *nativeControlApprovalFrame `json:"approval,omitempty"`
+	ApprovalIDs []string                    `json:"approvalIds,omitempty"`
 }
 
 type nativeControlOutcome struct {
@@ -39,16 +42,25 @@ func (c *nativeControlController) handle(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var frame nativeControlFrame
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, nativeControlMaxBody))
+	maxBody := int64(nativeControlMaxBody)
+	if r.URL.Path == "/approval" {
+		maxBody = int64(6*contracts.NativeSessionControlMaxApprovalDetailBytes + 16384)
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&frame) != nil || decoder.Decode(new(any)) != io.EOF ||
 		!validNativeSessionID(frame.SessionID) || !validNativeSessionID(frame.InstanceID) ||
-		(frame.ActiveTurn != "" && !validNativeSessionID(frame.ActiveTurn)) || len(frame.Outcomes) > 64 {
+		(frame.ActiveTurn != "" && !validNativeSessionID(frame.ActiveTurn)) || len(frame.Outcomes) > 64 ||
+		len(frame.ApprovalIDs) > contracts.NativeSessionControlMaxPendingApprovals {
 		http.Error(w, "invalid", http.StatusBadRequest)
 		return
 	}
 	if r.URL.Path == "/register" {
 		c.registerPeer(w, r, frame)
+		return
+	}
+	if r.URL.Path == "/approval" {
+		c.waitApproval(w, r, frame)
 		return
 	}
 	if r.URL.Path != "/poll" {
@@ -64,12 +76,16 @@ func (c *nativeControlController) handle(w http.ResponseWriter, r *http.Request)
 	}
 	now := c.clock.Now()
 	peer.lastSeen, peer.activeTurn, peer.stopped = now, frame.ActiveTurn, frame.Stopped
+	c.cancelApprovals(peer, frame.ApprovalIDs)
 	for _, outcome := range frame.Outcomes {
 		c.applyOutcome(peer, outcome)
 	}
 	commands := make([]nativeControlCommand, 0)
 	if c.peerFresh(peer, now) {
 		for _, command := range peer.commands {
+			if command.Kind == "approval" {
+				continue // Only the exact held PermissionRequest receives its answer.
+			}
 			// Mods buffers HTTP responses up to 4 MiB. Even worst-case JSON
 			// escaping of eight maximum-size inputs remains below that limit.
 			if len(commands) >= 8 {
@@ -122,6 +138,7 @@ func (c *nativeControlController) registerPeer(w http.ResponseWriter, r *http.Re
 	c.prunePeerSlots(c.clock.Now(), frame.SessionID)
 	peer := c.peers[frame.SessionID]
 	if peer != nil && (peer.owner.identity != owner.identity || peer.instance != frame.InstanceID) {
+		c.cancelApprovals(peer, nil)
 		for _, command := range peer.commands {
 			switch command.state {
 			case leapmuxv1.NativeSessionInputState_NATIVE_SESSION_INPUT_STATE_UNSPECIFIED:
@@ -198,6 +215,12 @@ func (c *nativeControlController) applyOutcome(peer *nativeControlPeer, outcome 
 		if validNativeSessionID(outcome.TurnID) {
 			command.TurnID = outcome.TurnID
 		}
+	case "answered":
+		if command.Kind != "approval" || outcome.TurnID != command.TurnID {
+			return
+		}
+		command.state = leapmuxv1.NativeSessionInputState_NATIVE_SESSION_INPUT_STATE_STARTED
+		command.detail = "The permission answer was delivered to the original Claude hook; this does not confirm tool execution."
 	case "dropped":
 		command.state = leapmuxv1.NativeSessionInputState_NATIVE_SESSION_INPUT_STATE_DROPPED
 		command.detail = "Claude did not accept this input."

@@ -3,7 +3,7 @@ import type { NativeConversationRef } from '~/components/chat/nativeConversation
 import type { InspectNativeSessionControlResponse } from '~/generated/proto/leapmux/v1/worker_pb'
 import { Code } from '@connectrpc/connect'
 import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack } from 'solid-js'
-import { inspectNativeSessionControl, interruptNativeSession, sendNativeSessionInput } from '~/api/workerRpc'
+import { answerNativeSessionApproval, inspectNativeSessionControl, interruptNativeSession, sendNativeSessionInput } from '~/api/workerRpc'
 import { nativeConversationKey } from '~/components/chat/nativeConversation'
 import { NATIVE_SESSION_CONTROL } from '~/generated/contracts/native-session-control'
 import { NativeSessionInputBehavior, NativeSessionInputDisposition, NativeSessionInputState } from '~/generated/proto/leapmux/v1/worker_pb'
@@ -23,7 +23,8 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
   const [checking, setChecking] = createSignal(false)
   const [expired, setExpired] = createSignal(true)
   const [inspectError, setInspectError] = createSignal('')
-  const [pending, setPending] = createSignal<'send' | 'interrupt'>()
+  const [pending, setPending] = createSignal<'send' | 'interrupt' | 'approval'>()
+  const [approvalAnswers, setApprovalAnswers] = createSignal<Record<string, 'sending' | 'accepted' | 'uncertain'>>({})
   const [receipt, setReceipt] = createSignal('')
   const [error, setError] = createSignal('')
   const [hasComposer, setHasComposer] = createSignal(false)
@@ -44,6 +45,12 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
   const knownBehavior = () => inputBehavior() === NativeSessionInputBehavior.QUEUE_NEXT_TURN || inputBehavior() === NativeSessionInputBehavior.SEND_NOW
   const canSend = createMemo(() => available() && !!capabilities()?.canSend && knownBehavior())
   const canInterrupt = createMemo(() => available() && !!capabilities()?.canInterrupt && !!capabilities()?.activeTurnId)
+  const pendingApprovals = () => capabilities()?.pendingApprovals ?? []
+  const canAnswerApproval = (promptId: string) => available() && !pending()
+    && !approvalAnswers()[promptId]
+    && pendingApprovals().some(prompt => prompt.promptId === promptId && prompt.canAnswer && prompt.options.length > 0)
+  const canAnswer = createMemo(() => pendingApprovals().some(prompt => canAnswerApproval(prompt.promptId)))
+  const connected = createMemo(() => available() && (canSend() || canInterrupt() || pendingApprovals().some(prompt => prompt.canAnswer)))
   const recoverableText = createMemo(() => {
     const state = inputState()
     return state === NativeSessionInputState.DROPPED || state === NativeSessionInputState.REJECTED || state === NativeSessionInputState.UNCERTAIN
@@ -150,8 +157,15 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
       if (disposed || current.signal.aborted || run !== generation || nativeConversationKey(untrack(ref)) !== key)
         return
       const lifetime = Date.parse(response.expiresAt) - Date.now()
+      const prompts = response.pendingApprovals
       if (response.sessionId !== source.sessionId
-        || ((response.canSend || response.canInterrupt) && (!response.bindingToken || !Number.isFinite(lifetime) || lifetime <= 0))) {
+        || ((response.canSend || response.canInterrupt || prompts.some(prompt => prompt.canAnswer)) && (!response.bindingToken || !Number.isFinite(lifetime) || lifetime <= 0))
+        || prompts.length > NATIVE_SESSION_CONTROL.MaxPendingApprovals
+        || new Set(prompts.map(prompt => prompt.promptId)).size !== prompts.length
+        || prompts.some(prompt => !prompt.promptId || prompt.options.length > NATIVE_SESSION_CONTROL.MaxApprovalOptions
+          || new Set(prompt.options.map(option => option.id)).size !== prompt.options.length
+          || prompt.options.some(option => !option.id || !option.label)
+          || (prompt.canAnswer && prompt.options.length === 0))) {
         throw new Error('Unverified native control capability')
       }
       clearTimeout(expiryTimer)
@@ -316,6 +330,73 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
     }
   }
 
+  async function answerApproval(promptId: string, optionId: string): Promise<boolean> {
+    const capability = untrack(capabilities)
+    const prompt = capability?.pendingApprovals.find(prompt => prompt.promptId === promptId)
+    if (!capability || !prompt || !untrack(() => canAnswerApproval(promptId))
+      || !prompt.options.some(option => option.id === optionId)
+      || Date.parse(capability.expiresAt) <= Date.now()) {
+      return false
+    }
+    const source = untrack(ref)
+    const scope = scopeGeneration
+    const requestId = crypto.randomUUID()
+    batch(() => {
+      setPending('approval')
+      setApprovalAnswers(previous => ({ ...previous, [promptId]: 'sending' }))
+      setReceipt('')
+      setError('')
+    })
+    try {
+      const response = await bounded(answerNativeSessionApproval(source.workerId, {
+        agentProvider: source.agentProvider,
+        sessionId: source.sessionId,
+        bindingToken: capability.bindingToken,
+        requestId,
+        promptId,
+        optionId,
+        expectedTurnId: prompt.turnId,
+      }))
+      if (disposed || scope !== scopeGeneration)
+        return false
+      if (response.sessionId !== source.sessionId || response.requestId !== requestId || response.promptId !== promptId)
+        throw new Error('Unverified native approval acknowledgement')
+      batch(() => {
+        setApprovalAnswers(previous => ({ ...previous, [promptId]: 'accepted' }))
+        setReceipt(response.detail || 'Answer submitted to the original app.')
+      })
+      void refresh()
+      return true
+    }
+    catch (failure) {
+      if (!disposed && scope === scopeGeneration) {
+        if (refusedBeforeDelivery(failure)) {
+          batch(() => {
+            setApprovalAnswers((previous) => {
+              const next = { ...previous }
+              delete next[promptId]
+              return next
+            })
+            setExpired(true)
+            setError('Answer was not sent. The prompt or your access changed. Refresh to check the original app.')
+          })
+        }
+        else {
+          batch(() => {
+            setApprovalAnswers(previous => ({ ...previous, [promptId]: 'uncertain' }))
+            setError('The original app did not confirm this answer. It will not be resent. Check the original app before answering again.')
+          })
+        }
+        void refresh()
+      }
+      return false
+    }
+    finally {
+      if (!disposed && scope === scopeGeneration)
+        setPending(undefined)
+    }
+  }
+
   createEffect(on(() => [nativeConversationKey(ref()), online()] as const, ([key], previous) => {
     generation++
     cancelProbe()
@@ -332,6 +413,7 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
         setReceipt('')
         setError('')
         setPending(undefined)
+        setApprovalAnswers({})
         sendAttempt = undefined
         interruptAttempt = undefined
       }
@@ -349,5 +431,5 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
     clearInterval(timer)
     cancelProbe()
   })
-  return { capabilities, checking, canSend, canInterrupt, hasComposer, inputBehavior, unavailableReason, pending, receipt, error, recoverableText, refresh, send, interrupt }
+  return { capabilities, checking, connected, canSend, canInterrupt, canAnswer, pendingApprovals, canAnswerApproval, approvalAnswerState: (promptId: string) => approvalAnswers()[promptId], answerApproval, hasComposer, inputBehavior, unavailableReason, pending, receipt, error, recoverableText, refresh, send, interrupt }
 }

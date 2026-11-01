@@ -57,6 +57,7 @@ func TestNativeControlDebugLoggingOmitsMessageAndBinding(t *testing.T) {
 	for _, message := range []proto.Message{
 		&leapmuxv1.SendNativeSessionInputRequest{Text: "private generated marker", BindingToken: "private binding"},
 		&leapmuxv1.InterruptNativeSessionRequest{BindingToken: "private binding"},
+		&leapmuxv1.AnswerNativeSessionApprovalRequest{BindingToken: "private binding", PromptId: "private prompt", OptionId: "private option"},
 		&leapmuxv1.InspectNativeSessionControlResponse{BindingToken: "private binding"},
 	} {
 		logged := lazyProtoJSON(message).LogValue().String()
@@ -71,7 +72,8 @@ func TestNativeControlUnavailableRPCPreservesOnlyTheRequestedSessionsDeliveryOut
 			fixture := &nativeAdmissionController{err: agent.ErrNativeControlUnavailable, state: agent.NativeSessionControlState{
 				SessionID: returnedSession, OwnerLabel: "Generated native owner", BindingToken: "generated-old-binding",
 				CanSend: true, CanInterrupt: true, ActiveTurnID: "generated-turn", ExpiresAt: time.Now().Add(time.Minute),
-				RecentInputs: []agent.NativeSessionInputOutcome{{RequestID: "generated-request", State: leapmuxv1.NativeSessionInputState_NATIVE_SESSION_INPUT_STATE_UNCERTAIN, Detail: "Delivery could not be confirmed."}},
+				RecentInputs:     []agent.NativeSessionInputOutcome{{RequestID: "generated-request", State: leapmuxv1.NativeSessionInputState_NATIVE_SESSION_INPUT_STATE_UNCERTAIN, Detail: "Delivery could not be confirmed."}},
+				PendingApprovals: []agent.NativeSessionApproval{{PromptID: "generated-prompt", CanAnswer: true}},
 			}}
 			installNativeAdmissionFixture(t, svc, fixture)
 			dispatch(dispatcher, "InspectNativeSessionControl", &leapmuxv1.InspectNativeSessionControlRequest{
@@ -87,6 +89,7 @@ func TestNativeControlUnavailableRPCPreservesOnlyTheRequestedSessionsDeliveryOut
 			assert.Empty(t, response.BindingToken)
 			assert.Empty(t, response.ActiveTurnId)
 			assert.Empty(t, response.ExpiresAt)
+			assert.Empty(t, response.PendingApprovals)
 			if returnedSession == "generated-session" {
 				require.Len(t, response.RecentInputs, 1)
 				assert.Equal(t, leapmuxv1.NativeSessionInputState_NATIVE_SESSION_INPUT_STATE_UNCERTAIN, response.RecentInputs[0].State)

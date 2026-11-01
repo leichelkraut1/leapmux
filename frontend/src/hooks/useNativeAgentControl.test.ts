@@ -6,15 +6,16 @@ import { Code } from '@connectrpc/connect'
 import { createRoot, createSignal } from 'solid-js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentActivityState, AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
-import { InspectNativeSessionControlResponseSchema, NativeSessionInputBehavior, NativeSessionInputDisposition, NativeSessionInputOutcomeSchema, NativeSessionInputState } from '~/generated/proto/leapmux/v1/worker_pb'
+import { InspectNativeSessionControlResponseSchema, NativeSessionApprovalSchema, NativeSessionInputBehavior, NativeSessionInputDisposition, NativeSessionInputOutcomeSchema, NativeSessionInputState } from '~/generated/proto/leapmux/v1/worker_pb'
 import { ChannelError } from '~/lib/channelError'
 import { deferred } from '~/test-support/async'
 
-const mocks = vi.hoisted(() => ({ inspect: vi.fn(), send: vi.fn(), interrupt: vi.fn() }))
+const mocks = vi.hoisted(() => ({ inspect: vi.fn(), send: vi.fn(), interrupt: vi.fn(), answer: vi.fn() }))
 vi.mock('~/api/workerRpc', () => ({
   inspectNativeSessionControl: (...args: unknown[]) => mocks.inspect(...args),
   sendNativeSessionInput: (...args: unknown[]) => mocks.send(...args),
   interruptNativeSession: (...args: unknown[]) => mocks.interrupt(...args),
+  answerNativeSessionApproval: (...args: unknown[]) => mocks.answer(...args),
 }))
 const { useNativeAgentControl } = await import('./useNativeAgentControl')
 const ref: NativeConversationRef = { workerId: 'generated-computer', workerName: 'Generated PC', agentProvider: AgentProvider.CODEX, sessionId: '11111111-2222-3333-4444-555555555555' }
@@ -35,6 +36,21 @@ function capability(extra: MessageInitShape<typeof InspectNativeSessionControlRe
   })
 }
 
+function approval(extra: MessageInitShape<typeof NativeSessionApprovalSchema> = {}) {
+  return create(NativeSessionApprovalSchema, {
+    promptId: 'generated-prompt',
+    turnId: 'generated-turn',
+    title: 'Generated command approval',
+    detail: 'Command: printf harmless-generated-text\nDirectory: /generated',
+    canAnswer: true,
+    options: [
+      { id: 'generated-allow', label: 'Allow once', description: 'Only this command.' },
+      { id: 'generated-deny', label: 'Deny', description: 'Do not run this command.' },
+    ],
+    ...extra,
+  })
+}
+
 function setup() {
   return createRoot((dispose) => {
     disposers.push(dispose)
@@ -50,6 +66,7 @@ beforeEach(() => {
   mocks.inspect.mockReset().mockImplementation((_worker, request) => Promise.resolve(capability({ sessionId: request.sessionId })))
   mocks.send.mockReset().mockImplementation((_worker, request) => Promise.resolve({ sessionId: request.sessionId, requestId: request.requestId, disposition: NativeSessionInputDisposition.QUEUED }))
   mocks.interrupt.mockReset().mockImplementation((_worker, request) => Promise.resolve({ sessionId: request.sessionId, requestId: request.requestId }))
+  mocks.answer.mockReset().mockImplementation((_worker, request) => Promise.resolve({ sessionId: request.sessionId, requestId: request.requestId, promptId: request.promptId, detail: 'Generated answer acknowledged.' }))
 })
 afterEach(() => {
   for (const dispose of disposers.splice(0))
@@ -343,5 +360,162 @@ describe('useNativeAgentControl', () => {
     expect(view.pending()).toBeUndefined()
     expect(view.error()).toMatch(/did not confirm delivery/)
     expect(mocks.send).toHaveBeenCalledOnce()
+  })
+
+  it('answers only an offered option on the verified prompt after an explicit call', async () => {
+    mocks.inspect.mockResolvedValue(capability({ canSend: false, inputBehavior: NativeSessionInputBehavior.UNSPECIFIED, pendingApprovals: [approval()] }))
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(view.hasComposer()).toBe(false)
+    expect(view.connected()).toBe(true)
+    expect(view.canAnswer()).toBe(true)
+    expect(mocks.answer).not.toHaveBeenCalled()
+    expect(await view.answerApproval('generated-prompt', 'not-offered')).toBe(false)
+    expect(await view.answerApproval('not-current', 'generated-allow')).toBe(false)
+    expect(mocks.answer).not.toHaveBeenCalled()
+    expect(await view.answerApproval('generated-prompt', 'generated-allow')).toBe(true)
+    expect(mocks.answer).toHaveBeenCalledWith(ref.workerId, {
+      agentProvider: ref.agentProvider,
+      sessionId: ref.sessionId,
+      bindingToken: 'generated-binding',
+      requestId: expect.any(String),
+      promptId: 'generated-prompt',
+      optionId: 'generated-allow',
+      expectedTurnId: 'generated-turn',
+    })
+    expect(view.approvalAnswerState('generated-prompt')).toBe('accepted')
+    expect(view.receipt()).toBe('Generated answer acknowledged.')
+    expect(await view.answerApproval('generated-prompt', 'generated-deny')).toBe(false)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(mocks.answer).toHaveBeenCalledOnce()
+    mocks.inspect.mockResolvedValueOnce(capability())
+    await view.refresh()
+    expect(view.pendingApprovals()).toEqual([])
+  })
+
+  it('refuses a prompt that was resolved in the original app or replaced by another prompt', async () => {
+    mocks.inspect.mockResolvedValueOnce(capability({ pendingApprovals: [approval()] }))
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    mocks.inspect.mockResolvedValueOnce(capability({ pendingApprovals: [approval({ promptId: 'generated-replacement' })] }))
+    await view.refresh()
+    expect(view.canAnswerApproval('generated-prompt')).toBe(false)
+    expect(await view.answerApproval('generated-prompt', 'generated-allow')).toBe(false)
+    expect(mocks.answer).not.toHaveBeenCalled()
+    expect(view.canAnswerApproval('generated-replacement')).toBe(true)
+  })
+
+  it('keeps read-only prompts visible without requiring a write lease', async () => {
+    mocks.inspect.mockResolvedValueOnce(capability({ canSend: false, bindingToken: '', expiresAt: '', pendingApprovals: [approval({ canAnswer: false, unavailableReason: 'Generated unsupported prompt.' })] }))
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(view.pendingApprovals()).toHaveLength(1)
+    expect(view.canAnswer()).toBe(false)
+    expect(await view.answerApproval('generated-prompt', 'generated-allow')).toBe(false)
+    expect(mocks.answer).not.toHaveBeenCalled()
+  })
+
+  it.each(['expired', 'offline'] as const)('does not answer with an %s connection', async (reason) => {
+    mocks.inspect.mockResolvedValue(capability({ expiresAt: new Date(Date.now() + 1000).toISOString(), pendingApprovals: [approval()] }))
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    if (reason === 'offline')
+      view.setOnline(false)
+    else await vi.advanceTimersByTimeAsync(1001)
+    expect(view.canAnswerApproval('generated-prompt')).toBe(false)
+    expect(await view.answerApproval('generated-prompt', 'generated-allow')).toBe(false)
+    expect(mocks.answer).not.toHaveBeenCalled()
+  })
+
+  it('prevents concurrent answers and message writes while an approval is pending', async () => {
+    mocks.inspect.mockResolvedValue(capability({ pendingApprovals: [approval()] }))
+    const gate = deferred<{ sessionId: string, requestId: string, promptId: string, detail: string }>()
+    mocks.answer.mockReturnValueOnce(gate.promise)
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    const answering = view.answerApproval('generated-prompt', 'generated-deny')
+    expect(view.pending()).toBe('approval')
+    expect(view.approvalAnswerState('generated-prompt')).toBe('sending')
+    expect(await view.answerApproval('generated-prompt', 'generated-allow')).toBe(false)
+    expect(await view.send('generated unrelated input')).toBe(false)
+    const request = mocks.answer.mock.calls[0]![1]
+    gate.resolve({ sessionId: request.sessionId, requestId: request.requestId, promptId: request.promptId, detail: '' })
+    expect(await answering).toBe(true)
+    expect(view.pending()).toBeUndefined()
+    expect(view.canAnswerApproval('generated-prompt')).toBe(false)
+    expect(mocks.answer).toHaveBeenCalledOnce()
+    expect(mocks.send).not.toHaveBeenCalled()
+  })
+
+  it('never retries an uncertain answer even after reconnecting with the same prompt', async () => {
+    mocks.inspect.mockResolvedValue(capability({ pendingApprovals: [approval()] }))
+    mocks.answer.mockRejectedValueOnce(new Error('generated acknowledgement lost'))
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await view.answerApproval('generated-prompt', 'generated-allow')).toBe(false)
+    expect(view.approvalAnswerState('generated-prompt')).toBe('uncertain')
+    expect(view.error()).toMatch(/did not confirm this answer.*not be resent/)
+    view.setOnline(false)
+    mocks.inspect.mockResolvedValue(capability({ bindingToken: 'generated-new-binding', pendingApprovals: [approval()] }))
+    view.setOnline(true)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(await view.answerApproval('generated-prompt', 'generated-deny')).toBe(false)
+    expect(mocks.answer).toHaveBeenCalledOnce()
+    mocks.inspect.mockResolvedValueOnce(capability({ pendingApprovals: [approval({ promptId: 'generated-next-prompt' })] }))
+    await view.refresh()
+    expect(view.canAnswerApproval('generated-next-prompt')).toBe(true)
+  })
+
+  it('allows only a fresh explicit answer after a known pre-delivery refusal', async () => {
+    mocks.inspect.mockResolvedValue(capability({ pendingApprovals: [approval()] }))
+    mocks.answer.mockRejectedValueOnce(new ChannelError('rpc', 'generated stale prompt', { code: Code.FailedPrecondition }))
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await view.answerApproval('generated-prompt', 'generated-deny')).toBe(false)
+    expect(view.error()).toMatch(/Answer was not sent/)
+    await view.refresh()
+    expect(mocks.answer).toHaveBeenCalledOnce()
+    expect(await view.answerApproval('generated-prompt', 'generated-deny')).toBe(true)
+    expect(mocks.answer.mock.calls[1]![1].requestId).not.toBe(mocks.answer.mock.calls[0]![1].requestId)
+  })
+
+  it('treats an acknowledgement for another prompt as uncertain and blocks further answers', async () => {
+    mocks.inspect.mockResolvedValue(capability({ pendingApprovals: [approval()] }))
+    mocks.answer.mockImplementationOnce((_worker, request) => Promise.resolve({ sessionId: request.sessionId, requestId: request.requestId, promptId: 'another-prompt', detail: '' }))
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await view.answerApproval('generated-prompt', 'generated-allow')).toBe(false)
+    expect(view.approvalAnswerState('generated-prompt')).toBe('uncertain')
+    expect(await view.answerApproval('generated-prompt', 'generated-allow')).toBe(false)
+    expect(mocks.answer).toHaveBeenCalledOnce()
+  })
+
+  it('ignores late approval acknowledgements after changing conversations', async () => {
+    mocks.inspect.mockResolvedValueOnce(capability({ pendingApprovals: [approval()] }))
+    const gate = deferred<{ sessionId: string, requestId: string, promptId: string, detail: string }>()
+    mocks.answer.mockReturnValueOnce(gate.promise)
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    const answering = view.answerApproval('generated-prompt', 'generated-allow')
+    const request = mocks.answer.mock.calls[0]![1]
+    view.setConversation({ ...ref, sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' })
+    await vi.advanceTimersByTimeAsync(0)
+    gate.resolve({ sessionId: request.sessionId, requestId: request.requestId, promptId: request.promptId, detail: 'Generated old chat acknowledgement.' })
+    expect(await answering).toBe(false)
+    expect(view.approvalAnswerState('generated-prompt')).toBeUndefined()
+    expect(view.receipt()).toBe('')
+    expect(view.pending()).toBeUndefined()
+  })
+
+  it('rejects ambiguous prompts and options before enabling any approval action', async () => {
+    mocks.inspect.mockResolvedValueOnce(capability({ pendingApprovals: [approval(), approval()] }))
+    const view = setup()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(view.canAnswer()).toBe(false)
+    expect(view.pendingApprovals()).toEqual([])
+    mocks.inspect.mockResolvedValueOnce(capability({ pendingApprovals: [approval({ options: [{ id: 'duplicate', label: 'Allow' }, { id: 'duplicate', label: 'Deny' }] })] }))
+    await view.refresh()
+    expect(view.canAnswer()).toBe(false)
+    expect(mocks.answer).not.toHaveBeenCalled()
   })
 })

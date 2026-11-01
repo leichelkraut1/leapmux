@@ -17,8 +17,10 @@ type nativeControlFixture struct {
 	sends      atomic.Int32
 	interrupts atomic.Int32
 	closes     atomic.Int32
+	approvals  atomic.Int32
 	stale      atomic.Bool
 	send       func(context.Context, agent.NativeSessionInput) (agent.NativeSessionInputReceipt, error)
+	answer     func(context.Context, agent.NativeSessionApprovalAnswer) error
 }
 
 func (f *nativeControlFixture) Inspect(_ context.Context, sessionID string) (agent.NativeSessionControlState, error) {
@@ -39,6 +41,64 @@ func (f *nativeControlFixture) Interrupt(context.Context, agent.NativeSessionInt
 	return nil
 }
 func (f *nativeControlFixture) Close() error { f.closes.Add(1); return nil }
+func (f *nativeControlFixture) AnswerApproval(ctx context.Context, input agent.NativeSessionApprovalAnswer) error {
+	f.approvals.Add(1)
+	if f.answer != nil {
+		return f.answer(ctx, input)
+	}
+	return nil
+}
+
+func TestNativeApprovalDeduplicatesConcurrentAnswersAndRejectsChangedDecisions(t *testing.T) {
+	fixture := &nativeControlFixture{}
+	manager := nativeControlManager(t, fixture)
+	input := agent.NativeSessionApprovalAnswer{
+		SessionID: "generated", BindingToken: "generated-binding", RequestID: "generated-answer",
+		PromptID: "generated-prompt", OptionID: "allow-once", ExpectedTurnID: "generated-turn",
+	}
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() {
+			assert.NoError(t, manager.AnswerNativeSessionApproval(t.Context(), leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, input))
+		})
+	}
+	wg.Wait()
+	assert.Equal(t, int32(1), fixture.approvals.Load())
+	for _, field := range []string{"session", "binding", "prompt", "option", "turn"} {
+		changed := input
+		switch field {
+		case "session":
+			changed.SessionID = "other"
+		case "binding":
+			changed.BindingToken = "other-owner"
+		case "prompt":
+			changed.PromptID = "other-prompt"
+		case "option":
+			changed.OptionID = "deny"
+		case "turn":
+			changed.ExpectedTurnID = "other-turn"
+		}
+		require.ErrorIs(t, manager.AnswerNativeSessionApproval(t.Context(), leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, changed), agent.ErrNativeControlInvalid)
+	}
+	_, err := manager.SendNativeSessionInput(t.Context(), leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, agent.NativeSessionInput{
+		SessionID: input.SessionID, BindingToken: input.BindingToken, RequestID: input.RequestID, Text: "generated marker",
+	})
+	require.ErrorIs(t, err, agent.ErrNativeControlInvalid)
+	assert.Zero(t, fixture.sends.Load())
+	assert.Equal(t, int32(1), fixture.approvals.Load())
+}
+
+func TestNativeApprovalNeverReplaysAnUnconfirmedAnswer(t *testing.T) {
+	fixture := &nativeControlFixture{answer: func(context.Context, agent.NativeSessionApprovalAnswer) error {
+		return agent.ErrNativeControlUncertain
+	}}
+	manager := nativeControlManager(t, fixture)
+	input := agent.NativeSessionApprovalAnswer{SessionID: "generated", BindingToken: "generated-binding", RequestID: "generated-answer", PromptID: "generated-prompt", OptionID: "deny"}
+	for range 3 {
+		require.ErrorIs(t, manager.AnswerNativeSessionApproval(t.Context(), leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, input), agent.ErrNativeControlUncertain)
+	}
+	assert.Equal(t, int32(1), fixture.approvals.Load())
+}
 
 func nativeControlManager(t *testing.T, fixture *nativeControlFixture) *agent.Manager {
 	t.Helper()
