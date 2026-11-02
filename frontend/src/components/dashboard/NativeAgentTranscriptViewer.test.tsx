@@ -1,15 +1,22 @@
 import type { NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { NativeSessionApproval } from '~/generated/proto/leapmux/v1/worker_pb'
 import { create } from '@bufbuild/protobuf'
-import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
+import { cleanup, fireEvent, render, screen, waitFor } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { PreferencesProvider } from '~/context/PreferencesContext'
+import { nativeConversationKey } from '~/components/chat/nativeConversation'
 import { AgentChatMessageSchema, AgentProvider, ContentCompression, MessageSource } from '~/generated/proto/leapmux/v1/agent_pb'
 import { NativeSessionApprovalOptionSchema, NativeSessionApprovalSchema, NativeSessionInputBehavior } from '~/generated/proto/leapmux/v1/worker_pb'
+import { setStorageAccountForTests } from '~/lib/browserStorage'
+import { loadDraft } from '~/lib/editor/draftPersistence'
 import { deferred } from '~/test-support/async'
+import { TEST_USER_ID } from '~/test-support/crdtBridge'
 import { testMessageContext } from '~/test-support/messageContext'
+import { useTestStorage } from '~/test-support/persistentStorage'
 import { installControllableResizeObserver } from '~/test-support/resizeObserverStub'
+
+useTestStorage()
 
 const hooks = vi.hoisted(() => ({ transcript: vi.fn(), control: vi.fn() }))
 vi.mock('~/hooks/useNativeAgentTranscript', () => ({ useNativeAgentTranscript: (...args: unknown[]) => hooks.transcript(...args) }))
@@ -386,6 +393,48 @@ describe('NativeAgentTranscriptViewer', () => {
 })
 
 describe('NativeAgentConversationContent', () => {
+  it('restores unsent text when the dashboard dialog becomes a linked tab', async () => {
+    fixture()
+    controlFixture(true)
+    const dialog = render(() => <PreferencesProvider><NativeAgentTranscriptViewer conversation={conversation} online onClose={() => {}} /></PreferencesProvider>)
+    fireEvent.input(screen.getByRole('textbox', { name: 'Message to original chat' }), { target: { value: 'Generated draft before attaching' } })
+    dialog.unmount()
+    render(() => <PreferencesProvider><NativeAgentConversationContent conversation={conversation} online embedded /></PreferencesProvider>)
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message to original chat' })).toHaveValue('Generated draft before attaching'))
+  })
+
+  it('retains an unconfirmed send across reopening and clears only an acknowledged unchanged draft', async () => {
+    fixture()
+    const state = controlFixture(true)
+    state.send.mockResolvedValueOnce(false)
+    const first = render(() => <PreferencesProvider><NativeAgentConversationContent conversation={conversation} online embedded /></PreferencesProvider>)
+    const editor = screen.getByRole('textbox', { name: 'Message to original chat' })
+    fireEvent.input(editor, { target: { value: 'Generated unconfirmed draft' } })
+    await fireEvent.submit(editor.closest('form')!)
+    first.unmount()
+    render(() => <PreferencesProvider><NativeAgentConversationContent conversation={conversation} online embedded /></PreferencesProvider>)
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message to original chat' })).toHaveValue('Generated unconfirmed draft'))
+    const restored = screen.getByRole('textbox', { name: 'Message to original chat' })
+    await fireEvent.submit(restored.closest('form')!)
+    await waitFor(() => expect(restored).toHaveValue(''))
+    expect((await loadDraft(`native-conversation:${nativeConversationKey(conversation)}`)).content).toBe('')
+    expect(state.send).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps unsent native drafts within the signed-in account', async () => {
+    fixture()
+    controlFixture(true)
+    render(() => <PreferencesProvider><NativeAgentConversationContent conversation={conversation} online embedded /></PreferencesProvider>)
+    const editor = screen.getByRole('textbox', { name: 'Message to original chat' })
+    fireEvent.input(editor, { target: { value: 'Generated first-account draft' } })
+    setStorageAccountForTests('generated-other-account')
+    await waitFor(() => expect(editor).toHaveValue(''))
+    fireEvent.input(editor, { target: { value: 'Generated other-account draft' } })
+    expect((await loadDraft(`native-conversation:${nativeConversationKey(conversation)}`)).content).toBe('Generated other-account draft')
+    setStorageAccountForTests(TEST_USER_ID)
+    await waitFor(() => expect(editor).toHaveValue('Generated first-account draft'))
+  })
+
   it('embeds the same conversation without a dialog and preserves a draft across tab switches', () => {
     fixture()
     const state = controlFixture(true)

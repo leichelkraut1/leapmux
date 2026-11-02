@@ -1,7 +1,7 @@
 import type { Component } from 'solid-js'
 import type { ChatScrollApi } from '~/components/chat/ChatView'
 import type { NativeConversationRef } from '~/components/chat/nativeConversation'
-import { createEffect, createMemo, createSignal, createUniqueId, For, on, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, Show } from 'solid-js'
 import { ChatView } from '~/components/chat/ChatView'
 import { nativeConversationKey } from '~/components/chat/nativeConversation'
 import { PromptCacheNotice } from '~/components/chat/PromptCacheNotice'
@@ -12,6 +12,8 @@ import { AgentActivityState } from '~/generated/proto/leapmux/v1/agent_pb'
 import { NativeSessionInputBehavior } from '~/generated/proto/leapmux/v1/worker_pb'
 import { useNativeAgentControl } from '~/hooks/useNativeAgentControl'
 import { useNativeAgentTranscript } from '~/hooks/useNativeAgentTranscript'
+import { onStorageAccountChange } from '~/lib/browserStorage'
+import { loadDraft, saveDraft } from '~/lib/editor/draftPersistence'
 import * as styles from './NativeAgentTranscriptViewer.css'
 
 export interface NativeAgentConversationContentProps {
@@ -35,6 +37,32 @@ export const NativeAgentConversationContent: Component<NativeAgentConversationCo
   const control = useNativeAgentControl(() => props.conversation, () => props.online, active)
   createEffect(() => props.onTitleChange?.(transcript.title() || props.conversation.sessionId))
   const [draft, setDraft] = createSignal('')
+  const draftKey = () => `native-conversation:${nativeConversationKey(props.conversation)}`
+  let draftGeneration = 0
+  let draftRevision = 0
+  let disposed = false
+  const updateDraft = (text: string, cursor = -1) => {
+    draftRevision++
+    setDraft(text)
+    saveDraft(draftKey(), text, cursor)
+  }
+  const restoreDraft = () => {
+    const generation = ++draftGeneration
+    const revision = ++draftRevision
+    const key = draftKey()
+    setDraft('')
+    void loadDraft(key).then((saved) => {
+      if (!disposed && generation === draftGeneration && revision === draftRevision && key === draftKey())
+        setDraft(saved.content)
+    }).catch(() => {})
+  }
+  createEffect(on(() => nativeConversationKey(props.conversation), restoreDraft))
+  const unsubscribeAccount = onStorageAccountChange(restoreDraft)
+  onCleanup(() => {
+    disposed = true
+    draftGeneration++
+    unsubscribeAccount()
+  })
   const draftBytes = createMemo(() => new TextEncoder().encode(draft()).length)
   const overLimit = () => draftBytes() > NATIVE_SESSION_CONTROL.MaxTextBytes
   const hasNul = () => draft().includes('\0')
@@ -44,14 +72,17 @@ export const NativeAgentConversationContent: Component<NativeAgentConversationCo
     : 'Messages queue in the original app for its next turn.'
   const editorId = createUniqueId()
   const hintId = createUniqueId()
-  createEffect(on(() => nativeConversationKey(props.conversation), () => setDraft('')))
   const send = async () => {
     if (!mutable())
       return
     const text = draft()
+    const generation = draftGeneration
+    const revision = draftRevision
     if (await control.send(text)) {
-      if (draft() === text)
-        setDraft('')
+      if (disposed || generation !== draftGeneration)
+        return
+      if (revision === draftRevision && draft() === text)
+        updateDraft('')
       void transcript.refresh()
     }
   }
@@ -256,7 +287,7 @@ export const NativeAgentConversationContent: Component<NativeAgentConversationCo
               placeholder="Write a message to the original chat…"
               rows={3}
               value={draft()}
-              onInput={event => setDraft(event.currentTarget.value)}
+              onInput={event => updateDraft(event.currentTarget.value, event.currentTarget.selectionStart)}
               onKeyDown={(event) => {
                 if (!event.isComposing && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                   event.preventDefault()
@@ -279,7 +310,7 @@ export const NativeAgentConversationContent: Component<NativeAgentConversationCo
           </Show>
           <div class={styles.actions}>
             <Show when={control.recoverableText() && !draft()}>
-              <button type="button" onClick={() => setDraft(control.recoverableText())}>Restore message to editor</button>
+              <button type="button" onClick={() => updateDraft(control.recoverableText())}>Restore message to editor</button>
             </Show>
             <Show when={control.capabilities()?.canInterrupt}>
               <button type="button" disabled={!mutable() || !control.canInterrupt() || !!control.pending()} onClick={() => {
