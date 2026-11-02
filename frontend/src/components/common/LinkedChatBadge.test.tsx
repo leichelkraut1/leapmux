@@ -1,6 +1,7 @@
 import type { Tab } from '~/stores/tab.types'
 import { cleanup, render, screen } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
+import { createStore } from 'solid-js/store'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
@@ -33,13 +34,13 @@ describe('LinkedChatBadge', () => {
   })
 
   it('describes a source whose computer name has not loaded and updates when it arrives', () => {
-    const [name, setName] = createSignal('')
-    store.workerInfo.mockImplementation(() => name() ? { name: name() } : null)
+    const [info, setInfo] = createStore({ name: '' })
+    store.workerInfo.mockReturnValue(info)
     render(() => <LinkedChatBadge tab={native} />)
     const badge = screen.getByTestId('linked-chat-badge')
     expect(hoverForTooltip(badge)).toHaveTextContent('original app and on its source computer')
     unhoverTooltip(badge)
-    setName('Hydrated Source PC')
+    setInfo('name', 'Hydrated Source PC')
     expect(hoverForTooltip(badge)).toHaveTextContent('on Hydrated Source PC.')
     expect(screen.getByTestId('linked-chat-badge')).toBe(badge)
   })
