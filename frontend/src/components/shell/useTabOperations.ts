@@ -1,8 +1,10 @@
 import type { BusyTabConfirmState } from './BusyTabCloseDialog'
+import type { NativeConversationPlacement } from './nativeConversationPlacement'
 import type { TabBusyProbe, TabBusyReason } from './tabBusyProbe'
 import type { TabContext } from './tabContext'
 import type { useAgentOperations } from './useAgentOperations'
 import type { useTerminalOperations } from './useTerminalOperations'
+import type { NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { WorktreeCloseSummary } from '~/components/shell/closeResultToast'
 import type { LastTabCloseChoice, LastTabConfirmState } from '~/components/shell/LastTabCloseDialog'
 import type { CloseTabResult } from '~/generated/proto/leapmux/v1/common_pb'
@@ -27,11 +29,13 @@ import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import { createDialogState, createUpdatableDialogState } from '~/hooks/createDialogState'
 import { makeIdGenerator } from '~/lib/idGenerator'
 import { basename, isAbsolute } from '~/lib/paths'
-import { fileTabPayload, imageTabPayload } from '~/lib/tabPayload'
+import { fileTabPayload, imageTabPayload, nativeConversationTabPayload, tabPayloadView } from '~/lib/tabPayload'
 import { MAX_BACKGROUND_CHAT_MESSAGES } from '~/stores/chat.store'
 import { descendantAgentTabs, isSubagentTab, planOptimisticRepoGit, tabDisplayLabel, tabKey } from '~/stores/tab.helpers'
 import { isPayloadBackedTabType } from '~/stores/tab.types'
-import { emitRemoveTab } from '~/stores/tabOps'
+import { tabPayloadMetadata } from '~/stores/tabMetadata.store'
+import { emitAddTab, emitRemoveTab, positionAfterKey } from '~/stores/tabOps'
+import { nativeConversationMatches, nativeConversationPlacementAnchor, nativeConversationPlacementKey } from './nativeConversationPlacement'
 import { openTabInFocusedTile } from './openTabInFocusedTile'
 import { focusTile, removeEmptyFloatingWindow } from './tileLifecycle'
 
@@ -76,6 +80,7 @@ interface UseTabOperationsOpts {
   /** Answers "would closing this tab interrupt running work". */
   busyProbe: TabBusyProbe
   repoGitStore: ReturnType<typeof createRepoGitStore>
+  isWorkspaceMutatable?: (workspaceId: string) => boolean
 }
 
 /**
@@ -334,6 +339,9 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
     // getAgentTab / getTerminalTab read `byKey()`, which spans every workspace.
     const closesInactiveWorkspace = ownerWorkspaceFor(tab) !== null
 
+    if (tab.type === TabType.NATIVE_CONVERSATION)
+      worktreeAction = WorktreeAction.KEEP
+
     let closeResult: Promise<CloseTabResult | undefined>
     if (tab.type === TabType.AGENT) {
       closeResult = agentOps.handleAgentClose(tab.id, worktreeAction)
@@ -505,7 +513,7 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
     // a child as tab-close-only (no teardown, no closed_at), so skip the
     // inspect/worktree prompt entirely and commit KEEP. Transcript + registry
     // survive; the tab can be revived (Part 5b).
-    if (isSubagentTab(tab)) {
+    if (isSubagentTab(tab) || tab.type === TabType.NATIVE_CONVERSATION) {
       addClosingTabKey(key)
       try {
         // Its own subagents go with it, for the same reason a root's do.
@@ -763,6 +771,116 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
     })
   }
 
+  const generateNativeTabId = makeIdGenerator('native')
+  const pendingNativeLinks = new Map<string, Promise<Tab>>()
+  /** Register a reference; never opens/resumes a provider or changes its cwd. */
+  const handleNativeConversationAttach = (ref: NativeConversationRef, at: NativeConversationPlacement): Promise<Tab> => {
+    const key = JSON.stringify([nativeConversationPlacementKey(at), ref.workerId, ref.agentProvider, ref.sessionId])
+    const pending = pendingNativeLinks.get(key)
+    if (pending)
+      return pending
+    const attach = async (): Promise<Tab> => {
+      const assertDestination = () => {
+        if (opts.isWorkspaceMutatable?.(at.workspaceId) === false)
+          throw new Error('This workspace is no longer available for changes.')
+        if (opts.workerOnlineState(at.workerId) !== true)
+          throw new Error('The destination computer must be online to save this link.')
+        const anchor = nativeConversationPlacementAnchor(view.forWorkspace(at.workspaceId), at, opts.repoGitStore)
+        if (!anchor?.tileId)
+          throw new Error('This worktree is no longer available. Choose another worktree.')
+        return anchor
+      }
+      assertDestination()
+      const candidates = () => view.forWorkspace(at.workspaceId)
+        .filter(tab => tab.type === TabType.NATIVE_CONVERSATION && tab.workerId === at.workerId)
+      const identityPending = (tab: Tab) => metadata.get(tab.id)?.hydrated !== true
+        || tab.type !== TabType.NATIVE_CONVERSATION || !tab.workingDir || !tab.sourceWorkerId || !tab.agentProvider || !tab.sessionId
+      const resolveCandidates = async () => {
+        // Placement is account-wide, but private identity can still be loading
+        // after a reload or a visit to another workspace. Unknown is not absent.
+        await Promise.all(candidates().filter(identityPending).map(async (tab) => {
+          const response = await workerRpc.getTabPayload(at.workerId, { tabId: tab.id })
+          const current = view.getById(TabType.NATIVE_CONVERSATION, tab.id)
+          if (!current || current.workerId !== at.workerId)
+            return
+          const payload = tabPayloadView(response.payload)
+          if (payload?.kind !== 'nativeConversation' || !payload.workingDir || !payload.sourceWorkerId || !payload.agentProvider || !payload.sessionId)
+            throw new Error('An existing linked chat could not be resolved. Reload before adding this chat.')
+          metadata.patch(tab.id, tabPayloadMetadata(payload))
+        }))
+        assertDestination()
+        if (candidates().some(identityPending))
+          throw new Error('Linked chats are still loading. Please try again.')
+      }
+      const findExisting = () => candidates().find(tab => nativeConversationMatches(tab, ref, at))
+      await resolveCandidates()
+      const existing = findExisting()
+      if (existing) {
+        handleTabSelect(existing)
+        return existing
+      }
+      const tabId = generateNativeTabId()
+      let placed = false
+      try {
+        await workerRpc.registerTabPayload(at.workerId, {
+          tabId,
+          payload: nativeConversationTabPayload({
+            sourceWorkerId: ref.workerId,
+            agentProvider: ref.agentProvider,
+            sessionId: ref.sessionId,
+            displayName: ref.displayName || 'Linked conversation',
+            workingDir: at.workingDir,
+          }),
+        })
+        // Re-check after the RPC: the chooser can outlive a move, archive or close.
+        await resolveCandidates()
+        const appeared = findExisting()
+        if (appeared) {
+          await workerRpc.revokeTabPayload(at.workerId, { tabId, worktreeAction: WorktreeAction.KEEP }).catch(() => {})
+          handleTabSelect(appeared)
+          return appeared
+        }
+        const anchor = assertDestination()
+        const tileId = anchor.tileId!
+        metadata.patch(tabId, {
+          hydrated: true,
+          workingDir: at.workingDir,
+          gitToplevel: at.workingDir,
+          title: ref.displayName || 'Linked conversation',
+          displayName: ref.displayName || 'Linked conversation',
+          sourceWorkerId: ref.workerId,
+          agentProvider: ref.agentProvider,
+          sessionId: ref.sessionId,
+        })
+        const batchId = emitAddTab({
+          type: TabType.NATIVE_CONVERSATION,
+          id: tabId,
+          workerId: at.workerId,
+          tileId,
+          position: positionAfterKey(view.forTile(tileId), tabKey(anchor)),
+        })
+        if (!batchId)
+          throw new Error('The workspace connection is not ready to save this link.')
+        placed = true
+        const tab = view.getById(TabType.NATIVE_CONVERSATION, tabId)
+        if (!tab)
+          throw new Error('The linked chat could not be placed in this workspace.')
+        handleTabSelect(tab)
+        return tab
+      }
+      catch (err) {
+        if (placed)
+          emitRemoveTab(TabType.NATIVE_CONVERSATION, tabId)
+        metadata.remove(tabId)
+        await workerRpc.revokeTabPayload(at.workerId, { tabId, worktreeAction: WorktreeAction.KEEP }).catch(() => {})
+        throw err
+      }
+    }
+    const result = attach().finally(() => pendingNativeLinks.delete(key))
+    pendingNativeLinks.set(key, result)
+    return result
+  }
+
   const generateImageTabId = makeIdGenerator('image')
   /**
    * Open one image an agent returned inside a chat message in its own tab.
@@ -905,6 +1023,7 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
     closeTabWithAction,
     closeWorktreeTabsAndReport,
     handleFileOpen,
+    handleNativeConversationAttach,
     // `handleImageOpen` is deliberately NOT exported. `handleChatImageOpen` is
     // the entry point, and the file-vs-image decision it makes is the reason
     // this module owns the pair -- a caller that reached the image opener

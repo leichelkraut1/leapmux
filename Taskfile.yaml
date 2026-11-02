@@ -538,6 +538,7 @@ tasks:
       - backend/go.mod
       - backend/go.sum
       - backend/**/*.{go,s,S,c,cc,cpp,cxx,h,hpp,f,F,f90,syso}
+      - backend/internal/worker/agent/providers/claude/native-control-plugin/**/*
       - exclude: backend/**/*_test.go
     vars:
       GO_CONTEXT:
@@ -568,6 +569,7 @@ tasks:
       - backend/go.mod
       - backend/go.sum
       - backend/**/*.{go,s,S,c,cc,cpp,cxx,h,hpp,f,F,f90,syso}
+      - backend/internal/worker/agent/providers/claude/native-control-plugin/**/*
       - exclude: backend/**/*_test.go
     vars:
       GO_CONTEXT:
@@ -635,6 +637,7 @@ tasks:
       - backend/go.mod
       - backend/go.sum
       - backend/**/*.go
+      - backend/internal/worker/agent/providers/claude/native-control-plugin/**/*
       - desktop/go/go.mod
       - desktop/go/go.sum
       - desktop/go/**/*.go
@@ -769,6 +772,7 @@ tasks:
       - backend/go.mod
       - backend/go.sum
       - backend/**/*.go
+      - backend/internal/worker/agent/providers/claude/native-control-plugin/**/*
       - desktop/go/go.mod
       - desktop/go/go.sum
       - desktop/go/**/*.go
@@ -877,6 +881,7 @@ tasks:
       - backend/go.mod
       - backend/go.sum
       - backend/**/*.go
+      - backend/internal/worker/agent/providers/claude/native-control-plugin/**/*
       - desktop/go/go.mod
       - desktop/go/go.sum
       - desktop/go/**/*.go
@@ -1168,6 +1173,12 @@ tasks:
       - buf lint
       - *record_artifacts
 
+  format-frontend:
+    desc: Format frontend code with the configured linter
+    deps: [prepare-frontend]
+    cmds:
+      - cd frontend && bun run lint --fix
+
   lint-frontend:
     desc: Lint frontend code
     deps: [prepare-frontend]
@@ -1198,6 +1209,11 @@ tasks:
       - cd frontend && bun run typecheck
       - cd frontend && bun run lint
       - *record_artifacts
+
+  format-backend:
+    desc: Format Go code with the configured formatters
+    cmds:
+      - cd backend && go tool golangci-lint fmt {{.CLI_ARGS | default "./..."}}
 
   lint-backend:
     desc: Lint Go code
@@ -1358,6 +1374,7 @@ tasks:
       - backend/go.mod
       - backend/go.sum
       - backend/**/*.{go,s,S,c,cc,cpp,cxx,h,hpp,f,F,f90,syso}
+      - backend/internal/worker/agent/providers/claude/native-control-plugin/**/*
       - exclude: backend/**/*_test.go
       - desktop/go/**/*.{go,s,S,c,cc,cpp,cxx,h,hpp,f,F,f90,syso}
       - exclude: desktop/go/**/*_test.go

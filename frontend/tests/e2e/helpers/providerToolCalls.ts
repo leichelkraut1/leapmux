@@ -1,6 +1,7 @@
 import type { MockModelToolCall } from './mockModelScript'
 import { createHash } from 'node:crypto'
 import { isAbsolute } from 'node:path'
+import process from 'node:process'
 // Use a relative import.
 // The note in ../agentSettings.ts explains standalone native probes.
 import { AMP_TOOL_NAME } from '../../../src/components/chat/providers/amp/toolNames'
@@ -2373,6 +2374,31 @@ export function codexViewImageToolCall(id: string, path: string): MockModelToolC
 /** Request Codex's native approval before a scripted shell command runs. */
 export function codexEscalatedCommandToolCall(id: string, command: string): MockModelToolCall {
   return codexCommandCall(id, { cmd: command, sandbox_permissions: 'require_escalated', justification: 'Run the scripted approval test.' })
+}
+
+/** Run an approved synthetic command to completion, including yielded native exec sessions. */
+export function codexCompletedEscalatedCommandToolCall(id: string, command: string, platform: NodeJS.Platform = process.platform): MockModelToolCall {
+  const request = {
+    cmd: command,
+    shell: platform === 'win32' ? 'cmd.exe' : '/bin/sh',
+    login: false,
+    yield_time_ms: 1000,
+    sandbox_permissions: 'require_escalated',
+    justification: 'Read the synthetic attachment fixture for the scripted test.',
+  }
+  // A fixture read should finish quickly. Follow actual session IDs within a
+  // fixed number of polls instead of treating a yielded command as completed.
+  return codexExecToolCall(id, [
+    `let result = await tools.exec_command(${JSON.stringify(request)})`,
+    'let output = result.output ?? ""',
+    'for (let poll = 0; result.session_id !== undefined && poll < 6; poll++) {',
+    '  result = await tools.write_stdin({ session_id: result.session_id, chars: "", yield_time_ms: 1000 })',
+    '  output += result.output ?? ""',
+    '}',
+    'if (result.session_id !== undefined || !Number.isInteger(result.exit_code))',
+    '  throw new Error("The scripted command did not complete within its bounded session polls.")',
+    'text(JSON.stringify({ ...result, output }))',
+  ].join('\n'))
 }
 
 /** Kimi Code reads image files through ReadMediaFile, not its text Read tool. */

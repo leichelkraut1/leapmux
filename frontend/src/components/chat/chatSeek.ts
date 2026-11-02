@@ -56,6 +56,8 @@ export interface ChatSeek {
  * callbacks.
  */
 export interface ChatSeekExtras {
+  /** Open a collapsed target before reading the virtual offset map. */
+  revealMessage?: ((seq: bigint | undefined, id?: string) => void) | undefined
   /** Live loaded transcript messages. */
   messages: () => AgentChatMessage[]
   /** Clamped logical scrollTop read (Safari rubber-band safe). */
@@ -139,6 +141,7 @@ export function createChatSeek(ctx: ScrollContext, extras: ChatSeekExtras): Chat
     const id = nearestRowIdBySeq(seq)
     if (!id)
       return false
+    extras.revealMessage?.(seq, id)
     // Resolve the row's top scrollTop via the anchor resolver (offsetWithinRow 0 pins the
     // row top to the viewport top). Falls back to the nearest-survivor resolver if the id
     // isn't in the current offset map. Both are already on the narrowed virtualizer type.

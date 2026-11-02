@@ -3,7 +3,7 @@ import type { JSX } from 'solid-js'
 import type { MessageUiKey } from './messageUiKeys'
 import type { ControlResponseSummary } from './model/controlResponse'
 import type { UserMessageAttachment } from './model/row'
-import type { ExpandableMarkdownRenderContext, MarkdownRenderContext, MessageUiRenderContext } from './renderContext'
+import type { ExpandableMarkdownRenderContext, MarkdownRenderContext, MessageUiRenderContext, ToolResultRenderContext } from './renderContext'
 import Braces from 'lucide-solid/icons/braces'
 import Brain from 'lucide-solid/icons/brain'
 import ChevronRight from 'lucide-solid/icons/chevron-right'
@@ -21,6 +21,7 @@ import { renderMarkdownForContext } from './markdownRendering'
 import { attachmentItem, attachmentList, controlResponseLabel, controlResponseMessage, thinkingChevron, thinkingChevronExpanded, thinkingContent, thinkingHeader } from './messageStyles.css'
 import { MESSAGE_UI_KEY, messageUiDefault } from './messageUiKeys'
 import { CONTROL_RESPONSE_FEEDBACK_LEAD } from './persistedControlResponse'
+import { ImageResultList } from './results/imageResult'
 import { LIMITED_TEXT_DISPLAY_NOTICE, limitTextForDisplay } from './safeTextDisplay'
 import {
   toolInputText,
@@ -152,7 +153,7 @@ export function PlanExecutionMessage(props: { text: string, context?: Expandable
  * attachment + markdown rendering. Renders nothing when the parsed body has
  * no usable text or attachments.
  */
-export function UserContentMessage(props: { text: string, attachments: UserMessageAttachment[], context?: MarkdownRenderContext }): JSX.Element {
+export function UserContentMessage(props: { text: string, attachments: UserMessageAttachment[], context?: ToolResultRenderContext }): JSX.Element {
   const hasText = (): boolean => props.text.trim().length > 0
   const hasAttachments = (): boolean => props.attachments.length > 0
   const hasAny = (): boolean => hasText() || hasAttachments()
@@ -168,11 +169,12 @@ export function UserContentMessage(props: { text: string, attachments: UserMessa
                   icon={att.mimeType?.startsWith('image/') ? FileImageIcon : FileIcon}
                   size="xs"
                 />
-                {att.filename ?? 'Unnamed file'}
+                {att.filename ?? (att.image ? 'Image' : 'Unnamed file')}
               </span>
             )}
           </For>
         </div>
+        <ImageResultList sources={props.attachments.flatMap(attachment => attachment.image ? [attachment.image] : [])} {...(props.context?.images !== undefined ? { actions: props.context.images } : {})} />
       </Show>
       <Show when={hasText()}>
         <MarkdownText text={props.text} {...(props.context !== undefined ? { context: props.context } : {})} />

@@ -7,7 +7,7 @@ import { exerciseShellToolExecution } from '../helpers/nativeToolExecution'
 import { bashToolCall } from '../helpers/providerToolCalls'
 import { createTestDirectory } from '../helpers/runDirectory'
 import { quotePosixShellArgument } from '../helpers/shellArguments'
-import { ARITHMETIC_ANSWER_TEXT, ARITHMETIC_PROMPT, chooseSettingsOption, expectAssistantAnswer, expectSettingsChip, sendMessage, toolRows, toolRunningBadge, waitForAgentStarted, waitForSettingsIdle } from '../helpers/ui'
+import { ARITHMETIC_ANSWER_TEXT, ARITHMETIC_PROMPT, chooseSettingsOption, expandActivityGroups, expectAssistantAnswer, expectSettingsChip, sendMessage, toolRows, toolRunningBadge, waitForAgentStarted, waitForSettingsIdle } from '../helpers/ui'
 
 /**
  * The heartbeat case checks a native CLI tool_progress event in the browser.
@@ -83,6 +83,8 @@ setTimeout(() => server.close(), 180000).unref()
     await modelScript.waitForSteps(serverStep + 1)
     // The native tool card proves delivery. An absent failure banner can pass before the send reply arrives.
     // Visible locators exclude hidden premeasure rows.
+    await expect(page.locator('[data-testid="activity-group-toggle"]:visible').first()).toBeVisible()
+    await expandActivityGroups(page)
     await expect(toolRows(page).first()).toBeVisible()
 
     // Require the server's actual port file. A tool that fails immediately can still create a card without a heartbeat.

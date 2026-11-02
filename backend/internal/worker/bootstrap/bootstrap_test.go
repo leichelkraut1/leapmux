@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/hubtransport"
@@ -225,6 +226,25 @@ func TestBuildTabSync_ReportsFileTabsScopedToTheOwner(t *testing.T) {
 		"the connecting owner's file tab must be reported")
 	assert.NotContains(t, reported, "file-2",
 		"another owner's file tab must not be reported as this registrant's, or it suppresses a tombstone that owner's tab was due")
+}
+
+func TestBuildTabSync_ReportsNativeConversationTabsScopedToTheOwner(t *testing.T) {
+	queries := setupTestDB(t)
+	ctx := context.Background()
+	payload, err := proto.Marshal(&leapmuxv1.TabPayload{Kind: &leapmuxv1.TabPayload_NativeConversation{NativeConversation: &leapmuxv1.NativeConversationTabPayload{
+		SourceWorkerId: "generated-source-worker", AgentProvider: leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX, SessionId: "generated-chat", DisplayName: "Generated native chat",
+	}}})
+	require.NoError(t, err)
+	for _, owner := range []string{"user-1", "user-2"} {
+		require.NoError(t, queries.UpsertWorkerTabPayload(ctx, db.UpsertWorkerTabPayloadParams{
+			UserID: owner, TabID: "native-" + owner, TabType: int64(leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION), Payload: payload,
+		}))
+	}
+	sync, err := BuildTabSync(queries, userid.MustNew("user-1"))
+	require.NoError(t, err)
+	require.Len(t, sync.GetTabs(), 1, "an inventory omission would tombstone the durable link on reconnect")
+	assert.Equal(t, "native-user-1", sync.GetTabs()[0].GetTabId())
+	assert.Equal(t, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION, sync.GetTabs()[0].GetTabType())
 }
 
 // TestBuildTabSync_RefusesWithoutARegisteredOwner pins the fail-closed half: with

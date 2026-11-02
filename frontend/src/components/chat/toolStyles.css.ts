@@ -2,6 +2,7 @@ import { globalStyle, style } from '@vanilla-extract/css'
 import { codeTypography, codeWrap } from '~/styles/codeBlock'
 import { fadeMaskBottom } from '~/styles/fadeMask'
 import { clippedText, controlReset } from '~/styles/shared.css'
+import { COLLAPSED_COMMAND_INPUT_ROWS } from './chatHeightShared'
 import { codeSurface } from './shikiTokenColors.css'
 import { LINE_THICKNESS, TOOL_BODY_INDENT } from './widgets/SpanLines.geometry'
 
@@ -130,19 +131,24 @@ export const toolInputSummary = style({
   color: 'var(--muted-foreground)',
 })
 
-// Collapsed command input summaries show the first three visual rows. This is
+// Collapsed command input summaries show the first visual row. This is
 // intentionally a visual row cap (not hard-line truncation) so a very long
-// single-line command is clipped correctly after wrapping. 4.5em == 3 rows at the
-// 1.5 line height above (kept in sync with it).
+// single-line command is clipped correctly after wrapping. A line-height unit
+// also fits semantic actions, which inherit the surrounding prose line height.
 export const commandInputCollapsed = style({
-  maxHeight: '4.5em',
+  maxHeight: `${COLLAPSED_COMMAND_INPUT_ROWS}lh`,
   overflow: 'hidden',
 })
 
-export const commandInputCollapsedFade = style(fadeMaskBottom())
+// A one-line preview fades only at its trailing edge, never over its whole height.
+const commandInputFadeMask = 'linear-gradient(to right, black calc(100% - 2em), transparent)'
+export const commandInputCollapsedFade = style({
+  WebkitMaskImage: commandInputFadeMask,
+  maskImage: commandInputFadeMask,
+})
 
 // Semantic command actions share one text color whether they draw as one line or a
-// list. A list keeps the command summary's three-row clip and its native bullets.
+// list. A list keeps the command summary's one-row clip and its native bullets.
 const commandActionSummaryStyle = {
   color: 'var(--muted-foreground)',
 }

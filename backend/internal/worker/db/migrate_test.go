@@ -14,7 +14,9 @@ func TestWorkerMigrationRemovesEveryApplicationTable(t *testing.T) {
 	connection := integerEnumStore(t)
 	provider, err := goose.NewProvider(goose.DialectSQLite3, connection, os.DirFS("migrations"))
 	require.NoError(t, err)
-	_, err = provider.Down(t.Context())
+	// Every migration's Down, newest first: together they must remove every
+	// table the Ups created.
+	_, err = provider.DownTo(t.Context(), 0)
 	require.NoError(t, err)
 	rows, err := connection.QueryContext(t.Context(), `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name <> 'goose_db_version' ORDER BY name`)
 	require.NoError(t, err)

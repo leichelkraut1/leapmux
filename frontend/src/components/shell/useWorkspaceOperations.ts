@@ -7,10 +7,10 @@ import { createSignal } from 'solid-js'
 import { sectionClient, workspaceClient } from '~/api/clients'
 import * as workerRpc from '~/api/workerRpc'
 import { showWarnToast } from '~/components/common/Toast'
-import { canReorderWithinSection, sectionFilterQuery, workspaceSortOrder } from '~/components/workspace/workspaceListState'
+import { sectionFilterQuery, workspaceSortOrder } from '~/components/workspace/workspaceListState'
 import { SectionType } from '~/generated/proto/leapmux/v1/section_pb'
 import { WorkspaceArchiveState } from '~/generated/proto/leapmux/v1/workspace_pb'
-import { appendPosition, mid } from '~/lib/lexorank'
+import { appendPosition } from '~/lib/lexorank'
 import { cleanName } from '~/lib/validate'
 import { filterWorkspaces, sortWorkspaces } from '~/lib/workspaceSort'
 import { isWorkspaceSection } from './sectionUtils'
@@ -538,108 +538,6 @@ export function useWorkspaceOperations(props: UseWorkspaceOperationsProps) {
   }
 
   // ---------------------------------------------------------------------------
-  // Workspace DnD helpers
-  // ---------------------------------------------------------------------------
-
-  const computeDropPosition = (
-    wsId: string,
-    targetWsId: string,
-    targetSectionId: string,
-    direction: 'before' | 'after',
-  ): string => {
-    const items = store.getItemsForSection(targetSectionId)
-      .filter(i => i.workspaceId !== wsId)
-    const targetIdx = items.findIndex(i => i.workspaceId === targetWsId)
-    if (targetIdx < 0) {
-      return appendPosition(items)
-    }
-    if (direction === 'after') {
-      // findIndex proved targetIdx valid and the ternary bounds targetIdx + 1;
-      // the '' defaults are the type-level guard alone.
-      const prevPos = items[targetIdx]?.position ?? ''
-      const nextPos = targetIdx + 1 < items.length ? items[targetIdx + 1]?.position ?? '' : ''
-      return mid(prevPos, nextPos)
-    }
-    // findIndex proved targetIdx valid and the ternary bounds targetIdx - 1;
-    // the '' defaults are the type-level guard alone.
-    const prevPos = targetIdx > 0 ? items[targetIdx - 1]?.position ?? '' : ''
-    const nextPos = items[targetIdx]?.position ?? ''
-    return mid(prevPos, nextPos)
-  }
-
-  const handleWorkspaceDragEnd = ({ draggable, droppable }: { draggable: any, droppable?: any }) => {
-    if (!draggable || !droppable || draggable.id === droppable.id)
-      return
-
-    const dragId = String(draggable.id)
-    const dropId = String(droppable.id)
-
-    if (!dragId.startsWith('ws-'))
-      return
-
-    const wsId = dragId.slice(3)
-    const fromSectionId = draggable.data?.sectionId as string
-
-    let targetSectionId: string
-    let position: string
-
-    if (dropId.startsWith('ws-')) {
-      const targetWsId = dropId.slice(3)
-      targetSectionId = droppable.data?.sectionId as string
-
-      if (fromSectionId === targetSectionId) {
-        // A same-section reorder has no meaning while the view order differs
-        // from the model order, which is what a non-manual sort or a live
-        // filter produces. The rows stay sortable so a CROSS-section drop can
-        // still resolve a row target; only this case is suppressed.
-        if (!canReorderWithinSection(targetSectionId))
-          return
-        const items = store.getItemsForSection(targetSectionId)
-        const dragIdx = items.findIndex(i => i.workspaceId === wsId)
-        const dropIdx = items.findIndex(i => i.workspaceId === targetWsId)
-        const direction = dragIdx >= 0 && dragIdx < dropIdx ? 'after' : 'before'
-        position = computeDropPosition(wsId, targetWsId, targetSectionId, direction)
-      }
-      else {
-        position = computeDropPosition(wsId, targetWsId, targetSectionId, 'before')
-      }
-    }
-    else if (dropId.startsWith('section-')) {
-      targetSectionId = dropId.slice(8)
-      if (fromSectionId === targetSectionId)
-        return
-      const items = store.getItemsForSection(targetSectionId)
-      position = appendPosition(items)
-    }
-    else {
-      return
-    }
-
-    // A drop that CROSSES the archive boundary -- in either direction -- is a
-    // lifecycle change, and `moveWorkspace` owns what that means: the archive
-    // confirmation on the way in, the unarchive on the way out, and the hub
-    // call that a plain `MoveWorkspace` refuses. The drop POSITION goes with
-    // it, because the lifecycle RPC takes a destination and a rank, so the
-    // workspace lands exactly where the user dropped it; a same-side drop
-    // keeps the optimistic path below.
-    const resolvedTargetSection = store.state.sections.find(s => s.id === targetSectionId)
-    const targetArchived = resolvedTargetSection?.sectionType === SectionType.WORKSPACES_ARCHIVED
-    if (targetArchived !== isWorkspaceArchived(wsId)) {
-      void moveWorkspace(wsId, targetSectionId, position)
-      return
-    }
-
-    store.moveWorkspace(wsId, targetSectionId, position)
-    const done = startWorkspaceLoading(wsId)
-    sectionClient.moveWorkspace({ workspaceId: wsId, sectionId: targetSectionId, position })
-      .catch((err) => {
-        showWarnToast('Failed to reorder workspace', err)
-        props.loadSections()
-      })
-      .finally(() => done())
-  }
-
-  // ---------------------------------------------------------------------------
   // Reactive helpers for content factories
   // ---------------------------------------------------------------------------
 
@@ -708,9 +606,6 @@ export function useWorkspaceOperations(props: UseWorkspaceOperationsProps) {
     isWorkspaceLoading,
     onRenameInput: (v: string) => setRenameValue(v),
 
-    // DnD
-    computeDropPosition,
-    handleWorkspaceDragEnd,
   }
 }
 

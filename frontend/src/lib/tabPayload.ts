@@ -1,4 +1,4 @@
-// The client half of `leapmux.v1.TabPayload`: what a FILE or IMAGE tab needs to
+// The client half of `leapmux.v1.TabPayload`: what a payload-backed tab needs to
 // resolve WHAT IT SHOWS, kept on the worker behind the E2EE channel because the
 // hub must never see it.
 //
@@ -8,6 +8,7 @@
 // directions, so a new tab kind is one file to edit rather than a search.
 
 import type { MessageInitShape } from '@bufbuild/protobuf'
+import type { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import type { TabPayload, TabPayloadSchema } from '~/generated/proto/leapmux/v1/worker_private_pb'
 
 /** A decoded payload, discriminated by tab kind. */
@@ -24,6 +25,15 @@ export type TabPayloadView
       imageIndex: number
       /** Display name for the tab strip. */
       title: string
+    }
+    | {
+      kind: 'nativeConversation'
+      workingDir: string
+      /** Worker owning the provider session; placement can use another worker. */
+      sourceWorkerId: string
+      agentProvider: AgentProvider
+      sessionId: string
+      displayName: string
     }
 
 /**
@@ -46,6 +56,16 @@ export function tabPayloadView(payload: TabPayload | undefined): TabPayloadView 
       seq: kind.value.seq,
       imageIndex: kind.value.imageIndex,
       title: kind.value.title,
+    }
+  }
+  if (kind.case === 'nativeConversation') {
+    return {
+      kind: 'nativeConversation',
+      workingDir,
+      sourceWorkerId: kind.value.sourceWorkerId,
+      agentProvider: kind.value.agentProvider,
+      sessionId: kind.value.sessionId,
+      displayName: kind.value.displayName,
     }
   }
   return null
@@ -73,6 +93,28 @@ export function imageTabPayload(image: {
         seq: image.seq,
         imageIndex: image.imageIndex,
         title: image.title,
+      },
+    },
+  }
+}
+
+/** Build a reference to the original session, never a copied or resumed chat. */
+export function nativeConversationTabPayload(conversation: {
+  sourceWorkerId: string
+  agentProvider: AgentProvider
+  sessionId: string
+  displayName: string
+  workingDir: string
+}): MessageInitShape<typeof TabPayloadSchema> {
+  return {
+    workingDir: conversation.workingDir,
+    kind: {
+      case: 'nativeConversation',
+      value: {
+        sourceWorkerId: conversation.sourceWorkerId,
+        agentProvider: conversation.agentProvider,
+        sessionId: conversation.sessionId,
+        displayName: conversation.displayName,
       },
     },
   }

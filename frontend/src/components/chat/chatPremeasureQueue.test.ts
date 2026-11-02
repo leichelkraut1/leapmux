@@ -114,6 +114,45 @@ describe('chatPremeasureQueue', () => {
     })
   })
 
+  it('keeps another pending candidate mounted when a sibling settles or a band adds rows', () => {
+    createRoot((dispose) => {
+      const h = makeHarness(['a', 'b', 'c'])
+      h.setRanged([h.candidate('a'), h.candidate('b')])
+      const pendingB = h.queue.premeasureCandidates().find(candidate => candidate.item.id === 'b')
+      expect(pendingB).toBeDefined()
+      h.queue.onMeasure('a', 120, 'k-a', 0, true)
+      expect(h.queue.premeasureCandidates()).toEqual([pendingB])
+      expect(h.queue.premeasureCandidates()[0]).toBe(pendingB)
+      h.setLookAhead([h.candidate('c')])
+      expect(h.queue.premeasureCandidates().map(candidate => candidate.item.id)).toEqual(['b', 'c'])
+      expect(h.queue.premeasureCandidates()[0]).toBe(pendingB)
+      dispose()
+    })
+  })
+
+  it('replaces a stable-ID candidate when its captured layout key changes', () => {
+    createRoot((dispose) => {
+      const item: VirtualItem = { id: 'a', hasSpanLines: false, heightKey: 'before' }
+      const entry = { message: { id: 'a' } } as ClassifiedEntry
+      const [items, setItems] = createSignal([item], { equals: false })
+      const queue = createPremeasureQueue({
+        virt: { hasMeasuredHeight: () => false, hasPendingPremeasuredHeight: () => false, primeHeight: () => false },
+        visibleEntryById: () => new Map([['a', entry]]),
+        virtualItemById: () => new Map(items().map(value => [value.id, value])),
+        virtualItems: items,
+        rangedCandidates: () => items().map(value => ({ entry, item: value })),
+        lookAheadCandidates: () => [],
+      })
+      const before = queue.premeasureCandidates()[0]
+      item.heightKey = 'after'
+      setItems([item])
+      expect(queue.premeasureCandidates()[0]).not.toBe(before)
+      expect(queue.premeasureCandidates()[0]?.item.heightKey).toBe('after')
+      expect(queue.collapsedPremeasureIds().has('a')).toBe(true)
+      dispose()
+    })
+  })
+
   it('an unsettled measurement keeps the row mounted for a re-measure under the same heightKey', () => {
     createRoot((dispose) => {
       const h = makeHarness(['a'])

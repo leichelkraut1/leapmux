@@ -87,6 +87,10 @@ func registerAgentHandlers(d registrar, svc *Service) {
 				sendInvalidArgument(sender, err.Error())
 				return
 			}
+			if err := validateWorkflowBinding(r.GetWorkflow()); err != nil {
+				sendInvalidArgument(sender, err.Error())
+				return
+			}
 
 			// A client-set title is CLEANED, never refused, with the rule
 			// that validate.CleanName documents. RenameAgent,
@@ -206,7 +210,7 @@ func registerAgentHandlers(d registrar, svc *Service) {
 			}, resumeSessionID); err != nil {
 				// The row does not exist, so no startup will ever run for it.
 				svc.AgentStartup.abandon(startupHandle)
-				if errors.Is(err, errNativeSessionAlreadyOpen) {
+				if errors.Is(err, errNativeSessionAlreadyOpen) || errors.Is(err, errNativeSessionExternallyControlled) {
 					sendFailedPrecondition(sender, err.Error())
 					return
 				}
@@ -230,6 +234,23 @@ func registerAgentHandlers(d registrar, svc *Service) {
 				return
 			}
 
+			// A workflow agent's binding is durable BEFORE its socket exists, so
+			// the coordinator's FindWorkflowAgents finds the agent even if this
+			// worker restarts mid-open, and every relaunch re-applies the
+			// confinement from the same row.
+			if binding := r.GetWorkflow(); binding != nil {
+				if err := svc.Workflows.Store().PutBinding(bgCtx(), agentID, binding); err != nil {
+					slog.Error("failed to record workflow binding", "agent_id", agentID, "error", err)
+					if _, closeErr := svc.Queries.CloseAgent(bgCtx(), agentID); closeErr != nil {
+						slog.Warn("failed to close the agent whose binding was not recorded", "agent_id", agentID, "error", closeErr)
+					}
+					svc.agentCleanups.abandonClaim(agentID)
+					svc.AgentStartup.abandon(startupHandle)
+					sendInternalError(sender, "failed to record workflow binding")
+					return
+				}
+			}
+
 			remoteEnvs, _, err := svc.spawnControlIPC(string(tabKindAgent), agentID, "", svc.agentCleanups.register, func() ([]string, func(), error) {
 				return svc.ControlIPC.AgentSpawning(AgentSpawnInfo{
 					UserID:        caller.UserID,
@@ -237,6 +258,7 @@ func registerAgentHandlers(d registrar, svc *Service) {
 					TabID:         agentID,
 					WorkingDir:    plan.PlannedWorkingDir,
 					AgentProvider: agentlabels.CLIAlias(agentProvider),
+					Workflow:      r.GetWorkflow(),
 				})
 			})
 			if err != nil {
@@ -1275,11 +1297,6 @@ func registerAgentHandlers(d registrar, svc *Service) {
 		// row itself is what any file-tab client needs, and the pre-existing
 		// precedent is WatchWorkerPrivateEvents, which applies per-kind checks
 		// inside a file:read gate (privateEventVisible).
-		if r.GetWorktreeAction() == leapmuxv1.WorktreeAction_WORKTREE_ACTION_REMOVE &&
-			!caller.Allows(leapmuxv1.Scope_SCOPE_GIT_WRITE) {
-			sendPermissionDenied(sender, "removing a worktree needs the git:write permission")
-			return
-		}
 		// Drive the shared closeTabCommon flow so the worktree-tab link
 		// (and any user-requested `git worktree remove`) is handled
 		// identically to CloseAgent / CloseTerminal. It is idempotent: a
@@ -1305,7 +1322,22 @@ func registerAgentHandlers(d registrar, svc *Service) {
 			}
 			tabType = leapmuxv1.TabType_TAB_TYPE_FILE
 		}
-		result := svc.closePayloadTabCommon(caller.UserID.String(), r.GetTabId(), tabType, r.GetWorktreeAction(), dropWorktreeLink)
+		action := r.GetWorktreeAction()
+		if tabType == leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION {
+			if !callerReadsTabType(caller, tabType) {
+				sendPermissionDenied(sender, "scope required for this tab kind")
+				return
+			}
+			// Native references own neither their source chat nor the destination
+			// worktree. REMOVE has no destructive meaning for this tab kind.
+			action = leapmuxv1.WorktreeAction_WORKTREE_ACTION_KEEP
+		}
+		if action == leapmuxv1.WorktreeAction_WORKTREE_ACTION_REMOVE &&
+			!caller.Allows(leapmuxv1.Scope_SCOPE_GIT_WRITE) {
+			sendPermissionDenied(sender, "removing a worktree needs the git:write permission")
+			return
+		}
+		result := svc.closePayloadTabCommon(caller.UserID.String(), r.GetTabId(), tabType, action, dropWorktreeLink)
 		sendProtoResponse(sender, &leapmuxv1.RevokeTabPayloadResponse{Result: result})
 	})
 
@@ -4502,7 +4534,7 @@ func messageToProto(m *db.Message) (*leapmuxv1.AgentChatMessage, error) {
 // IMAGE payload reached a file:read-only caller in the first place.
 func tabTypeReadScope(tabType leapmuxv1.TabType) (leapmuxv1.Scope, bool) {
 	switch tabType {
-	case leapmuxv1.TabType_TAB_TYPE_AGENT, leapmuxv1.TabType_TAB_TYPE_IMAGE:
+	case leapmuxv1.TabType_TAB_TYPE_AGENT, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
 		return leapmuxv1.Scope_SCOPE_AGENT_READ, true
 	case leapmuxv1.TabType_TAB_TYPE_TERMINAL:
 		return leapmuxv1.Scope_SCOPE_TERMINAL_READ, true

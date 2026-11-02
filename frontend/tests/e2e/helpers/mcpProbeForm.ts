@@ -9,7 +9,7 @@ import { MCP_FORM_SERVER_NAME } from './mcpFormServer'
 import { nativeTextStep, nativeToolOutcome } from './nativeScenario'
 import { mcpToolCall } from './providerToolCalls'
 import { waitForStoredEntry } from './storage'
-import { controlActions, messageBubbles, sendMessage, waitForAgentIdle } from './ui'
+import { controlActions, messageBubbles, revealActivityTarget, sendMessage, waitForAgentIdle } from './ui'
 
 /** Fill the disposable MCP server's form with values that expose false and zero. */
 export async function fillMcpProbeForm(page: Page): Promise<Locator> {
@@ -105,6 +105,7 @@ export async function exerciseMcpProbeFormRoundTrip(
   await waitForAgentIdle(page)
   const request = await modelScript.requestAt(start + 1)
   expect((await nativeToolOutcome(context, request, options.callId)).text, 'the model reads the accepted answers of the form').toContain('FORM_ROUND_TRIP_OK')
+  await revealActivityTarget(page, messageBubbles(page).filter({ hasText: 'FORM_ROUND_TRIP_OK' }).first())
   await expect(messageBubbles(page).filter({ hasText: 'FORM_ROUND_TRIP_OK' }).first()).toBeVisible()
   await expect(form).toHaveCount(0)
   return request

@@ -9,7 +9,7 @@ import { FINISHED_TOOL_STATUSES } from '../../../src/components/chat/model/toolC
 import { escapeRegExp } from '../../../src/lib/regexp'
 import { nativeTextStep } from './nativeScenario'
 import { runNativeToolTurn } from './nativeToolExecution'
-import { answerControl, readAttached, sendMessage, toolRows, waitForAgentIdle, waitForControlBanner } from './ui'
+import { answerControl, expandActivityGroups, readAttached, revealActivityTarget, sendMessage, toolRows, waitForAgentIdle, waitForControlBanner } from './ui'
 
 /**
  * Image-in-tool-result fixtures and assertions.
@@ -155,6 +155,7 @@ export async function expectDecodedImageInBubble(bubble: Locator): Promise<void>
 /** Find the visible named row and its provider-neutral tool-call identity. */
 async function namedToolCall(page: Page, fileName: string): Promise<{ bubble: Locator, chatContainer: Locator, callID: string, role: string, sequence: bigint, status: string }> {
   const namedRow = toolRows(page).filter({ hasText: fileName }).last()
+  await revealActivityTarget(page, namedRow)
   await expect(namedRow).toBeVisible()
   const matchedBubble = namedRow.locator('xpath=ancestor::*[@data-testid="message-bubble"][1]')
   const identity = await readAttached(matchedBubble, 'the named tool bubble', (matches) => {
@@ -316,6 +317,7 @@ export async function isNamedToolResultFinished(page: Page, fileName: string): P
 
 /** The image inside the exact Model Context Protocol call's result bubble. */
 export async function mcpResultImage(page: Page, fileName: string, callID: string): Promise<Locator> {
+  await expandActivityGroups(page)
   const selector = await callSelector(page, callID)
   const bubbleSelector = `[data-chat-scroll-container="true"]:visible [data-testid="message-bubble"]:visible${selector}`
   const startRows = page.locator(`${bubbleSelector}:is([data-tool-row-role="request"], [data-tool-row-role="update"])`)

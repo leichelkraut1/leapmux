@@ -27,6 +27,52 @@ function seekVirt(): ChatScrollVirtualizer {
 }
 
 describe('useChatScroll jump to seq', () => {
+  it('reveals a collapsed target before resolving the landing offset', () =>
+    createRoot((dispose) => {
+      const div = makeFakeScrollDiv()
+      div.setScrollHeight(5000)
+      div.setClientHeight(500)
+      let revealed = false
+      const virt = seekVirt()
+      const resolve = virt.scrollTopForAnchor
+      const hook = useChatScroll({
+        virtualizer: { ...virt, scrollTopForAnchor: anchor => revealed ? resolve(anchor) : null },
+        messages: () => mkMsgs([1, 2, 3, 4, 5]),
+        revealMessage: (seq) => {
+          expect(seq).toBe(5n)
+          revealed = true
+        },
+      })
+      hook.attachListRef(div.el)
+      void hook.jumpToSeq(5n)
+      expect(revealed).toBe(true)
+      expect(div.getScrollTop()).toBe(992)
+      dispose()
+    }))
+
+  it('reveals the nearest loaded member when a rail seek has no exact sequence', () =>
+    createRoot((dispose) => {
+      const div = makeFakeScrollDiv()
+      div.setScrollHeight(5000)
+      div.setClientHeight(500)
+      let revealed = false
+      const virt = seekVirt()
+      const hook = useChatScroll({
+        virtualizer: { ...virt, scrollTopForAnchor: () => revealed ? 600 : null },
+        messages: () => mkMsgs([1, 3, 8]),
+        revealMessage: (seq, id) => {
+          expect(seq).toBe(4n)
+          expect(id).toBe('m3')
+          revealed = true
+        },
+      })
+      hook.attachListRef(div.el)
+      void hook.jumpToSeq(4n)
+      expect(revealed).toBe(true)
+      expect(div.getScrollTop()).toBe(592)
+      dispose()
+    }))
+
   it('lands on an in-window seq: writes the resolved row top minus the align offset', () =>
     createRoot((dispose) => {
       const div = makeFakeScrollDiv()

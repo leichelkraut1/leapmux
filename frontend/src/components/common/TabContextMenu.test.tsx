@@ -14,6 +14,17 @@ vi.mock('~/components/common/DropdownMenu', () => ({
   },
 }))
 
+vi.mock('~/components/common/SubMenu', () => ({
+  SubMenu(props: any) {
+    return (
+      <>
+        <button data-testid={props['data-testid']}>{props.label}</button>
+        {props.children}
+      </>
+    )
+  },
+}))
+
 describe('TabContextMenu', () => {
   it('renders nothing when the tab offers no action', () => {
     const { container } = render(() => <TabContextMenu />)
@@ -27,6 +38,14 @@ describe('TabContextMenu', () => {
 
     expect(screen.getByTestId('tab-menu-rename')).toBeInTheDocument()
     expect(screen.getByTestId('tab-menu-close')).toBeInTheDocument()
+  })
+
+  it('labels a reference removal without changing the close action', () => {
+    const onClose = vi.fn()
+    render(() => <TabContextMenu onClose={onClose} closeLabel="Remove from LeapMux" />)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from LeapMux' }))
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('menuitem', { name: 'Close' })).not.toBeInTheDocument()
   })
 
   it('hides rename for a tab that cannot be renamed', () => {
@@ -63,6 +82,24 @@ describe('TabContextMenu', () => {
     render(() => <TabContextMenu onRename={() => {}} onClose={() => {}} />)
 
     expect(screen.queryByTestId('tab-menu-pop')).not.toBeInTheDocument()
+  })
+
+  it('moves only to the explicitly selected workspace', () => {
+    const onSelect = vi.fn()
+    render(() => (
+      <TabContextMenu move={{ targets: [{ id: 'ws-b', label: 'Project B' }, { id: 'ws-c', label: 'Project C' }], onSelect }} />
+    ))
+
+    expect(screen.getByTestId('tab-menu-move')).toHaveTextContent('Move to workspace')
+    expect(onSelect).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Project C' }))
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith('ws-c')
+  })
+
+  it('has no move menu when there is no eligible destination', () => {
+    render(() => <TabContextMenu move={{ targets: [], onSelect: vi.fn() }} />)
+    expect(screen.queryByTestId('tab-menu-move')).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem')).not.toBeInTheDocument()
   })
 
   it('runs rename and close exactly once each', () => {

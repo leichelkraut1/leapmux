@@ -821,11 +821,11 @@
         "verified": true
       },
       "codex": {
-        "support": "agent-limit",
-        "userNote": "Codex has no input type for PDF files, so LeapMux refuses them. [An upstream request for PDF support](https://github.com/openai/codex/issues/1797) is open.",
-        "detailNote": "Codex accepts text and image input blocks. Its LeapMux provider rejects PDF bytes because its native input has no PDF representation. See providers/codex/provider.go.\n\nClassified as an agent limit: the Codex 0.160.0 app-server UserInput type has text, image, local image, audio, local audio, skill and mention entries, and no PDF or document entry. Upstream issue 1797 asks for PDF support and is open (checked 2026-10-05).\n\nSources fetched on 2026-10-05:\n- <https://github.com/openai/codex/issues/1797> (open): Asks Codex to read text, pictures, charts and tables of PDF files. No maintainer response, no linked change.",
+        "support": "supported",
+        "userNote": "PDFs are supplied as private Worker files for agent tools, not native PDF input. Reading their contents depends on the tools available.",
+        "detailNote": "The Codex provider retains native text/image handling and stores PDFs in durable per-chat Worker attachment storage. The prompt carries a quoted local path; the provider does not send a native PDF block. The browser scenario selects a PDF, requires the current model request to reference the exact stored bytes, reloads the browser, then asks the real native tool to read those bytes. Linux native browser verification passed on 2026-10-28 for current input, exact bytes, reload and an actual tool read; no PDF parsing or visual-understanding claim is made.",
         "spec": "frontend/tests/e2e/codex/pdf-attachments.spec.ts",
-        "audit": "unsupported",
+        "audit": "source-verified",
         "testStatus": "passed",
         "verified": true
       },
@@ -1084,20 +1084,20 @@
     },
     "other-binary-attachments": {
       "claude-code": {
-        "support": "agent-limit",
-        "userNote": "Claude Code accepts text, images and PDF documents as input. It has no input type for other binary files, so LeapMux refuses them. See the [Claude API documentation](https://platform.claude.com/docs/en/build-with-claude/pdf-support).",
-        "detailNote": "LeapMux rejects binary attachments for Claude Code. The native message input supports text, images, and PDF documents, without a general binary block.\n\nClassified as an agent limit: Claude Code 2.1.289 reads user input as text, image and document blocks. The Claude API documentation (checked 2026-10-05) states that binary formats such as .xlsx and .docx are not supported in document blocks.\n\nSources fetched on 2026-10-05:\n- <https://platform.claude.com/docs/en/build-with-claude/pdf-support>: States that plain text files work in document blocks and that binary formats such as .xlsx or .docx are not supported in document blocks.",
+        "support": "supported",
+        "userNote": "Other files are supplied as private Worker files for agent tools. Reading formats such as Office documents or PLC projects depends on the tools available.",
+        "detailNote": "Claude keeps native text, image and PDF input. Other binary files are stored in durable per-chat Worker attachment storage and supplied as quoted paths for tools, not native binary model blocks. The browser scenario selects a binary PLC-named fixture, requires a current-user reference to its exact bytes, reloads the browser, then reads the same bytes through the real native tool. Linux native browser verification passed on 2026-10-28, including exact bytes, reload and an actual tool read; upload does not guarantee support for a file format.",
         "spec": "frontend/tests/e2e/claude-code/other-binary-attachments.spec.ts",
-        "audit": "unsupported",
+        "audit": "source-verified",
         "testStatus": "passed",
         "verified": true
       },
       "codex": {
-        "support": "leapmux-limit",
-        "userNote": "Codex 0.160.0 accepts audio on models that list audio input, and LeapMux does not send it yet. Codex has no input type for any other binary file, so LeapMux refuses every binary file.",
-        "detailNote": "Codex accepts text and image input blocks. Its LeapMux provider rejects other binary bytes because its native input has no general binary representation. See providers/codex/provider.go.\n\nClassified as a LeapMux limit, because the native protocol carries part of the feature. The Codex 0.160.0 UserInput type carries audio as a data URI or as a local path (wav, mp3, m4a, webm and ogg). It has no general binary entry (https://raw.githubusercontent.com/openai/codex/rust-v0.160.0/codex-rs/protocol/src/user_input.rs, fetched 2026-10-05). Audio needs a model whose input modalities include audio. LeapMux refuses every non-image binary file, so it refuses audio. The spec asserts the refusal of a generic binary file, which Codex cannot carry, so the audit value stays unsupported.\n\nThe native audio input path is not integrated. See https://github.com/leapmux/leapmux/issues/498.",
+        "support": "supported",
+        "userNote": "Other files are supplied as private Worker files for agent tools. Format support depends on the tools available; native audio or general binary model input is not claimed.",
+        "detailNote": "Codex keeps native text/image input and stores other binary files in durable per-chat Worker attachment storage, referenced by quoted local paths for tools. The browser scenario selects a binary PLC-named fixture, requires a current-user reference to its exact bytes, reloads the browser, then reads the same bytes through the real native tool. Linux native browser verification passed on 2026-10-28, including exact bytes, reload and an actual tool read. This does not implement native audio input or promise decoding of every binary format.",
         "spec": "frontend/tests/e2e/codex/other-binary-attachments.spec.ts",
-        "audit": "unsupported",
+        "audit": "source-verified",
         "testStatus": "passed",
         "verified": true
       },

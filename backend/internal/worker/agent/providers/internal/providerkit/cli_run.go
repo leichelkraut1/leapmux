@@ -91,6 +91,11 @@ func RunCLI(ctx context.Context, run CLIRun) ([]byte, error) {
 		env = run.Env(env)
 	}
 	cmd.Env = env
+	return runCLICommand(ctx, cmd, run, delimiter)
+}
+
+// runCLICommand owns execution and bounded output for both launch paths.
+func runCLICommand(ctx context.Context, cmd *exec.Cmd, run CLIRun, delimiter string) ([]byte, error) {
 	owner := procutil.PrepareProcess(cmd)
 	var stdout, stderr LimitedBuffer
 	stdout.Limit, stderr.Limit = run.MaxOutput, maxCLIStderr

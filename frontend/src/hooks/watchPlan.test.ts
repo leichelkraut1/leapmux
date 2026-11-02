@@ -127,6 +127,11 @@ describe('isTabOnScreen', () => {
 })
 
 describe('buildWatchPlans', () => {
+  it('does not start a managed agent or terminal watch for an outside conversation reference', () => {
+    const native: Tab = { type: TabType.NATIVE_CONVERSATION, id: 'native-1', workspaceId: 'ws-1', workerId: 'destination-pc', sourceWorkerId: 'source-pc', tileId: 'tile-1' }
+    expect(buildWatchPlans([native], 'ws-1', () => '5:native-1').size).toBe(0)
+  })
+
   it('feeds every on-screen tile in a split layout as FULL', () => {
     const tabs = [
       agent({ id: 'a1', tileId: 'tile-1' }),

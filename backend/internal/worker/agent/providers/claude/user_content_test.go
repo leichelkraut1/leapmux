@@ -194,11 +194,9 @@ func TestClaudeSteerInputPutsThePromptTextLast(t *testing.T) {
 // TestClaudeSteerInputRefusesWhatTheFoldDrops pins the refusal of each
 // attachment kind that Claude Code's queued-command fold drops. The fold keeps
 // the text blocks and the image blocks only (the queued_command attachment of
-// 2.1.289). ValidateAttachment refuses a binary file before it reaches here.
-// The refusal covers it all the same, because the fold would drop it too.
+// 2.1.289). Binary files instead use durable path references in text blocks.
 func TestClaudeSteerInputRefusesWhatTheFoldDrops(t *testing.T) {
 	t.Parallel()
-	blob := &leapmuxv1.Attachment{Filename: "blob.bin", MimeType: "application/octet-stream", Data: []byte{0, 255}}
 	for _, tc := range []struct {
 		name        string
 		content     string
@@ -207,7 +205,6 @@ func TestClaudeSteerInputRefusesWhatTheFoldDrops(t *testing.T) {
 		{name: "a PDF", content: claudeOrderPrompt, attachments: []*leapmuxv1.Attachment{claudeOrderPDF()}},
 		{name: "a PDF without prompt text", attachments: []*leapmuxv1.Attachment{claudeOrderPDF()}},
 		{name: "a PDF after an image", content: claudeOrderPrompt, attachments: []*leapmuxv1.Attachment{claudeOrderPNG(), claudeOrderPDF()}},
-		{name: "a binary file", content: claudeOrderPrompt, attachments: []*leapmuxv1.Attachment{blob}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

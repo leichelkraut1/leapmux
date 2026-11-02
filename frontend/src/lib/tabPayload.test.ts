@@ -1,7 +1,8 @@
-import { create } from '@bufbuild/protobuf'
+import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
+import { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import { TabPayloadSchema } from '~/generated/proto/leapmux/v1/worker_private_pb'
-import { fileTabPayload, imageTabPayload, tabPayloadView } from './tabPayload'
+import { fileTabPayload, imageTabPayload, nativeConversationTabPayload, tabPayloadView } from './tabPayload'
 
 describe('tabPayloadView', () => {
   it('decodes the file branch', () => {
@@ -24,6 +25,24 @@ describe('tabPayloadView', () => {
       imageIndex: 1,
       title: 'Read',
       workingDir: '/repo',
+    })
+  })
+
+  it('round-trips a native session reference independently of its worktree placement', () => {
+    const payload = create(TabPayloadSchema, nativeConversationTabPayload({
+      sourceWorkerId: 'source-pc',
+      agentProvider: AgentProvider.CODEX,
+      sessionId: 'generated-native-session',
+      displayName: 'Generated native chat',
+      workingDir: '/destination/worktree',
+    }))
+    expect(tabPayloadView(fromBinary(TabPayloadSchema, toBinary(TabPayloadSchema, payload)))).toEqual({
+      kind: 'nativeConversation',
+      sourceWorkerId: 'source-pc',
+      agentProvider: AgentProvider.CODEX,
+      sessionId: 'generated-native-session',
+      displayName: 'Generated native chat',
+      workingDir: '/destination/worktree',
     })
   })
 

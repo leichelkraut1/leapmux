@@ -3,7 +3,7 @@ import type { CustomizedHubSetting } from './api'
 import { execFile, spawn } from 'node:child_process'
 import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import process from 'node:process'
 import { promisify } from 'node:util'
 import { agentDefaultsEnv } from '../agentSettings'
@@ -95,6 +95,13 @@ export function ancestorInstructionsReport(count: number): string {
   return `The mock refused ${count} ${count === 1 ? 'request' : 'requests'} that held an instruction file above the working directory of an agent. The failed tests state each request; a request with no scenario marker is in the model server log.`
 }
 
+/** Each suite uses its own supported IPC address, never the same-user Hub default. */
+export function suiteLocalListen(socketDir: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32'
+    ? `npipe:leapmux-e2e-${basename(socketDir)}`
+    : `unix:${join(socketDir, 'hub.sock')}`
+}
+
 /** Start the LeapMux process and the model server that one test run shares. */
 export async function startSuiteServer(options: SuiteServerOptions): Promise<StartedSuiteServer> {
   const mockModel = await createMockModelServer({ models: MOCK_MODEL_IDS, runRoot: options.runRoot })
@@ -147,9 +154,10 @@ export async function startSuiteServer(options: SuiteServerOptions): Promise<Sta
       // `--listen` carries both addresses: an ephemeral TCP port (the operating
       // system assigns it and the hub reports it in its state file -- scanning
       // for a free port and rebinding it is a window another process can win)
-      // and the local IPC socket at the short path.
+      // and one unique platform-supported local IPC address. Windows uses a
+      // named pipe; reusing its default would collide with another test Hub.
       socketDir = mkdtempSync(join(tmpdir(), 'lm-e2e-sock-'))
-      const localListen = `unix:${join(socketDir, 'hub.sock')}`
+      const localListen = suiteLocalListen(socketDir)
       proc = spawn(options.binaryPath, [
         'dev',
         '-listen',

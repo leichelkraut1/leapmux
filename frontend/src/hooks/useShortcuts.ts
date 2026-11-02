@@ -258,7 +258,7 @@ export function useShortcuts(props: UseShortcutsProps): void {
   cmd('app.nextTab', 'Next Tab', () => navigateTab(1), 'Tab')
   const scrollActiveTabPage = (direction: -1 | 1) => {
     const tabType = activeTabType()
-    if (tabType === TabType.AGENT || tabType === TabType.TERMINAL)
+    if (tabType === TabType.AGENT || tabType === TabType.TERMINAL || tabType === TabType.NATIVE_CONVERSATION)
       scrollFocusedTabPage(direction)
   }
   cmd('app.scrollActiveTabPageUp', 'Scroll Active Tab Up One Page', () => scrollActiveTabPage(-1), 'View')

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 
+	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/util/userid"
 )
 
@@ -64,6 +65,11 @@ type AgentSpawnInfo struct {
 	TabID         string // The spawned agent's id (becomes LEAPMUX_CONTROL_TAB_ID).
 	WorkingDir    string
 	AgentProvider string
+	// Workflow is set for an agent that belongs to a workflow run. Its socket
+	// then reaches only WorkflowParticipantMethods on the coordinator, and
+	// the binding's credential rides LEAPMUX_WORKFLOW_* env vars. A non-nil
+	// but empty binding confines the socket to nothing.
+	Workflow *leapmuxv1.WorkflowBinding
 }
 
 // TerminalSpawnInfo identifies a spawning terminal.

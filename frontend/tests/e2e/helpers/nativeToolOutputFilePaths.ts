@@ -12,7 +12,7 @@ import { currentNativeAgent } from './nativeScenario'
 import { copyNativeToolOutputPreview } from './nativeToolOutput'
 import { nativeToolRowId } from './nativeToolRowId'
 import { getGlobalState } from './server'
-import { openWorkspace, readAttachedWithArgument, toolCallRow } from './ui'
+import { openWorkspace, readAttachedWithArgument, revealActivityTarget, toolCallRow } from './ui'
 
 export interface NativeToolOutputFilePathsOptions {
   context: Pick<ManagedNativeScenarioContext, 'page' | 'workspaceId' | 'resolveToolRowId'>
@@ -110,6 +110,7 @@ export async function proveNativeToolOutputFilePaths(options: NativeToolOutputFi
     workerProof: options.workerProof,
     viewProof: async () => {
       await options.revealView?.()
+      await revealActivityTarget(options.context.page, result)
       await expect(result).toHaveCount(1)
       await expect(result).toHaveAttribute('data-tool-status', options.status)
       await options.prepareView?.(result)

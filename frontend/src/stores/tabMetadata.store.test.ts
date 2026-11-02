@@ -3,10 +3,10 @@ import { create } from '@bufbuild/protobuf'
 import { createEffect, createRoot, createSignal } from 'solid-js'
 import { unwrap } from 'solid-js/store'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { AgentStatus, AvailableOptionGroupSchema } from '~/generated/proto/leapmux/v1/agent_pb'
+import { AgentProvider, AgentStatus, AvailableOptionGroupSchema } from '~/generated/proto/leapmux/v1/agent_pb'
 import { TerminalStatus } from '~/generated/proto/leapmux/v1/terminal_pb'
 import { KEY_TAB_MRU, sessionStorageGet, sessionStorageSet } from '~/lib/browserStorage'
-import { createTabMetadataStore, liveTabIds, useMetadataSweep } from './tabMetadata.store'
+import { createTabMetadataStore, liveTabIds, tabPayloadMetadata, useMetadataSweep } from './tabMetadata.store'
 
 /**
  * Everything about a tab the CRDT does not carry.
@@ -22,6 +22,27 @@ import { createTabMetadataStore, liveTabIds, useMetadataSweep } from './tabMetad
  * fan-out across each registry snapshot.
  */
 const flush = () => new Promise<void>(queueMicrotask)
+
+describe('tabPayloadMetadata', () => {
+  it('hydrates a native conversation identity and destination working directory without agent lifecycle fields', () => {
+    expect(tabPayloadMetadata({
+      kind: 'nativeConversation',
+      sourceWorkerId: 'source-pc',
+      agentProvider: AgentProvider.CLAUDE_CODE,
+      sessionId: 'generated-native-session',
+      displayName: 'Generated outside chat',
+      workingDir: '/destination/worktree',
+    })).toEqual({
+      hydrated: true,
+      sourceWorkerId: 'source-pc',
+      agentProvider: AgentProvider.CLAUDE_CODE,
+      sessionId: 'generated-native-session',
+      displayName: 'Generated outside chat',
+      title: 'Generated outside chat',
+      workingDir: '/destination/worktree',
+    })
+  })
+})
 
 // The store reads `KEY_TAB_MRU` eagerly on construction now; isolate every test
 // so a prior test's stamps cannot leak into the next store's seed.

@@ -594,7 +594,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
       markdownCopied: markdownCopied(),
       ...(hasCopyableResult() ? { onCopyContent: copyResultContent } : {}),
       ...(copyContentLabel !== undefined ? { copyContentLabel } : {}),
-      ...(quotableText() ? { onReply: props.premeasureMode ? () => {} : handleReply } : {}),
+      ...(quotableText() && props.onReply ? { onReply: props.premeasureMode ? () => {} : handleReply } : {}),
       ...(proseText() ? { onCopyMarkdown: copyMarkdown } : {}),
     }
   })

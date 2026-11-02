@@ -6,9 +6,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ALL_PROVIDERS } from '~/generated/contracts/providers'
 import { GOAL_STATUS_TOKEN, GOAL_TRANSITION, NOTIFICATION_TYPE } from '~/generated/contracts/worker-vocab'
 import { AgentProvider, MessageCompletion } from '~/generated/proto/leapmux/v1/agent_pb'
+import { copyTextToClipboard } from '~/lib/clipboard'
 import { clearSettingsLabelCache, updateSettingsLabelCache } from '~/lib/settingsLabelCache'
 import { elementText, renderDivider, renderThreadElement, renderThreadGlyph, renderThreadHasIcon, renderThreadText } from '~/test-support/messageRenderProbes'
 import { renderNotificationBlocks } from './notificationRenderers'
+
+vi.mock('~/lib/clipboard', () => ({
+  copyTextToClipboard: vi.fn(async () => true),
+}))
 
 describe('renderNotificationBlocks loading state', () => {
   it.each([true, false])('marks a divider only while loading=%s', (loading) => {
@@ -844,6 +849,58 @@ describe('renderNotificationBlocks auto-review', () => {
   function renderBlock(block: ReviewBlock, context?: RowRenderContext) {
     return render(() => renderNotificationBlocks([block], context))
   }
+
+  it('folds an approved review and reveals its complete details on demand', () => {
+    const block: ReviewBlock = {
+      ...deniedBlock,
+      outcome: 'approved',
+      title: 'Auto-review approved: printf first\nprintf final',
+      rationale: 'The command only reads **local files**.',
+      approvable: false,
+    }
+    const view = renderBlock(block)
+    const toggle = view.getByRole('button', { name: 'Show review details' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(view.queryByTestId('auto-review-details')).toBeNull()
+    expect(view.container.textContent).not.toContain('The command only reads')
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(view.getByTestId('auto-review-details').textContent).toContain(block.title)
+    expect(view.getByTestId('auto-review-details').querySelector('strong')?.textContent).toBe('local files')
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(view.queryByTestId('auto-review-details')).toBeNull()
+  })
+
+  it('copies the complete review while its details remain folded', async () => {
+    vi.mocked(copyTextToClipboard).mockClear()
+    const block: ReviewBlock = { ...deniedBlock, outcome: 'approved', approvable: false }
+    const view = renderBlock(block)
+    fireEvent.click(view.getByRole('button', { name: 'Copy review' }))
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledWith(`${block.title}\n\n${block.rationale}`))
+    expect(view.queryByTestId('auto-review-details')).toBeNull()
+  })
+
+  it.each(['denied', 'timed-out', 'aborted', 'unknown'] as const)('keeps the rationale visible for a %s review while the command is folded', (outcome) => {
+    const view = renderBlock({ ...deniedBlock, outcome })
+    expect(view.queryByTestId('auto-review-details')).toBeNull()
+    expect(view.container.querySelector('strong')?.textContent).toBe('not')
+    expect(view.getByTestId('auto-review')).toHaveAttribute('data-outcome', outcome)
+  })
+
+  it('expands one review without expanding its neighbors or approving it', () => {
+    const { reviews, approveDenied } = deferredReviews()
+    const view = render(() => renderNotificationBlocks([
+      { ...deniedBlock, reviewId: 'first' },
+      { ...deniedBlock, reviewId: 'second' },
+    ], { reviews }))
+    fireEvent.click(view.getAllByRole('button', { name: 'Show review details' })[0]!)
+    expect(view.getAllByTestId('auto-review-details')).toHaveLength(1)
+    expect(view.getAllByRole('button', { name: 'Approve' })).toHaveLength(2)
+    expect(approveDenied).not.toHaveBeenCalled()
+  })
 
   it('draws the title and the rationale as markdown', () => {
     const { container } = renderBlock(deniedBlock)

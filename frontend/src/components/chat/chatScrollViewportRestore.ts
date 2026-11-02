@@ -23,6 +23,8 @@ interface ResizeContext {
  * the restore strategies can be reasoned about without the whole scroll machine.
  */
 export function createViewportRestore(ctx: ScrollContext, extras: {
+  /** Open a saved transcript target before reading its virtual offset. */
+  revealMessage?: ((seq: bigint | undefined, id?: string) => void) | undefined
   // High-level scroll actions declared later in the hook than the shared context.
   checkAtBottom: () => void
   repinToAnchor: () => void
@@ -67,7 +69,11 @@ export function createViewportRestore(ctx: ScrollContext, extras: {
   // resolves to a scroll position.
   const restoreFromAnchor = (el: HTMLDivElement, savedScroll: ChatScrollState): boolean => {
     const savedAnchor = savedScroll.anchor ?? null
-    const top = savedAnchor ? ctx.virt.scrollTopForAnchor(savedAnchor) : null
+    let top = savedAnchor ? ctx.virt.scrollTopForAnchor(savedAnchor) : null
+    if (savedAnchor && top == null) {
+      extras.revealMessage?.(savedAnchor.seq, savedAnchor.id)
+      top = ctx.virt.scrollTopForAnchor(savedAnchor)
+    }
     if (top == null)
       return false
     ctx.writeScrollTop(top, 'viewport-restore-anchor')

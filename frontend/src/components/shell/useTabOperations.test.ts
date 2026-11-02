@@ -4,17 +4,19 @@ import { create } from '@bufbuild/protobuf'
 import { createRoot, createSignal } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useTabOperations } from '~/components/shell/useTabOperations'
-import { MessageSource } from '~/generated/proto/leapmux/v1/agent_pb'
+import { AgentProvider, MessageSource } from '~/generated/proto/leapmux/v1/agent_pb'
 import { WorktreeAction, WorktreeRemovalOutcome } from '~/generated/proto/leapmux/v1/common_pb'
 import { LastTabCloseTarget } from '~/generated/proto/leapmux/v1/git_pb'
 import { TerminalProcessSchema } from '~/generated/proto/leapmux/v1/terminal_pb'
 import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import { ChannelError } from '~/lib/channelError'
+import { nativeConversationTabPayload } from '~/lib/tabPayload'
 import { createChatStore, MAX_BACKGROUND_CHAT_MESSAGES } from '~/stores/chat.store'
+import { repoKey } from '~/stores/repoGit'
 import { createRepoGitStore } from '~/stores/repoGit.store'
 import { emitAddTab, emitRemoveTab } from '~/stores/tabOps'
 import { flush } from '~/test-support/async'
-import { installTestBridge } from '~/test-support/crdtBridge'
+import { installTestBridge, seedWorkspace } from '~/test-support/crdtBridge'
 import { makeMessage } from '~/test-support/messageFactory'
 import { createTestFloatingWindowStore, createTestTabStores } from '~/test-support/tabStores'
 
@@ -28,6 +30,7 @@ import { createTestFloatingWindowStore, createTestTabStores } from '~/test-suppo
 const mockInspectLastTabClose = vi.fn((..._args: unknown[]) => Promise.resolve({ shouldPrompt: false } as unknown))
 const mockPushBranch = vi.fn((..._args: unknown[]) => {})
 const mockRegisterTabPayload = vi.fn((..._args: unknown[]) => Promise.resolve({}))
+const mockGetTabPayload = vi.fn((..._args: unknown[]) => Promise.resolve({} as unknown))
 const mockRevokeTabPayload = vi.fn((..._args: unknown[]) => Promise.resolve({}))
 const mockCloseAgent = vi.fn((..._args: unknown[]) => Promise.resolve({ result: undefined }))
 const mockCloseTerminal = vi.fn((..._args: unknown[]) => Promise.resolve({ result: undefined }))
@@ -38,6 +41,7 @@ vi.mock('~/api/workerRpc', () => ({
   inspectLastTabClose: (...args: unknown[]) => mockInspectLastTabClose(...args),
   pushBranch: (...args: unknown[]) => mockPushBranch(...args),
   registerTabPayload: (...args: unknown[]) => mockRegisterTabPayload(...args),
+  getTabPayload: (...args: unknown[]) => mockGetTabPayload(...args),
   revokeTabPayload: (...args: unknown[]) => mockRevokeTabPayload(...args),
   closeAgent: (...args: unknown[]) => mockCloseAgent(...args),
   closeTerminal: (...args: unknown[]) => mockCloseTerminal(...args),
@@ -104,10 +108,11 @@ function setup(
 ) {
   // Override the global test bridge with a known tile id so the
   // projection's root leaf is the tile these tests address.
-  installTestBridge({ rootTileId: 'tile-1' })
+  const harness = installTestBridge({ rootTileId: 'tile-1' })
   const stores = createTestTabStores(opts.unbootstrapped ? 'ws-never-bootstrapped' : 'ws-test')
   const { view, metadata, selection, layoutStore } = stores
   const chatStore = createChatStore()
+  const repoGitStore = createRepoGitStore()
 
   const tileId = 'tile-1'
   layoutStore.setFocusedTile(tileId)
@@ -148,11 +153,13 @@ function setup(
       probeMany: async () => [],
     },
     workerOnlineState,
-    repoGitStore: createRepoGitStore(),
+    repoGitStore,
   })
 
   return {
+    harness,
     ...stores,
+    repoGitStore,
     chatStore,
     ops,
     tileId,
@@ -183,11 +190,176 @@ describe('useTabOperations', () => {
     mockInspectLastTabClose.mockImplementation(() => Promise.resolve({ shouldPrompt: false } as unknown))
     mockPushBranch.mockReset()
     mockRegisterTabPayload.mockReset()
+    mockGetTabPayload.mockReset()
     mockRevokeTabPayload.mockReset()
     mockRegisterTabPayload.mockImplementation(() => Promise.resolve({}))
     mockRevokeTabPayload.mockImplementation(() => Promise.resolve({}))
     mockShowWarnToast.mockReset()
     mockShowInfoToast.mockReset()
+  })
+
+  describe('linked native conversations', () => {
+    const ref = { workerId: 'source-mac', workerName: 'Source Mac', agentProvider: AgentProvider.CLAUDE_CODE, sessionId: 'c3eda383-638f-46df-a5fc-83f6cecd1a92', displayName: 'Generated test conversation' }
+    const at = { workspaceId: 'ws-test', workerId: 'w-1', workingDir: '/generated/worktree' }
+    const seed = (s: ReturnType<typeof setup>) => {
+      s.metadata.patch('agent-a', { workingDir: at.workingDir, gitToplevel: at.workingDir })
+      s.repoGitStore.upsert(repoKey('w-1', at.workingDir), { workerId: 'w-1', repoRoot: at.workingDir, toplevel: at.workingDir, branch: 'fixture' })
+    }
+
+    it('persists destination placement separately from source identity and focuses the same link on repeat', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          seed(s)
+          const tab = await s.ops.handleNativeConversationAttach(ref, at)
+          expect(tab).toMatchObject({ type: TabType.NATIVE_CONVERSATION, workerId: 'w-1', workingDir: at.workingDir, sourceWorkerId: 'source-mac', sessionId: ref.sessionId, agentProvider: ref.agentProvider })
+          expect(mockRegisterTabPayload).toHaveBeenCalledWith('w-1', expect.objectContaining({ payload: { workingDir: at.workingDir, kind: { case: 'nativeConversation', value: { sourceWorkerId: 'source-mac', agentProvider: ref.agentProvider, sessionId: ref.sessionId, displayName: ref.displayName } } } }))
+          expect((await s.ops.handleNativeConversationAttach(ref, at)).id).toBe(tab.id)
+          expect(mockRegisterTabPayload).toHaveBeenCalledTimes(1)
+          expect(s.selection.activeTabForWorkspace('ws-test')?.id).toBe(tab.id)
+          expect(s.handleAgentClose).not.toHaveBeenCalled()
+          expect(s.handleTerminalClose).not.toHaveBeenCalled()
+        }
+        finally { dispose() }
+      })
+    })
+
+    it('resolves an inactive workspace private link before deduplicating its native Windows checkout spelling', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          const destination = { workspaceId: 'ws-destination', workerId: 'w-1', workingDir: 'C:/Generated/Worktree' }
+          seedWorkspace(s.harness, destination.workspaceId, 'destination-tile')
+          s.addAgent('destination-anchor', 'destination-tile', { workingDir: destination.workingDir, gitToplevel: destination.workingDir })
+          s.repoGitStore.upsert(repoKey('w-1', destination.workingDir), { workerId: 'w-1', repoRoot: destination.workingDir, toplevel: destination.workingDir, branch: 'fixture' })
+          emitAddTab({ type: TabType.NATIVE_CONVERSATION, id: 'existing-private-link', tileId: 'destination-tile', position: 'z', workerId: 'w-1' })
+          mockGetTabPayload.mockResolvedValueOnce({ payload: nativeConversationTabPayload({ sourceWorkerId: ref.workerId, agentProvider: ref.agentProvider, sessionId: ref.sessionId, displayName: ref.displayName, workingDir: 'C:\\Generated\\Worktree' }) })
+          expect(s.selection.activeTabForWorkspace('ws-test')?.id).toBe('agent-a')
+          const tab = await s.ops.handleNativeConversationAttach(ref, destination)
+          expect(mockGetTabPayload).toHaveBeenCalledWith('w-1', { tabId: 'existing-private-link' })
+          expect(tab.id).toBe('existing-private-link')
+          expect(s.selection.activeTabForWorkspace(destination.workspaceId)?.id).toBe(tab.id)
+          expect(s.view.forWorkspace(destination.workspaceId).filter(tab => tab.type === TabType.NATIVE_CONVERSATION)).toHaveLength(1)
+          expect(mockRegisterTabPayload).not.toHaveBeenCalled()
+          expect(mockRevokeTabPayload).not.toHaveBeenCalled()
+          expect(s.handleAgentClose).not.toHaveBeenCalled()
+          expect(s.handleTerminalClose).not.toHaveBeenCalled()
+        }
+        finally { dispose() }
+      })
+    })
+
+    it('refuses unknown private identity instead of creating another reference', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          seed(s)
+          emitAddTab({ type: TabType.NATIVE_CONVERSATION, id: 'unresolved-link', tileId: s.tileId, position: 'z', workerId: 'w-1' })
+          mockGetTabPayload.mockRejectedValueOnce(new Error('private payload unavailable'))
+          await expect(s.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('private payload unavailable')
+          expect(s.view.getById(TabType.NATIVE_CONVERSATION, 'unresolved-link')).toBeDefined()
+          expect(mockRegisterTabPayload).not.toHaveBeenCalled()
+          expect(mockRevokeTabPayload).not.toHaveBeenCalled()
+          mockGetTabPayload.mockResolvedValueOnce({})
+          await expect(s.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('could not be resolved')
+          expect(mockRegisterTabPayload).not.toHaveBeenCalled()
+        }
+        finally { dispose() }
+      })
+    })
+
+    it('rechecks placement after private hydration and keeps existing links when their anchor disappears', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          seed(s)
+          emitAddTab({ type: TabType.NATIVE_CONVERSATION, id: 'loading-link', tileId: s.tileId, position: 'z', workerId: 'w-1' })
+          mockGetTabPayload.mockImplementationOnce(async () => {
+            emitRemoveTab(TabType.AGENT, 'agent-a')
+            return { payload: nativeConversationTabPayload({ sourceWorkerId: ref.workerId, agentProvider: ref.agentProvider, sessionId: ref.sessionId, displayName: ref.displayName, workingDir: at.workingDir }) }
+          })
+          await expect(s.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('no longer available')
+          expect(s.view.getById(TabType.NATIVE_CONVERSATION, 'loading-link')).toBeDefined()
+          expect(mockRegisterTabPayload).not.toHaveBeenCalled()
+          expect(mockRevokeTabPayload).not.toHaveBeenCalled()
+        }
+        finally { dispose() }
+      })
+    })
+
+    it('focuses a matching link arriving during registration and revokes only the unplaced payload', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          seed(s)
+          mockRegisterTabPayload.mockImplementationOnce(async () => {
+            emitAddTab({ type: TabType.NATIVE_CONVERSATION, id: 'peer-link', tileId: s.tileId, position: 'z', workerId: 'w-1' })
+            s.metadata.patch('peer-link', { hydrated: true, workingDir: at.workingDir, sourceWorkerId: ref.workerId, agentProvider: ref.agentProvider, sessionId: ref.sessionId })
+            return {}
+          })
+          const tab = await s.ops.handleNativeConversationAttach(ref, at)
+          expect(tab.id).toBe('peer-link')
+          expect(s.view.all().filter(tab => tab.type === TabType.NATIVE_CONVERSATION)).toHaveLength(1)
+          expect(mockRevokeTabPayload).toHaveBeenCalledWith('w-1', { tabId: expect.not.stringMatching(/^peer-link$/), worktreeAction: WorktreeAction.KEEP })
+          expect(s.handleAgentClose).not.toHaveBeenCalled()
+          expect(s.handleTerminalClose).not.toHaveBeenCalled()
+        }
+        finally { dispose() }
+      })
+    })
+
+    it('cleans an ambiguously registered reference after transport failure without creating a visible tab', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          seed(s)
+          mockRegisterTabPayload.mockRejectedValueOnce(new Error('connection lost after write'))
+          await expect(s.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('connection lost')
+          expect(mockRevokeTabPayload).toHaveBeenCalledWith('w-1', expect.objectContaining({ worktreeAction: WorktreeAction.KEEP }))
+          expect(s.view.all().some(tab => tab.type === TabType.NATIVE_CONVERSATION)).toBe(false)
+          expect(s.handleAgentClose).not.toHaveBeenCalled()
+        }
+        finally { dispose() }
+      })
+    })
+
+    it('unlinks with KEEP even when bulk close requests REMOVE, without inspecting or interrupting the source', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          seed(s)
+          const tab = await s.ops.handleNativeConversationAttach(ref, at)
+          await s.ops.closeTabWithAction(tab, WorktreeAction.REMOVE)
+          expect(mockRevokeTabPayload).toHaveBeenCalledWith('w-1', { tabId: tab.id, worktreeAction: WorktreeAction.KEEP })
+          expect(mockInspectLastTabClose).not.toHaveBeenCalled()
+          expect(s.handleAgentClose).not.toHaveBeenCalled()
+          expect(s.handleTerminalClose).not.toHaveBeenCalled()
+          expect(s.view.getById(TabType.NATIVE_CONVERSATION, tab.id)).toBeUndefined()
+        }
+        finally { dispose() }
+      })
+    })
+
+    it('refuses an offline destination and removes a saved payload if its anchor disappears during registration', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const offline = setup(DEFAULT_SCROLL_STATE, () => false)
+          seed(offline)
+          await expect(offline.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('online')
+          expect(mockRegisterTabPayload).not.toHaveBeenCalled()
+          const s = setup()
+          seed(s)
+          mockRegisterTabPayload.mockImplementationOnce(async () => {
+            emitRemoveTab(TabType.AGENT, 'agent-a')
+            return {}
+          })
+          await expect(s.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('no longer available')
+          expect(mockRevokeTabPayload).toHaveBeenCalledWith('w-1', expect.objectContaining({ worktreeAction: WorktreeAction.KEEP }))
+          expect(s.view.all().some(tab => tab.type === TabType.NATIVE_CONVERSATION)).toBe(false)
+        }
+        finally { dispose() }
+      })
+    })
   })
 
   describe('file-tab E2EE worker round-trip', () => {

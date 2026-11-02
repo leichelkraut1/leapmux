@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,6 +76,38 @@ type Router struct {
 	// janitor calls SweepStaleCancellers periodically to limit the
 	// worst-case lifetime of an orphaned cancel function.
 	StreamCancellers sync.Map // string → *streamCancelEntry
+	// Confine, when set, limits this router to one workflow run: the
+	// participant methods, on the run's coordinator, and nothing else. It is
+	// set only for an agent whose workflow template asked to restrict its
+	// agents; every other agent keeps the owner's full reach.
+	Confine *WorkflowConfinement
+}
+
+// WorkflowConfinement is the whole reach of a workflow agent's socket.
+type WorkflowConfinement struct {
+	// CoordinatorWorkerID is the only computer the agent may call. Empty
+	// admits nothing, which is how a binding that could not be read fails.
+	CoordinatorWorkerID string
+	// Methods are the bare inner methods it may call there.
+	Methods []string
+}
+
+// admits reports whether the confinement allows method to the resolved target.
+func (c *WorkflowConfinement) admits(localWorkerID, method, targetWorkerID string) error {
+	if namespaceOf(method) != namespaceWorker {
+		return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("a workflow agent cannot call %s: its control socket reaches only its workflow", method))
+	}
+	target := targetWorkerID
+	if target == "" {
+		target = localWorkerID
+	}
+	if c.CoordinatorWorkerID == "" || target != c.CoordinatorWorkerID {
+		return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("a workflow agent may call only its run's coordinator"))
+	}
+	if !slices.Contains(c.Methods, stripNamespace(method)) {
+		return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("a workflow agent cannot call %s: its control socket reaches only its workflow", stripNamespace(method)))
+	}
+	return nil
 }
 
 // streamCancelEntry retains frames before binding and cancels its stream context on retirement.
@@ -93,6 +126,11 @@ func (r *Router) now() time.Time {
 
 // CallInner executes a unary inner-RPC.
 func (r *Router) CallInner(ctx context.Context, info TokenInfo, method string, payload []byte, targetWorkerID string) (*leapmuxv1.CallInnerResponse, error) {
+	if r.Confine != nil {
+		if err := r.Confine.admits(r.WorkerID, method, targetWorkerID); err != nil {
+			return nil, err
+		}
+	}
 	switch ns := namespaceOf(method); ns {
 	case namespaceWorker:
 		bare := stripNamespace(method)
@@ -162,6 +200,11 @@ func (r *Router) dispatchLocal(ctx context.Context, info TokenInfo, method strin
 
 // StreamInner runs a server-streaming inner RPC.
 func (r *Router) StreamInner(ctx context.Context, info TokenInfo, method string, payload []byte, targetWorkerID, clientReqID string, onMsg func(*leapmuxv1.StreamInnerEnvelope) error) error {
+	if r.Confine != nil {
+		if err := r.Confine.admits(r.WorkerID, method, targetWorkerID); err != nil {
+			return err
+		}
+	}
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var entry *streamCancelEntry

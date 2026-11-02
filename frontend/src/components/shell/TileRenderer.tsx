@@ -10,6 +10,7 @@ import type { useAgentOperations } from './useAgentOperations'
 import type { useTerminalOperations } from './useTerminalOperations'
 import type { AgentComposerActionStateStore } from '~/components/chat/agentComposerActionState'
 import type { AgentLifecycleProps, ChatRailProps } from '~/components/chat/ChatView'
+import type { NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { BranchMenuActions, BranchRefActions } from '~/components/workspace/branchActions'
 import type { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import type { DialogState } from '~/hooks/createDialogState'
@@ -28,7 +29,7 @@ import type { createFloatingWindowStore } from '~/stores/floatingWindow.store'
 import type { createLayoutStore, SplitOrientation, TilePredicates } from '~/stores/layout.store'
 import type { LayoutOwner } from '~/stores/layoutOwner'
 import type { createRepoGitStore } from '~/stores/repoGit.store'
-import type { AgentTab, FileTab, ImageTab, Tab, TerminalTab } from '~/stores/tab.types'
+import type { AgentTab, FileTab, ImageTab, NativeConversationTab, Tab, TerminalTab } from '~/stores/tab.types'
 import type { TabMetadataStore } from '~/stores/tabMetadata.store'
 import type { TabSelectionStore } from '~/stores/tabSelection.store'
 import type { TabView } from '~/stores/tabView'
@@ -43,6 +44,7 @@ import { pluginFor } from '~/components/chat/providers/registry'
 import { readWorkerImage } from '~/components/chat/readWorkerImage'
 import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
 import { ConfirmDialog } from '~/components/common/ConfirmDialog'
+import { NativeAgentConversationContent } from '~/components/dashboard/NativeAgentTranscriptViewer'
 import { FileViewer } from '~/components/fileviewer/FileViewer'
 import { pageScrollFocusedTerminal, TerminalView } from '~/components/terminal/TerminalView'
 import { bindBranchActions, focusedBranchAction } from '~/components/workspace/branchActions'
@@ -220,6 +222,11 @@ interface TileRendererOpts {
      * them when it is not — the same guard the sidebar's branch row applies.
      */
     isWorkerKnownOnline?: (workerId: string) => boolean
+  }
+  /** Native chat content always addresses its source computer, not its link's destination. */
+  nativeConversation?: {
+    isWorkerKnownOnline: (workerId: string) => boolean
+    workerName: (workerId: string) => string | undefined
   }
 }
 
@@ -805,13 +812,18 @@ export function createTileRenderer(opts: TileRendererOpts) {
       const t = tab()
       return t?.type === TabType.IMAGE ? t : null
     }
-    // One pass over the tile's tabs produces buckets for the four For loops
+    const nativeConversationTab = () => {
+      const t = tab()
+      return t?.type === TabType.NATIVE_CONVERSATION ? t : null
+    }
+    // One pass over the tile's tabs produces buckets for the pane loops
     // below. The source `getTabsForTile` is itself memoised, so this memo only
     // re-runs when something in the tile actually changed.
     const tabsByType = createMemo(() => {
       const agent: AgentTab[] = []
       const file: FileTab[] = []
       const image: ImageTab[] = []
+      const nativeConversation: NativeConversationTab[] = []
       const terminal: TerminalTab[] = []
       for (const t of view.forTile(tileId)) {
         if (t.type === TabType.AGENT)
@@ -822,8 +834,10 @@ export function createTileRenderer(opts: TileRendererOpts) {
           image.push(t)
         else if (t.type === TabType.TERMINAL)
           terminal.push(t)
+        else if (t.type === TabType.NATIVE_CONVERSATION)
+          nativeConversation.push(t)
       }
-      return { agent, file, image, terminal }
+      return { agent, file, image, nativeConversation, terminal }
     })
     // The panes below key their `<For>`s on TAB IDs, not on the `Tab` objects.
     //
@@ -844,11 +858,12 @@ export function createTileRenderer(opts: TileRendererOpts) {
     const tileAgentTabIds = createStableKeys(() => tabsByType().agent, t => t.id)
     const tileFileTabIds = createStableKeys(() => tabsByType().file, t => t.id)
     const tileImageTabIds = createStableKeys(() => tabsByType().image, t => t.id)
+    const tileNativeConversationTabIds = createStableKeys(() => tabsByType().nativeConversation, t => t.id)
     const tileTerminals = () => tabsByType().terminal
     const agentScrollStates = new Map<string, () => SavedViewportScroll | undefined>()
     const agentScrollToBottoms = new Map<string, () => void>()
     createEffect(() => {
-      const activeId = agentTab()?.id
+      const activeId = agentTab()?.id ?? nativeConversationTab()?.id
       if (layoutStore.focusedTileId() !== tileId)
         return
       getScrollStateRef.set(activeId ? agentScrollStates.get(activeId) : undefined)
@@ -1074,6 +1089,53 @@ export function createTileRenderer(opts: TileRendererOpts) {
                     {...(isActiveWorkspaceArchived() ? {} : { onQuote: quoteIntoComposer, onReply: quoteIntoComposer })}
                     agentLifecycle={agentLifecycle}
                   />
+                </Show>
+              </div>
+            )
+          }}
+        </For>
+
+        <For each={tileNativeConversationTabIds()}>
+          {(nativeTabId) => {
+            const linkedTab = createMemo(() => view.getNativeConversationTab(nativeTabId))
+            const conversation = createMemo<NativeConversationRef | undefined>(() => {
+              const native = linkedTab()
+              if (!native?.sourceWorkerId || native.agentProvider === undefined || !native.sessionId)
+                return undefined
+              return {
+                workerId: native.sourceWorkerId,
+                workerName: opts.nativeConversation?.workerName(native.sourceWorkerId) || native.sourceWorkerId,
+                agentProvider: native.agentProvider,
+                sessionId: native.sessionId,
+                ...optionalProp('displayName', native.displayName),
+              }
+            })
+            onCleanup(() => {
+              agentScrollStates.delete(nativeTabId)
+              agentScrollToBottoms.delete(nativeTabId)
+              chatHandlers.delete(nativeTabId)
+            })
+            return (
+              <div class={styles.tilePane} classList={{ [styles.tilePaneHidden]: nativeConversationTab()?.id !== nativeTabId }}>
+                <Show when={conversation()} fallback={<div class={styles.placeholder}>Loading linked chat…</div>}>
+                  {source => (
+                    <NativeAgentConversationContent
+                      conversation={source()}
+                      online={!!opts.nativeConversation?.isWorkerKnownOnline(source().workerId)}
+                      active={nativeConversationTab()?.id === nativeTabId}
+                      embedded
+                      readOnly={isActiveWorkspaceArchived()}
+                      onScrollApiReady={(api) => {
+                        agentScrollStates.set(nativeTabId, api.getScrollState)
+                        agentScrollToBottoms.set(nativeTabId, api.forceScrollToBottom)
+                        chatHandlers.set(nativeTabId, { pageScroll: api.pageScroll })
+                        if (nativeConversationTab()?.id === nativeTabId) {
+                          getScrollStateRef.set(api.getScrollState)
+                          forceScrollToBottomRef.set(api.forceScrollToBottom)
+                        }
+                      }}
+                    />
+                  )}
                 </Show>
               </div>
             )
@@ -1333,6 +1395,9 @@ export function createTileRenderer(opts: TileRendererOpts) {
         suppressAutoFocus={isTabEditing}
         agentId={agentId()}
         actionStateStore={opts.agentComposerActionStates}
+        messages={chatStore.getMessages(agentId())}
+        messageVersion={chatStore.getMessageVersion(agentId())}
+        cacheHistoryCurrent={!chatStore.hasNewerMessages(agentId())}
         {...editorOptionalProps()}
         {...optionalProp('messageContext', messageContext(focusedAgentTab()?.workerId ?? '', agentId()))}
         queueClientId={opts.clientId()}
@@ -1445,7 +1510,7 @@ export function createTileRenderer(opts: TileRendererOpts) {
       if (pageScrollFocusedTerminal(direction))
         return
       const tab = resolveFocusedTab()
-      if (tab?.type === TabType.AGENT)
+      if (tab?.type === TabType.AGENT || tab?.type === TabType.NATIVE_CONVERSATION)
         chatHandlers.get(tab.id)?.pageScroll(direction)
     },
     FocusedAgentEditorPanel,

@@ -34,7 +34,8 @@ const (
 // the base in acp, Kilo builds on the OpenCode family base, and OpenCode, Kilo,
 // ZCode and MiMo Code read the OpenCode-family session store. Every other edge
 // between providers is a provider-specific shape that leaked into another
-// provider.
+// provider. A provider may also import its explicitly listed, provider-owned
+// helper package; Codex alone owns its passive local-app IPC observer.
 var allowedProviderImports = map[string][]string{
 	".": {"muse", "commandcode", "deepseekharness", "gemini", "amp", "claude", "cline", "codebuddy", "codewhale", "codex", "copilot", "cursor", "dirac", "droid", "fastagent", "goose", "grok", "junie", "kilo", "kimi", "kiro", "letta", "mimo", "ohmypi", "opencode", "pi", "qoder", "qwen", "reasonix", "zcode"},
 
@@ -52,7 +53,8 @@ var allowedProviderImports = map[string][]string{
 	"codebuddy":              nil,
 	"claude/claudetest":      {"claude"},
 	"codewhale":              nil,
-	"codex":                  nil,
+	"codex":                  {"codex/codexobserve"},
+	"codex/codexobserve":     nil,
 	"copilot":                nil,
 	"cursor":                 {"acp"},
 	"droid":                  nil,

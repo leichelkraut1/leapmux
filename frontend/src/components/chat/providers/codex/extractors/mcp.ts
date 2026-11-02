@@ -69,12 +69,14 @@ function fromDynamicToolCall(item: Record<string, unknown>): McpCallFacts {
   })
 
   const durationMs = pickNumber(item, 'durationMs', undefined)
+  const error = pickString(item, 'error')
   return {
     server: pickString(item, 'namespace'),
     tool: pickString(item, 'tool', 'Tool'),
     argsJson,
     content,
     ...(failed ? { failed } : {}),
+    ...(error ? { error } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
   }
 }

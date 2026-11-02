@@ -2,6 +2,7 @@ syntax = "proto3";
 package leapmux.v1;
 
 import "leapmux/v1/common.proto";
+import "leapmux/v1/agent.proto";
 import "leapmux/v1/workspace.proto";
 
 // WorkerPrivateService is a worker-side service whose RPCs travel
@@ -130,7 +131,21 @@ message TabPayload {
   oneof kind {
     FileTabPayload  file  = 2;
     ImageTabPayload image = 3;
+    NativeConversationTabPayload native_conversation = 4;
   }
+}
+
+// A link to the unchanged chat on its original computer, not a managed agent
+// or a transcript copy. The worker holding this payload is the destination
+// worktree's worker; source_worker_id independently identifies the computer
+// whose existing native history/control APIs resolve the conversation.
+// TabPayload.working_dir is placement context only for this kind. It grants no
+// ownership of that directory and never participates in worktree deletion.
+message NativeConversationTabPayload {
+  string source_worker_id = 1;
+  AgentProvider agent_provider = 2;
+  string session_id = 3;
+  string display_name = 4;
 }
 
 message FileTabPayload {
@@ -200,6 +215,8 @@ message RevokeTabPayloadRequest {
   // a tracked worktree. UNSPECIFIED / KEEP leaves the worktree in place;
   // REMOVE asks the worker to `git worktree remove` once no other tabs
   // reference it. Mirrors CloseAgentRequest.
+  // NATIVE_CONVERSATION ignores REMOVE: revocation only removes the link and
+  // never stops its source chat or removes a worktree.
   WorktreeAction worktree_action = 2;
 }
 

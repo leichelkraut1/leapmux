@@ -11,6 +11,7 @@ import { installControllableResizeObserver, triggerResizeObserverForSync } from 
 import { ChatHiddenPremeasure } from './chatHiddenPremeasure'
 import { bandRow, bandRowThought, bleedRow } from './messageStyles.css'
 import { prepareMessage } from './rowPreparation'
+import { SpanLines } from './widgets/SpanLines'
 import { COL_SPACING, CONTAINER_PAD_RIGHT, ROW_BLEED_LEFT_VAR, rowBleedLeftStyle, spanLinesReservedWidth } from './widgets/SpanLines.geometry'
 
 type PremeasureCategory = Exclude<MessageCategory, { kind: 'notification' | 'control_response' }>
@@ -70,6 +71,17 @@ function renderPremeasureRow(
 }
 
 describe('chat hidden premeasure rendering', () => {
+  it.each([18, 64])('reserves the visible capped gutter for a premeasured row with %i rails', (lineCount) => {
+    const { column } = renderPremeasureRow('user_text', MessageSource.AGENT, lineCount)
+    const lines = entryWithSpanLines(lineCount).parsedSpanLines
+    const visible = render(() => <SpanLines lines={lines} />)
+    const rails = visible.container.firstElementChild as HTMLElement
+    expect(rails.children).toHaveLength(lineCount)
+    expect(rails.style.width).toBe('77px')
+    expect(column.style.marginLeft).toBe(rails.style.width)
+    expect(column.style.getPropertyValue(ROW_BLEED_LEFT_VAR)).toBe('calc(var(--chat-pad-left, 0px) + 77px)')
+  })
+
   // The root publishes what a reader -- a screen reader, or an e2e measurement --
   // needs to tell a hidden COPY of a row from the row itself. Both markers are
   // load-bearing and neither is visible from inside a row, so nothing else fails

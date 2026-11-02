@@ -9,7 +9,6 @@ import {
 } from '~/lib/browserStorage'
 import { DEFAULT_WORKSPACE_SORT_ORDER } from '~/lib/workspaceSort'
 import {
-  canReorderWithinSection,
   isSectionFilterShown,
   resetWorkspaceListStateForTests,
   sectionFilterQuery,
@@ -31,7 +30,6 @@ function reader() {
     dispose,
     order: () => workspaceSortOrder(),
     filter: (sectionId: string) => sectionFilterQuery(sectionId),
-    canReorder: (sectionId: string) => canReorderWithinSection(sectionId),
   }))
 }
 
@@ -123,31 +121,6 @@ describe('workspaceListState', () => {
       setSectionFilterQuery('sec-a', 'amber')
       resetWorkspaceListStateForTests()
       expect(isSectionFilterShown('sec-a')).toBe(false)
-    })
-  })
-
-  describe('canReorderWithinSection', () => {
-    it('allows reordering by default', () => {
-      expect(canReorderWithinSection('sec-a')).toBe(true)
-    })
-
-    it('refuses in EVERY section once a non-manual sort is picked', () => {
-      // The sort is global, so one pick changes every section at once.
-      setWorkspaceSortOrder({ key: 'name', direction: 'asc' })
-      expect(canReorderWithinSection('sec-a')).toBe(false)
-      expect(canReorderWithinSection('sec-b')).toBe(false)
-    })
-
-    it('refuses in the FILTERED section alone', () => {
-      toggleSectionFilter('sec-a')
-      setSectionFilterQuery('sec-a', 'amber')
-      expect(canReorderWithinSection('sec-a')).toBe(false)
-      expect(canReorderWithinSection('sec-b')).toBe(true)
-    })
-
-    it('still allows reordering while the filter box is open but empty', () => {
-      toggleSectionFilter('sec-a')
-      expect(canReorderWithinSection('sec-a')).toBe(true)
     })
   })
 

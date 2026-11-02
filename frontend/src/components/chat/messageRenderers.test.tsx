@@ -8,7 +8,7 @@ import { parseMessageContent } from '~/lib/messageParser'
 import { assembledMessageRow } from '~/test-support/assembledMessages'
 import { testMessageSources } from '~/test-support/messageRenderSources'
 import { renderMessageContent } from './messageContentRenderer'
-import { UnrecognizedMessage } from './messageRenderers'
+import { UnrecognizedMessage, UserContentMessage } from './messageRenderers'
 import { MESSAGE_UI_KEY } from './messageUiKeys'
 import { resolveMessageForRendering } from './providers/registry'
 import './providers'
@@ -44,6 +44,30 @@ describe('UnrecognizedMessage', () => {
     expect(view.getByTestId('unrendered-row')).toHaveTextContent(renderFailed
       ? 'LeapMux could not render this row'
       : 'LeapMux has no display for this row')
+  })
+})
+
+describe('native user attachments', () => {
+  it('renders inline image bytes beside text and file labels through the shared safe image renderer', () => {
+    const { container } = render(() => (
+      <UserContentMessage
+        text="Generated image question"
+        attachments={[
+          { filename: 'fixture.png', mimeType: 'image/png', image: { data: 'iVBORw0KGgo=', mimeType: 'image/png' } },
+          { filename: 'notes.pdf', mimeType: 'application/pdf' },
+        ]}
+      />
+    ))
+    expect(container).toHaveTextContent('Generated image question')
+    expect(container).toHaveTextContent('fixture.png')
+    expect(container).toHaveTextContent('notes.pdf')
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=')
+  })
+
+  it('keeps an unsafe native image source as a placeholder', () => {
+    const { container } = render(() => <UserContentMessage text="Generated" attachments={[{ image: { url: 'javascript:alert(1)' } }]} />)
+    expect(container.querySelector('img')).toBeNull()
+    expect(container).toHaveTextContent('Image')
   })
 })
 

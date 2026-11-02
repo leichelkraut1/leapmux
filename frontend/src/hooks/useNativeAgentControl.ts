@@ -1,0 +1,439 @@
+import type { Accessor } from 'solid-js'
+import type { NativeConversationRef } from '~/components/chat/nativeConversation'
+import type { InspectNativeSessionControlResponse } from '~/generated/proto/leapmux/v1/worker_pb'
+import { Code } from '@connectrpc/connect'
+import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack } from 'solid-js'
+import { answerNativeSessionApproval, inspectNativeSessionControl, interruptNativeSession, sendNativeSessionInput } from '~/api/workerRpc'
+import { nativeConversationKey } from '~/components/chat/nativeConversation'
+import { NATIVE_SESSION_CONTROL } from '~/generated/contracts/native-session-control'
+import { NativeSessionInputBehavior, NativeSessionInputDisposition, NativeSessionInputState } from '~/generated/proto/leapmux/v1/worker_pb'
+import { ChannelError } from '~/lib/channelError'
+
+const REFRESH_INTERVAL_MS = NATIVE_SESSION_CONTROL.PollMilliseconds
+const REQUEST_TIMEOUT_MS = 15000
+
+function refusedBeforeDelivery(failure: unknown): boolean {
+  return failure instanceof ChannelError && failure.source === 'rpc'
+    && (failure.code === Code.FailedPrecondition || failure.code === Code.InvalidArgument || failure.code === Code.PermissionDenied)
+}
+
+/** Existing owners only: capability reads never start, resume, or claim a chat. */
+export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, online: Accessor<boolean>, active: Accessor<boolean> = () => true) {
+  const [capabilities, setCapabilities] = createSignal<InspectNativeSessionControlResponse>()
+  const [checking, setChecking] = createSignal(false)
+  const [expired, setExpired] = createSignal(true)
+  const [inspectError, setInspectError] = createSignal('')
+  const [pending, setPending] = createSignal<'send' | 'interrupt' | 'approval'>()
+  const [approvalAnswers, setApprovalAnswers] = createSignal<Record<string, 'sending' | 'accepted' | 'uncertain'>>({})
+  const [receipt, setReceipt] = createSignal('')
+  const [error, setError] = createSignal('')
+  const [hasComposer, setHasComposer] = createSignal(false)
+  const [latestInput, setLatestInput] = createSignal<{ requestId: string, text: string }>()
+  const [inputState, setInputState] = createSignal<NativeSessionInputState>()
+  let generation = 0
+  let scopeGeneration = 0
+  let disposed = false
+  let controller: AbortController | undefined
+  let inspection: Promise<void> | undefined
+  let queuedInspection: Promise<void> | undefined
+  let expiryTimer: ReturnType<typeof setTimeout> | undefined
+  let sendAttempt: { bindingToken: string, text: string, requestId: string, inputBehavior: NativeSessionInputBehavior, uncertain: boolean } | undefined
+  let interruptAttempt: { bindingToken: string, turnId: string, requestId: string } | undefined
+
+  const available = createMemo(() => online() && active() && !expired() && !inspectError() && !!capabilities()?.bindingToken)
+  const inputBehavior = () => capabilities()?.inputBehavior ?? NativeSessionInputBehavior.UNSPECIFIED
+  const knownBehavior = () => inputBehavior() === NativeSessionInputBehavior.QUEUE_NEXT_TURN || inputBehavior() === NativeSessionInputBehavior.SEND_NOW
+  const canSend = createMemo(() => available() && !!capabilities()?.canSend && knownBehavior())
+  const canInterrupt = createMemo(() => available() && !!capabilities()?.canInterrupt && !!capabilities()?.activeTurnId)
+  const pendingApprovals = () => capabilities()?.pendingApprovals ?? []
+  const canAnswerApproval = (promptId: string) => available() && !pending()
+    && !approvalAnswers()[promptId]
+    && pendingApprovals().some(prompt => prompt.promptId === promptId && prompt.canAnswer && prompt.options.length > 0)
+  const canAnswer = createMemo(() => pendingApprovals().some(prompt => canAnswerApproval(prompt.promptId)))
+  const connected = createMemo(() => available() && (canSend() || canInterrupt() || pendingApprovals().some(prompt => prompt.canAnswer)))
+  const recoverableText = createMemo(() => {
+    const state = inputState()
+    return state === NativeSessionInputState.DROPPED || state === NativeSessionInputState.REJECTED || state === NativeSessionInputState.UNCERTAIN
+      ? latestInput()?.text || ''
+      : ''
+  })
+  const unavailableReason = createMemo(() => {
+    if (!online())
+      return 'Computer offline. Reconnect to continue in the original app.'
+    if (inspectError())
+      return inspectError()
+    if (!capabilities())
+      return checking() ? 'Checking the original app connection…' : 'The original app connection is unavailable.'
+    if (expired())
+      return 'The original app connection has expired. Refresh to check it again.'
+    return capabilities()?.unavailableReason || (capabilities()?.canSend && !knownBehavior()
+      ? 'The original app has not advertised a supported input behavior.'
+      : !canSend() ? 'This session is available for read-only viewing.' : '')
+  })
+
+  const cancelProbe = () => {
+    controller?.abort()
+    controller = undefined
+    inspection = undefined
+    queuedInspection = undefined
+    clearTimeout(expiryTimer)
+  }
+
+  function updateInputOutcome(response: InspectNativeSessionControlResponse) {
+    const requestId = untrack(latestInput)?.requestId
+    const outcome = requestId && response.recentInputs.find(input => input.requestId === requestId)
+    if (!outcome || outcome.state === untrack(inputState))
+      return
+    const labels: Partial<Record<NativeSessionInputState, string>> = {
+      [NativeSessionInputState.QUEUED]: 'Message queued in the original app; its turn has not started.',
+      [NativeSessionInputState.DISPATCHED]: 'Message handed to the original app. Waiting for its turn to start.',
+      [NativeSessionInputState.STARTED]: 'Message started a turn in the original app.',
+      [NativeSessionInputState.DROPPED]: 'The original app dropped this message. It was not resent.',
+      [NativeSessionInputState.REJECTED]: 'The original app rejected this message. It was not resent.',
+      [NativeSessionInputState.UNCERTAIN]: 'Delivery is unconfirmed. Check the original conversation before sending again.',
+    }
+    const label = labels[outcome.state]
+    if (!label)
+      return
+    batch(() => {
+      setInputState(outcome.state)
+      setReceipt(outcome.detail ? `${label} ${outcome.detail}` : label)
+      setError('')
+    })
+    if ((outcome.state === NativeSessionInputState.DROPPED || outcome.state === NativeSessionInputState.REJECTED)
+      && sendAttempt?.requestId === outcome.requestId) {
+      sendAttempt = undefined
+    }
+  }
+
+  function refresh(): Promise<void> {
+    if (disposed || !untrack(online) || !untrack(active))
+      return Promise.resolve()
+    if (inspection) {
+      if (!queuedInspection) {
+        const run = generation
+        const queued = inspection.then(async () => {
+          if (disposed || run !== generation || !untrack(online) || !untrack(active))
+            return
+          if (queuedInspection === queued)
+            queuedInspection = undefined
+          await refresh()
+        }).finally(() => {
+          if (queuedInspection === queued)
+            queuedInspection = undefined
+        })
+        queuedInspection = queued
+      }
+      return queuedInspection
+    }
+    const current = inspectOnce().finally(() => {
+      if (inspection === current)
+        inspection = undefined
+    })
+    inspection = current
+    return current
+  }
+
+  async function inspectOnce(): Promise<void> {
+    if (disposed || !untrack(online) || !untrack(active))
+      return
+    const source = untrack(ref)
+    const key = nativeConversationKey(source)
+    const run = generation
+    const current = new AbortController()
+    controller = current
+    const timeout = setTimeout(() => current.abort(), REQUEST_TIMEOUT_MS)
+    let rejectAbort: (() => void) | undefined
+    setChecking(true)
+    try {
+      const aborted = new Promise<never>((_resolve, reject) => {
+        rejectAbort = () => reject(new Error('Control inspection cancelled'))
+        current.signal.addEventListener('abort', rejectAbort, { once: true })
+      })
+      const response = await Promise.race([
+        inspectNativeSessionControl(source.workerId, { agentProvider: source.agentProvider, sessionId: source.sessionId }, { signal: current.signal }),
+        aborted,
+      ])
+      if (disposed || current.signal.aborted || run !== generation || nativeConversationKey(untrack(ref)) !== key)
+        return
+      const lifetime = Date.parse(response.expiresAt) - Date.now()
+      const prompts = response.pendingApprovals
+      if (response.sessionId !== source.sessionId
+        || ((response.canSend || response.canInterrupt || prompts.some(prompt => prompt.canAnswer)) && (!response.bindingToken || !Number.isFinite(lifetime) || lifetime <= 0))
+        || prompts.length > NATIVE_SESSION_CONTROL.MaxPendingApprovals
+        || new Set(prompts.map(prompt => prompt.promptId)).size !== prompts.length
+        || prompts.some(prompt => !prompt.promptId || prompt.options.length > NATIVE_SESSION_CONTROL.MaxApprovalOptions
+          || new Set(prompt.options.map(option => option.id)).size !== prompt.options.length
+          || prompt.options.some(option => !option.id || !option.label)
+          || (prompt.canAnswer && prompt.options.length === 0))) {
+        throw new Error('Unverified native control capability')
+      }
+      clearTimeout(expiryTimer)
+      batch(() => {
+        setCapabilities(response)
+        setExpired(false)
+        setInspectError('')
+        if (response.canSend && (response.inputBehavior === NativeSessionInputBehavior.QUEUE_NEXT_TURN || response.inputBehavior === NativeSessionInputBehavior.SEND_NOW))
+          setHasComposer(true)
+        updateInputOutcome(response)
+      })
+      if (Number.isFinite(lifetime) && lifetime > 0)
+        expiryTimer = setTimeout(setExpired, Math.min(lifetime, 2_147_483_647), true)
+    }
+    catch {
+      if (!disposed && run === generation) {
+        batch(() => {
+          setExpired(true)
+          setInspectError('Control unavailable. Refresh to check the original app; saved history remains available.')
+        })
+      }
+    }
+    finally {
+      clearTimeout(timeout)
+      if (rejectAbort)
+        current.signal.removeEventListener('abort', rejectAbort)
+      if (run === generation && controller === current) {
+        controller = undefined
+        setChecking(false)
+      }
+    }
+  }
+
+  async function bounded<T>(operation: Promise<T>): Promise<T> {
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([operation, new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error('Native control acknowledgement timed out')), REQUEST_TIMEOUT_MS)
+      })])
+    }
+    finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  async function send(text: string): Promise<boolean> {
+    if (!untrack(canSend) || untrack(pending) || !text.trim() || Date.parse(untrack(capabilities)!.expiresAt) <= Date.now())
+      return false
+    if (new TextEncoder().encode(text).length > NATIVE_SESSION_CONTROL.MaxTextBytes) {
+      setError(`Message exceeds the ${NATIVE_SESSION_CONTROL.MaxTextBytes.toLocaleString()} byte limit. Shorten it before sending.`)
+      return false
+    }
+    if (text.includes('\0')) {
+      setError('Remove NUL characters from this message before sending.')
+      return false
+    }
+    const source = untrack(ref)
+    const scope = scopeGeneration
+    const bindingToken = untrack(capabilities)!.bindingToken
+    // A manual retry of the same unconfirmed input retains its idempotency ID.
+    if (!sendAttempt || sendAttempt.text !== text)
+      sendAttempt = { bindingToken, text, requestId: crypto.randomUUID(), inputBehavior: untrack(inputBehavior), uncertain: false }
+    const attempt = sendAttempt
+    batch(() => {
+      setPending('send')
+      setReceipt('')
+      setError('')
+      setLatestInput({ requestId: attempt.requestId, text })
+      setInputState(undefined)
+    })
+    try {
+      const response = await bounded(sendNativeSessionInput(source.workerId, {
+        agentProvider: source.agentProvider,
+        sessionId: source.sessionId,
+        bindingToken: attempt.bindingToken,
+        requestId: attempt.requestId,
+        text: attempt.text,
+        inputBehavior: attempt.inputBehavior,
+      }))
+      if (disposed || scope !== scopeGeneration)
+        return false
+      if (response.sessionId !== source.sessionId || response.requestId !== attempt.requestId
+        || (response.disposition !== NativeSessionInputDisposition.ACCEPTED && response.disposition !== NativeSessionInputDisposition.QUEUED)
+        || (attempt.inputBehavior === NativeSessionInputBehavior.SEND_NOW && response.disposition === NativeSessionInputDisposition.QUEUED)) {
+        throw new Error('Unverified native input acknowledgement')
+      }
+      if (untrack(inputState) === undefined) {
+        setReceipt(response.disposition === NativeSessionInputDisposition.QUEUED
+          ? 'Message queued in the original app for its next turn.'
+          : 'Message accepted by the original app.')
+      }
+      sendAttempt = undefined
+      void refresh()
+      return true
+    }
+    catch (failure) {
+      if (!disposed && scope === scopeGeneration) {
+        const outcome = untrack(inputState)
+        if (outcome === NativeSessionInputState.QUEUED || outcome === NativeSessionInputState.DISPATCHED || outcome === NativeSessionInputState.STARTED) {
+          sendAttempt = undefined
+          return true
+        }
+        if (refusedBeforeDelivery(failure) && !attempt.uncertain) {
+          sendAttempt = undefined
+          setInputState(NativeSessionInputState.REJECTED)
+          setError('Message was not sent. The request was refused; refresh the connection or check your access before trying again.')
+          return false
+        }
+        if (outcome === undefined) {
+          attempt.uncertain = true
+          setInputState(NativeSessionInputState.UNCERTAIN)
+          setError('The original app did not confirm delivery. Your text is kept. Check the conversation before sending again.')
+        }
+      }
+      return false
+    }
+    finally {
+      if (!disposed && scope === scopeGeneration)
+        setPending(undefined)
+    }
+  }
+
+  async function interrupt(): Promise<void> {
+    if (!untrack(canInterrupt) || untrack(pending) || Date.parse(untrack(capabilities)!.expiresAt) <= Date.now())
+      return
+    const source = untrack(ref)
+    const scope = scopeGeneration
+    const capability = untrack(capabilities)!
+    const bindingToken = capability.bindingToken
+    const turnId = capability.activeTurnId
+    if (!interruptAttempt || interruptAttempt.bindingToken !== bindingToken || interruptAttempt.turnId !== turnId)
+      interruptAttempt = { bindingToken, turnId, requestId: crypto.randomUUID() }
+    const attempt = interruptAttempt
+    batch(() => {
+      setPending('interrupt')
+      setReceipt('')
+      setError('')
+    })
+    try {
+      const response = await bounded(interruptNativeSession(source.workerId, {
+        agentProvider: source.agentProvider,
+        sessionId: source.sessionId,
+        bindingToken,
+        requestId: attempt.requestId,
+        expectedTurnId: turnId,
+      }))
+      if (disposed || scope !== scopeGeneration)
+        return
+      if (response.sessionId !== source.sessionId || response.requestId !== attempt.requestId)
+        throw new Error('Unverified native interruption acknowledgement')
+      setReceipt('Interrupt accepted by the original app for this turn.')
+      interruptAttempt = undefined
+      void refresh()
+    }
+    catch {
+      if (!disposed && scope === scopeGeneration)
+        setError('The original app did not confirm the interrupt. Check its current turn before trying again.')
+    }
+    finally {
+      if (!disposed && scope === scopeGeneration)
+        setPending(undefined)
+    }
+  }
+
+  async function answerApproval(promptId: string, optionId: string): Promise<boolean> {
+    const capability = untrack(capabilities)
+    const prompt = capability?.pendingApprovals.find(prompt => prompt.promptId === promptId)
+    if (!capability || !prompt || !untrack(() => canAnswerApproval(promptId))
+      || !prompt.options.some(option => option.id === optionId)
+      || Date.parse(capability.expiresAt) <= Date.now()) {
+      return false
+    }
+    const source = untrack(ref)
+    const scope = scopeGeneration
+    const requestId = crypto.randomUUID()
+    batch(() => {
+      setPending('approval')
+      setApprovalAnswers(previous => ({ ...previous, [promptId]: 'sending' }))
+      setReceipt('')
+      setError('')
+    })
+    try {
+      const response = await bounded(answerNativeSessionApproval(source.workerId, {
+        agentProvider: source.agentProvider,
+        sessionId: source.sessionId,
+        bindingToken: capability.bindingToken,
+        requestId,
+        promptId,
+        optionId,
+        expectedTurnId: prompt.turnId,
+      }))
+      if (disposed || scope !== scopeGeneration)
+        return false
+      if (response.sessionId !== source.sessionId || response.requestId !== requestId || response.promptId !== promptId)
+        throw new Error('Unverified native approval acknowledgement')
+      batch(() => {
+        setApprovalAnswers(previous => ({ ...previous, [promptId]: 'accepted' }))
+        setReceipt(response.detail || 'Answer submitted to the original app.')
+      })
+      void refresh()
+      return true
+    }
+    catch (failure) {
+      if (!disposed && scope === scopeGeneration) {
+        if (refusedBeforeDelivery(failure)) {
+          batch(() => {
+            setApprovalAnswers((previous) => {
+              const next = { ...previous }
+              delete next[promptId]
+              return next
+            })
+            setExpired(true)
+            setError('Answer was not sent. The prompt or your access changed. Refresh to check the original app.')
+          })
+        }
+        else {
+          batch(() => {
+            setApprovalAnswers(previous => ({ ...previous, [promptId]: 'uncertain' }))
+            setError('The original app did not confirm this answer. It will not be resent. Check the original app before answering again.')
+          })
+        }
+        void refresh()
+      }
+      return false
+    }
+    finally {
+      if (!disposed && scope === scopeGeneration)
+        setPending(undefined)
+    }
+  }
+
+  createEffect(on(() => [nativeConversationKey(ref()), online(), active()] as const, ([key], previous) => {
+    generation++
+    cancelProbe()
+    batch(() => {
+      setChecking(false)
+      setExpired(true)
+      setInspectError('')
+      if (!previous || previous[0] !== key) {
+        scopeGeneration++
+        setCapabilities(undefined)
+        setHasComposer(false)
+        setLatestInput(undefined)
+        setInputState(undefined)
+        setReceipt('')
+        setError('')
+        setPending(undefined)
+        setApprovalAnswers({})
+        sendAttempt = undefined
+        interruptAttempt = undefined
+      }
+    })
+    if (online() && active())
+      void refresh()
+  }))
+  createEffect(() => {
+    if (!online() || !active())
+      return
+    const timer = setInterval(() => {
+      if (!inspection)
+        void refresh()
+    }, REFRESH_INTERVAL_MS)
+    onCleanup(() => clearInterval(timer))
+  })
+  onCleanup(() => {
+    disposed = true
+    generation++
+    cancelProbe()
+  })
+  return { capabilities, checking, connected, canSend, canInterrupt, canAnswer, pendingApprovals, canAnswerApproval, approvalAnswerState: (promptId: string) => approvalAnswers()[promptId], answerApproval, hasComposer, inputBehavior, unavailableReason, pending, receipt, error, recoverableText, refresh, send, interrupt }
+}

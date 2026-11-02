@@ -57,9 +57,23 @@ export function isPublishedActivityState(state: AgentActivityState): boolean {
 export function createAgentActivityStore() {
   const [state, setState] = createStore<AgentActivityStoreState>({ stateByAgent: {} })
 
+  // Non-reactive write stamps protect an awaited snapshot from newer publications.
+  const revisions = new Map<string, number>()
+  const recordWrite = (agentId: string) => revisions.set(agentId, (revisions.get(agentId) ?? 0) + 1)
+
   const stateOf = (agentId: string): AgentActivityState => state.stateByAgent[agentId] ?? DEFAULT_ACTIVITY_STATE
 
   return {
+    /** A repeated live level is still newer than an earlier snapshot request. */
+    revision(agentId: string): number {
+      return revisions.get(agentId) ?? 0
+    },
+
+    /** Distinguish a worker-confirmed level from the indicator's cold IDLE fallback. */
+    hasPublished(agentId: string): boolean {
+      return state.stateByAgent[agentId] !== undefined
+    },
+
     /**
      * Show the spinner only for WORKING.
      * An unreported agent uses the IDLE default.
@@ -87,6 +101,7 @@ export function createAgentActivityStore() {
     apply(agentId: string, next: AgentActivityState): boolean {
       if (!isPublishedActivityState(next))
         return false
+      recordWrite(agentId)
       const settled = stateOf(agentId) === AgentActivityState.WORKING && next !== AgentActivityState.WORKING
       if (state.stateByAgent[agentId] !== next)
         setState('stateByAgent', agentId, next)
@@ -107,12 +122,14 @@ export function createAgentActivityStore() {
     seedPublished(agentId: string, next: AgentActivityState): void {
       if (!isPublishedActivityState(next))
         return
+      recordWrite(agentId)
       if (state.stateByAgent[agentId] !== next)
         setState('stateByAgent', agentId, next)
     },
 
     /** Remove the level and its settle baseline when the tab retires or its worker disconnects. */
     forget(agentId: string) {
+      recordWrite(agentId)
       setState(produce((s) => {
         delete s.stateByAgent[agentId]
       }))

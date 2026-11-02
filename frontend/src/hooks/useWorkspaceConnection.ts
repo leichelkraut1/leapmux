@@ -206,6 +206,8 @@ export interface WorkspaceConnectionParams {
    * The working tree needs a refresh at the turn boundary in either case.
    */
   onTurnEndRefresh?: (agentId: string) => void
+  /** Refresh background agent snapshots after an event stream reconnects. */
+  onWorkerStreamReopened?: (workerId: string) => void
 }
 
 type ReplayTopic = 'activity' | 'goal' | 'tasks'
@@ -690,6 +692,7 @@ export function useWorkspaceConnection(params: WorkspaceConnectionParams) {
       }
     },
     onWorkerOnline: setWorkerOnline,
+    onWorkerStreamReopened: workerId => params.onWorkerStreamReopened?.(workerId),
     onReplayRequested: (workerId, replayId, entries) => {
       batch(() => {
         for (const entry of entries) {
@@ -815,6 +818,7 @@ export function useWorkspaceConnection(params: WorkspaceConnectionParams) {
   }))
 
   return {
+    workerStreamReady: streams.workerStreamReady,
     workerOnline,
   }
 }

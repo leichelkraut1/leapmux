@@ -14,7 +14,7 @@ import { nativeToolResult } from '../helpers/nativeToolResult'
 import { codexExecToolCall } from '../helpers/providerToolCalls'
 import { retryUntilPass } from '../helpers/retryUntilPass'
 import { quotePosixShellArgument } from '../helpers/shellArguments'
-import { assistantBubbles, openWorkspace, sendMessage, toolCallRow, waitForAgentIdle } from '../helpers/ui'
+import { assistantBubbles, openWorkspace, revealActivityTarget, sendMessage, toolCallRow, waitForAgentIdle } from '../helpers/ui'
 import { closeNativeAgentAndWait } from '../helpers/workerTabs'
 import { codexAsyncExecRules } from './asyncExec'
 import { nativeContext } from './scenarios'
@@ -81,6 +81,7 @@ codexTest('retains a completed native script with empty output after reload', as
       await page.reload()
       await openWorkspace(page, workspaceId)
     }
+    await revealActivityTarget(page, bubble)
     await expect(bubble).toHaveCount(1)
     await expect(bubble).toHaveAttribute('data-tool-status', 'completed')
     await expect(assistantBubbles(page).filter({ hasText: 'The empty native script completed.' }).first()).toBeVisible()
@@ -108,6 +109,7 @@ codexTest('retains native large-output truncation and its computed head and tail
       await page.reload()
       await openWorkspace(page, workspaceId)
     }
+    await revealActivityTarget(page, bubble)
     await expect(bubble).toHaveCount(1)
     await expect(bubble).toHaveAttribute('data-tool-status', 'completed')
     await expect(bubble).toContainText('Warning: truncated output')
@@ -138,6 +140,7 @@ codexTest('omits outer execution rows when a nested shell command supplies the o
     expect(snapshot.messages.filter(message => message.spanId === callId)).toHaveLength(0)
     const command = snapshot.messages.find(message => message.spanType === 'commandExecution')
     expect(command).toBeDefined()
+    await revealActivityTarget(page, toolCallRow(page, command!.spanId))
     await expect(toolCallRow(page, command!.spanId)).toContainText('NESTED_RESULT')
     await expect(toolCallRow(page, callId)).toHaveCount(0)
     for (const message of snapshot.messages)
@@ -163,6 +166,7 @@ codexTest('retains independent script output beside a nested shell receipt after
     }
     const snapshot = await readNativeMessageSnapshot(context, agent.id)
     expect(snapshot.messages.filter(message => message.spanId === callId)).toHaveLength(2)
+    await revealActivityTarget(page, toolCallRow(page, callId))
     await expect(toolCallRow(page, callId)).toHaveCount(1)
     await expect(toolCallRow(page, callId)).toContainText('INDEPENDENT_42')
     await expect(toolCallRow(page, callId)).toContainText('NESTED_MIXED')
@@ -290,6 +294,7 @@ codexTest('preserves numeric results and duplicate keys beside empty polls after
       const snapshot = await readNativeMessageSnapshot(context, agent.id)
       for (const [callId, content] of [[numericCall, '"failureCount":3'], [duplicateCall, '"result":"POLL_FAILURE_DETAIL","result":']] as const) {
         expect(snapshot.messages.filter(message => message.spanId === callId)).toHaveLength(2)
+        await revealActivityTarget(page, toolCallRow(page, callId))
         await expect(toolCallRow(page, callId)).toHaveCount(1)
         await expect(toolCallRow(page, callId)).toContainText(content)
       }
@@ -361,6 +366,7 @@ codexTest('joins the output that a waited cell states after its yield into one c
       }
       const snapshot = await readNativeMessageSnapshot(context, agent.id)
       expect(snapshot.messages.filter(message => message.spanId === callId), 'the cell is one request row and one result row').toHaveLength(2)
+      await revealActivityTarget(page, bubble)
       await expect(bubble).toHaveCount(1)
       await expect(bubble).toHaveAttribute('data-tool-status', 'completed')
       await expect(bubble).toContainText('CELLPARTONE')

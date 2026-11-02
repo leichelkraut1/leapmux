@@ -2,8 +2,9 @@ import { cleanup, fireEvent, render, screen } from '@solidjs/testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { UserMenuItems } from './UserMenuItems'
 
-const { setShowAboutDialog, openPreferences, isDesktopApp, isAutoAuthenticated, switchMode } = vi.hoisted(() => ({
+const { setShowAboutDialog, openPreferences, isDesktopApp, isAutoAuthenticated, switchMode, setSearchParams } = vi.hoisted(() => ({
   setShowAboutDialog: vi.fn(),
+  setSearchParams: vi.fn(),
   openPreferences: vi.fn(),
   isDesktopApp: { value: false },
   isAutoAuthenticated: { value: false },
@@ -19,6 +20,7 @@ vi.mock('~/context/AuthContext', () => ({
 
 vi.mock('@solidjs/router', () => ({
   useNavigate: () => vi.fn(),
+  useSearchParams: () => [{}, setSearchParams],
 }))
 
 vi.mock('~/components/shell/UserMenuState', () => ({
@@ -59,6 +61,7 @@ beforeEach(() => {
   isDesktopApp.value = false
   isAutoAuthenticated.value = false
   setShowAboutDialog.mockClear()
+  setSearchParams.mockClear()
   openPreferences.mockClear()
   switchMode.mockClear()
 })
@@ -68,6 +71,18 @@ afterEach(() => {
 })
 
 describe('UserMenuItems', () => {
+  it('opens the agent dashboard without navigating away from the shell', () => {
+    render(() => <UserMenuItems />)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Agent dashboard' }))
+    expect(setSearchParams).toHaveBeenCalledWith({ dashboard: 'agents' })
+  })
+
+  it('opens the workflows dialog on its runs tab', () => {
+    render(() => <UserMenuItems />)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Workflows' }))
+    expect(setSearchParams).toHaveBeenCalledWith({ workflows: 'runs' })
+  })
+
   it('always offers About and Preferences', () => {
     render(() => <UserMenuItems />)
     expect(screen.getByRole('menuitem', { name: /About/ })).toBeInTheDocument()

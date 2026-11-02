@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "attachment_classification_conformance.schema.json",
+  "title": "Attachment classification conformance corpus",
+  "description": "One byte-preserving fixture replayed by the browser and Worker attachment classifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "_readme",
+    "cases"
+  ],
+  "properties": {
+    "_readme": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "filename",
+          "mimeType",
+          "dataBase64",
+          "expectedMimeType",
+          "expectedKind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "filename": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "dataBase64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+          },
+          "expectedMimeType": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedKind": {
+            "enum": [
+              "text",
+              "image",
+              "pdf",
+              "binary"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

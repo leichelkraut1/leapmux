@@ -1,6 +1,6 @@
 /** Attachment types, cache, and helpers for the agent editor panel. */
 
-import type { AttachmentCapabilities } from './providers/registry'
+import type { AttachmentCapabilities } from './providers/capabilities'
 import { MAX_AGENT_INPUT_ITEM_BYTES } from '~/generated/contracts/agent-input'
 import { randomUUID } from '~/lib/idGenerator'
 import { extname } from '~/lib/paths'
@@ -82,7 +82,7 @@ const GENERIC_BINARY_MIME_TYPES = new Set([
   'application/octet-stream',
 ])
 
-const TEXT_MIME_BY_EXTENSION = new Map<string, string>([
+const MIME_BY_EXTENSION = new Map<string, string>([
   ['txt', 'text/plain'],
   ['md', 'text/markdown'],
   ['markdown', 'text/markdown'],
@@ -133,9 +133,13 @@ const TEXT_MIME_BY_EXTENSION = new Map<string, string>([
   ['gitignore', 'text/plain'],
   ['editorconfig', 'text/plain'],
   ['svg', 'image/svg+xml'],
+  ['pdf', 'application/pdf'],
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['gif', 'image/gif'],
+  ['webp', 'image/webp'],
 ])
-
-const TEXT_FILE_EXTENSIONS = Array.from(TEXT_MIME_BY_EXTENSION.keys(), ext => `.${ext}`)
 
 const TEXTUAL_MIME_PREFIXES = ['text/']
 const TEXTUAL_MIME_EXACT = new Set([
@@ -147,18 +151,14 @@ const TEXTUAL_MIME_EXACT = new Set([
   'image/svg+xml',
 ])
 
-/** File input accept attribute for provider-specific supported types. */
+/** Let text-capable providers choose any extension; validate bytes after selection. */
 export function buildAcceptAttribute(capabilities: AttachmentCapabilities | undefined): string | undefined {
   if (!capabilities)
     return undefined
-  if (capabilities.binary)
+  if (capabilities.binary || capabilities.text)
     return undefined
 
   const accepted = new Set<string>()
-  if (capabilities.text) {
-    for (const ext of TEXT_FILE_EXTENSIONS)
-      accepted.add(ext)
-  }
   if (capabilities.image) {
     for (const mime of SUPPORTED_IMAGE_MIME_TYPES)
       accepted.add(mime)
@@ -179,7 +179,7 @@ function inferredMimeTypeFromFilename(filename: string): string {
     return 'text/plain'
   if (lower === '.gitignore' || lower === '.editorconfig' || lower === '.env')
     return 'text/plain'
-  return TEXT_MIME_BY_EXTENSION.get(extname(filename)) ?? ''
+  return MIME_BY_EXTENSION.get(extname(filename)) ?? ''
 }
 
 function isTextualMimeType(mime: string): boolean {
@@ -191,6 +191,11 @@ function isTextualMimeType(mime: string): boolean {
 }
 
 function isUtf8Text(data: Uint8Array): boolean {
+  // Match the Worker: retain common whitespace and ANSI logs, not binary controls.
+  for (const byte of data) {
+    if ((byte < 0x20 && byte !== 0x09 && byte !== 0x0A && byte !== 0x0C && byte !== 0x0D && byte !== 0x1B) || byte === 0x7F)
+      return false
+  }
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(data)
     return true
@@ -221,6 +226,17 @@ export function inferAttachmentDetails(filename: string, mimeType: string, data:
     return { kind: 'text', mimeType: inferredMime || 'text/plain' }
 
   return { kind: 'binary', mimeType: effectiveMime || 'application/octet-stream' }
+}
+
+/** Whether this accepted attachment is delivered as a Worker file for agent tools. */
+export function attachmentUsesWorkerFile(
+  attachment: Pick<FileAttachment, 'filename' | 'mimeType' | 'data'>,
+  capabilities: AttachmentCapabilities | undefined,
+): boolean {
+  if (!capabilities?.fileBackedKinds?.length)
+    return false
+  const kind = inferAttachmentDetails(attachment.filename, attachment.mimeType, attachment.data).kind
+  return (kind === 'pdf' || kind === 'binary') && capabilities.fileBackedKinds.includes(kind)
 }
 
 export function isAttachmentSupported(kind: AttachmentKind, capabilities: AttachmentCapabilities | undefined): boolean {

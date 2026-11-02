@@ -1,4 +1,5 @@
 import type { Component } from 'solid-js'
+import type { ChatActivityGroup, ChatActivityGroups } from './chatActivityGroups'
 import type { ClassifiedEntry } from './chatEntryCache'
 import type { MessageBubbleHost } from './MessageBubble'
 import type { MessageContextResolver } from './messageContextResolver'
@@ -22,7 +23,9 @@ import { AgentStatus } from '~/generated/proto/leapmux/v1/agent_pb'
 import { formatChatQuote } from '~/lib/quoteUtils'
 import { onSyntaxThemeChange } from '~/lib/syntaxThemeStore'
 import { motion } from '~/styles/tokens'
+import { ActivityGroupHeader } from './ActivityGroupHeader'
 import { AgentStartupBanner } from './AgentStartupBanner'
+import { createActivityEntryProjection, createActivityGroupBuilder, isCollapsibleActivity } from './chatActivityGroups'
 import { createClassifiedEntryCache, heightKeyForEntry, renderKeyForEntry } from './chatEntryCache'
 import { ChatHiddenPremeasure } from './chatHiddenPremeasure'
 import { createMessageUiState } from './chatMessageUiState'
@@ -39,9 +42,12 @@ import * as styles from './ChatView.css'
 import { computeOverscanPx, createViewportSizeObserver, measureSpaceToken, PRE_MEASURE_WIDTH_PX } from './chatViewportGeometry'
 import { MessageBubble } from './MessageBubble'
 import { MessageContextMenuHostProvider } from './MessageContextMenuHost'
+import { createMessageRenderSources } from './messageContextResolver'
 import { createMessageRenderCacheStore } from './messageRenderCache'
 import { messageRowChrome } from './messageRowLayout'
-import { expandedUiKeyFor, messageUiDefault } from './messageUiKeys'
+import { expandedUiKeyFor, MESSAGE_UI_KEY, messageUiDefault } from './messageUiKeys'
+import { pluginFor } from './providers/registry'
+import { cachedChatRow } from './rowModelCache'
 import { useChatScroll } from './useChatScroll'
 import { sameVirtualItems, useChatVirtualizer } from './useChatVirtualizer'
 import { ChatRowSkeleton } from './widgets/ChatRowSkeleton'
@@ -259,6 +265,7 @@ export const ChatView: Component<ChatViewProps> = (props) => {
   // protect on-screen rows from eviction -- mirrors how `flingSettle` is wired in
   // useChatScroll, so no forward reference to a not-yet-declared const.
   let mountedRowIds: ReadonlySet<string> = new Set()
+  let activityGroupsForUi: (() => ChatActivityGroups) | undefined
 
   // Pin a row's top before a user toggle changes its height, so the toggled row stays
   // visually stationary instead of being scrolled by the viewport-midpoint re-pin.
@@ -275,7 +282,15 @@ export const ChatView: Component<ChatViewProps> = (props) => {
   // The cap protects the currently-rendered rows so an on-screen row's choice is
   // never the eviction target.
   const { getLocalDiffView, setLocalDiffView, getMessageUiBool, setMessageUiBool, getUiVersion } = createMessageUiState({
-    protectedIds: () => mountedRowIds,
+    protectedIds: () => {
+      const protectedIds = new Set(mountedRowIds)
+      for (const id of mountedRowIds) {
+        const groupId = activityGroupsForUi?.().byHeadId.get(id)?.id
+        if (groupId !== undefined)
+          protectedIds.add(groupId)
+      }
+      return protectedIds
+    },
   })
   const renderCacheStore = createMessageRenderCacheStore()
   // A syntax theme change invalidates every cached body at once: they all carry
@@ -316,8 +331,52 @@ export const ChatView: Component<ChatViewProps> = (props) => {
     isChildTranscript: () => !!props.isChildTranscript,
     showHiddenMessages: () => prefs.showHiddenMessages(),
   })
-  const visibleEntries = entries.visibleEntries
+  const buildActivityGroups = createActivityGroupBuilder()
+  const projectActivityEntries = createActivityEntryProjection()
+  const activityGroups = createMemo(() => buildActivityGroups(entries.visibleEntries(), (entry) => {
+    if (prefs.showHiddenMessages() || !pluginFor(entry.message.agentProvider)?.transcript.foldActivity)
+      return false
+    const kind = entry.category.kind
+    if (kind !== 'tool_use' && kind !== 'tool_result' && kind !== 'assistant_thinking')
+      return false
+    const sources = createMessageRenderSources(() => props.messageContext, () => entry.message, () => entry.resolved)
+    return isCollapsibleActivity(cachedChatRow({
+      sources,
+      spanType: entry.message.spanType,
+      renderCache: renderCacheStore.forRow(renderKeyForEntry(entry)),
+    }, entry.message.agentProvider, entry.resolved, entry.category, entry.message.completion))
+  }))
+  activityGroupsForUi = activityGroups
+  const activityExpanded = (group: ChatActivityGroup) =>
+    getMessageUiBool(group.id, MESSAGE_UI_KEY.ACTIVITY_EXPANDED) ?? false
+  const visibleEntries = createMemo(() => projectActivityEntries(entries.visibleEntries(), activityGroups(), activityExpanded))
   const hasVisibleEntries = entries.hasVisibleEntries
+  const setActivityExpanded = (group: ChatActivityGroup, value: boolean) => {
+    if (activityExpanded(group) === value)
+      return
+    anchorRowForResize(group.head.message.id)
+    setMessageUiBool(group.id, MESSAGE_UI_KEY.ACTIVITY_EXPANDED, value)
+  }
+  // Seeking and saved-viewport restore expose an exact target before the
+  // virtualizer resolves its offset. Merely landing on a nearby header would
+  // silently hide the message the reader selected.
+  const revealActivityMessage = (seq: bigint | undefined, id?: string) => {
+    const entry = entries.visibleEntries().find(candidate => id !== undefined ? candidate.message.id === id : seq !== undefined && candidate.message.seq === seq)
+    const group = entry && activityGroups().byMemberId.get(entry.message.id)
+    if (group && !activityExpanded(group))
+      setMessageUiBool(group.id, MESSAGE_UI_KEY.ACTIVITY_EXPANDED, true)
+  }
+  const foldedLiveActivity = createMemo(() => {
+    const tail = activityGroups().groups.at(-1)
+    return tail !== undefined && tail.atTail && !activityExpanded(tail)
+      && !props.pagination?.hasNewerMessages && props.agentLifecycle?.agentWorking === true
+      && !props.agentLifecycle?.backgroundTasks?.length && !props.agentLifecycle?.todos?.length && !props.agentLifecycle?.goal
+      && !props.agentLifecycle?.thinkingTokens && !props.agentLifecycle?.outputBytes
+  })
+  const activityHeightKey = (id: string): string => {
+    const group = activityGroups().byHeadId.get(id)
+    return group ? JSON.stringify(['activity', group.id, activityExpanded(group), group.members.length]) : ''
+  }
 
   // Inter-row gaps from the design tokens the non-virtual layout used, resolved
   // to pixels once mounted so the offset map keeps span-line bridges aligned (D6).
@@ -408,7 +467,7 @@ export const ChatView: Component<ChatViewProps> = (props) => {
           e.category.kind,
           () => effectiveDiffView(e.message.id),
           () => effectiveThinkingExpanded(e),
-        )}`,
+        )}|${activityHeightKey(e.message.id)}`,
       })),
     [],
     // Suppress the geom rebuild + scroll re-pin when a recompute leaves the offset
@@ -508,7 +567,7 @@ export const ChatView: Component<ChatViewProps> = (props) => {
     // diff-view toggle re-measures the row and KEEPS everything the cache holds for
     // it -- its extracted model, its normalized command body, its Myers diff and its
     // rendered markdown, none of which the click changed.
-    renderCacheStore.prune(visibleEntries().map(renderKeyForEntry))
+    renderCacheStore.prune(entries.visibleEntries().map(renderKeyForEntry))
   })
 
   // Two scroll-activity windows over the SAME gesture stream, differing in length AND in
@@ -680,7 +739,7 @@ export const ChatView: Component<ChatViewProps> = (props) => {
   const rowSpanColumnHidden = (id: string): boolean =>
     rowHiddenUntilMeasured(id) || flingSkeletons.skeletonIds().has(id)
 
-  const renderMessageBubble = (entry: ClassifiedEntry, opts: { premeasureMode?: boolean } = {}) => (
+  const renderOriginalBubble = (entry: ClassifiedEntry, opts: { premeasureMode?: boolean } = {}) => (
     <MessageBubble
       message={entry.message}
       prepared={entry}
@@ -690,6 +749,33 @@ export const ChatView: Component<ChatViewProps> = (props) => {
       {...(props.onReply !== undefined ? { onReply: props.onReply } : {})}
       {...(opts.premeasureMode !== undefined ? { premeasureMode: opts.premeasureMode } : {})}
     />
+  )
+
+  const renderMessageBubble = (entry: ClassifiedEntry, opts: { premeasureMode?: boolean } = {}) => (
+    <Show when={activityGroups().byHeadId.get(entry.message.id)} fallback={renderOriginalBubble(entry, opts)}>
+      {group => (
+        <>
+          <ActivityGroupHeader
+            expanded={activityExpanded(group())}
+            working={group().atTail && !props.pagination?.hasNewerMessages && props.agentLifecycle?.agentWorking === true}
+            busyIndicator={foldedLiveActivity() && group().atTail}
+            count={group().members.length}
+            onToggle={() => setActivityExpanded(group(), !activityExpanded(group()))}
+            {...(opts.premeasureMode !== undefined ? { premeasureMode: opts.premeasureMode } : {})}
+          />
+          <Show when={activityExpanded(group())}>
+            <Show when={group().head.parsedSpanLines.length > 0} fallback={renderOriginalBubble(group().head, opts)}>
+              <div class={styles.railedRow} data-span-columns={group().head.parsedSpanLines.length}>
+                <SpanLines lines={group().head.parsedSpanLines} />
+                <div class={styles.railedRowContent} style={rowBleedLeftStyle(group().head.parsedSpanLines.length)}>
+                  {renderOriginalBubble(group().head, opts)}
+                </div>
+              </div>
+            </Show>
+          </Show>
+        </>
+      )}
+    </Show>
   )
 
   // Rows hidden pending reveal -- the CANDIDATES for a loading skeleton. Filter
@@ -760,6 +846,7 @@ export const ChatView: Component<ChatViewProps> = (props) => {
   const saveViewportScrollOnCleanup = untrack(() => props.onSaveViewportScroll)
   const scroll = useChatScroll({
     messages: () => props.messages,
+    revealMessage: revealActivityMessage,
     messageVersion: () => props.messageVersion,
     agentWorking: () => props.agentLifecycle?.agentWorking,
     agentStatus: () => props.agentLifecycle?.agentStatus,
@@ -1171,7 +1258,7 @@ export const ChatView: Component<ChatViewProps> = (props) => {
                     {/* Each optional indicator prop is omitted (not undefined) while the lifecycle scope holds none. */}
                     <ThinkingIndicator
                       {...(props.agentId !== undefined ? { id: props.agentId } : {})}
-                      visible={props.agentLifecycle?.agentWorking ?? false}
+                      visible={(props.agentLifecycle?.agentWorking ?? false) && !foldedLiveActivity()}
                       {...(props.agentLifecycle?.thinkingTokens !== undefined ? { thinkingTokens: props.agentLifecycle.thinkingTokens } : {})}
                       {...(props.agentLifecycle?.outputBytes !== undefined ? { outputBytes: props.agentLifecycle.outputBytes } : {})}
                       {...(props.agentLifecycle?.outputBytesMinimum !== undefined ? { outputBytesMinimum: props.agentLifecycle.outputBytesMinimum } : {})}

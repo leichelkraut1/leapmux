@@ -7,6 +7,9 @@ export const treeWrapper = style({
 })
 
 export const leafNode = style({
+  // The tree can scroll horizontally, but leaf labels must give way to their badges.
+  boxSizing: 'border-box',
+  maxWidth: '100cqi',
   paddingRight: 'var(--space-1)',
   selectors: {
     [`${node}&:hover`]: {

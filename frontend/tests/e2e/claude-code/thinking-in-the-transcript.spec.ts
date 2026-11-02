@@ -1,7 +1,7 @@
 import { expect } from '@playwright/test'
 import { claudeTest } from '../claude-fixtures'
 import { expectContextUsage } from '../helpers/contextUsage'
-import { bandRows, sendMessage, waitForAgentIdle } from '../helpers/ui'
+import { bandRows, revealActivityTarget, sendMessage, waitForAgentIdle } from '../helpers/ui'
 
 claudeTest.describe('Claude Code transcript and context', () => {
   claudeTest('keeps model reasoning and context usage after a reload', async ({ authenticatedWorkspace, page, modelScript }) => {
@@ -14,10 +14,12 @@ claudeTest.describe('Claude Code transcript and context', () => {
     await waitForAgentIdle(page)
 
     const thought = bandRows(page, 'thought').filter({ hasText: reasoning })
+    await revealActivityTarget(page, thought)
     await expect(thought).toBeVisible()
     await expectContextUsage(page, usage)
 
     await page.reload()
+    await revealActivityTarget(page, thought)
     await expect(thought).toBeVisible()
     await expectContextUsage(page, usage)
   })

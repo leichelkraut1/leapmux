@@ -24,6 +24,7 @@ import { nativeToolResult } from './nativeToolResult'
 const trip = vi.hoisted(() => ({ events: [] as string[], body: 'FORM_ROUND_TRIP_OK', resultCallId: 'probe-call' }))
 vi.mock('./ui', async importOriginal => ({
   ...await importOriginal<typeof import('./ui')>(),
+  revealActivityTarget: vi.fn(async () => {}),
   sendMessage: async (_page: unknown, text: string) => { trip.events.push(`send ${text}`) },
   waitForAgentIdle: async () => { trip.events.push('idle') },
   messageBubbles: () => ({ filter: () => ({ first: () => assertingLocator('result bubble') }) }),

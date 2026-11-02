@@ -14,14 +14,15 @@ func registerSysInfoHandlers(d ownerOnlyRegistrar, svc *Service) {
 	d.Register("GetWorkerSystemInfo", leapmuxv1.Scope_SCOPE_WORKER_READ, func(_ context.Context, _ channel.Caller, _ *leapmuxv1.InnerRpcRequest, sender channel.ResponseWriter) {
 		homeDir, _ := os.UserHomeDir()
 		sendProtoResponse(sender, &leapmuxv1.GetWorkerSystemInfoResponse{
-			Name:       svc.Name,
-			Os:         runtime.GOOS,
-			Arch:       runtime.GOARCH,
-			HomeDir:    homeDir,
-			Version:    version.Value,
-			CommitHash: version.CommitHash,
-			BuildTime:  version.BuildTime,
-			Branch:     version.Branch,
+			Name:         svc.Name,
+			Os:           runtime.GOOS,
+			Arch:         runtime.GOARCH,
+			HomeDir:      homeDir,
+			Version:      version.Value,
+			CommitHash:   version.CommitHash,
+			BuildTime:    version.BuildTime,
+			Branch:       version.Branch,
+			Capabilities: workerCapabilities(),
 		})
 	})
 }

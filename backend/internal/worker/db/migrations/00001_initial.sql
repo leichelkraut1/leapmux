@@ -566,7 +566,7 @@ CREATE TABLE worker_tab_payloads (
     -- agent/terminal links as live and leak their worktrees.
     user_id      TEXT NOT NULL CHECK (user_id <> ''),
     tab_id       TEXT NOT NULL,
-    -- TabType of the tab this payload belongs to: 3 = FILE, 4 = IMAGE. Stored
+    -- TabType: 3 = FILE, 4 = IMAGE, 5 = NATIVE_CONVERSATION. Stored
     -- rather than derived from the payload so tab_locations can project it
     -- without decoding a blob, and so a row whose payload the running binary
     -- cannot parse still reports which kind of tab it is.
@@ -577,11 +577,10 @@ CREATE TABLE worker_tab_payloads (
     -- newOwnedTabKey and bootstrap's payload-tab filter -- have no default
     -- case, so an out-of-range row would be keyed against nothing in the hub's
     -- tab list and reaped as an orphan.
-    tab_type     INTEGER NOT NULL CHECK (tab_type IN (3, 4)),
+    tab_type     INTEGER NOT NULL CHECK (tab_type IN (3, 4, 5)),
     -- The serialized leapmux.v1.TabPayload. Opaque here on purpose: the shared
     -- columns beside it are exactly what shared code reads, and the kind-
-    -- specific half belongs to the kind. Adding a third tab kind is a proto
-    -- change and no schema change.
+    -- specific half belongs to the kind. The CHECK enumerates supported kinds.
     payload      BLOB NOT NULL,
     -- The tab's git working directory, and the reason such a tab is a
     -- first-class git citizen rather than a type shared code routes around.
@@ -717,8 +716,9 @@ CREATE INDEX idx_agent_background_tasks_child ON agent_background_tasks(child_ag
 -- and terminals are closed by stamping closed_at, while a payload-backed tab is
 -- HARD DELETED on close, so its presence IS its openness.
 --
--- The projection covers every payload-backed kind, FILE and IMAGE alike: the
--- view reads tab_type from the row rather than stating a constant.
+-- Only resource-owning payload tabs participate. Native conversation links
+-- use their working_dir for placement only, never for physical directory or
+-- quake ownership, so they are deliberately absent from this lifecycle view.
 --
 -- workspace_archived and is_quake ride along so the QUAKE REFERENCE COUNT can
 -- read this one relation too, rather than restating the per-type rule a fourth
@@ -734,7 +734,7 @@ SELECT 2, id, '', working_dir, workspace_archived, is_quake
 FROM terminals WHERE closed_at IS NULL
 UNION ALL
 SELECT tab_type, tab_id, user_id, working_dir, workspace_archived, 0
-FROM worker_tab_payloads;
+FROM worker_tab_payloads WHERE tab_type IN (3, 4);
 
 -- +goose Down
 DROP VIEW IF EXISTS tab_locations;

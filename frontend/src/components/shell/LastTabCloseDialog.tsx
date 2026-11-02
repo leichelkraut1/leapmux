@@ -169,6 +169,7 @@ export const LastTabCloseDialog: Component<LastTabCloseDialogProps> = (props) =>
             terminals: props.state.tabType === TabType.TERMINAL ? 1 : 0,
             files: props.state.tabType === TabType.FILE ? 1 : 0,
             images: props.state.tabType === TabType.IMAGE ? 1 : 0,
+            nativeConversations: props.state.tabType === TabType.NATIVE_CONVERSATION ? 1 : 0,
             // AGENT / TERMINAL closes stop a running process; a FILE or
             // IMAGE close only drops a viewer. The dialog uses willStop
             // to pick the verb ("will be stopped" vs. "will keep

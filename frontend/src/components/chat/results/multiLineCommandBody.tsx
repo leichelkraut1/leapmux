@@ -90,7 +90,7 @@ export function useCollapsedSummaryOverflow(props: {
   }
 }
 
-/** Collapsed command summary: full text, clipped to three visual rows. */
+/** Collapsed command summary: full text, clipped to one visual row. */
 export function CommandInputSummary(props: {
   command: string
   language?: CommandLanguage

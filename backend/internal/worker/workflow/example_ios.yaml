@@ -1,0 +1,139 @@
+# LeapMux workflow template: develop, audit and test on iOS.
+#
+# Installed by "Add example" in the Workflows dialog. Every placement below is
+# a capability or "any computer" placement so the template works on any team
+# of computers; pin each role to a specific computer when you launch it, or
+# edit the template.
+format_version: 1
+profiles:
+  - id: lead
+    name: Lead (Claude, high effort)
+    description: Plans, delegates, reviews evidence and reports the outcome.
+    agent_provider: AGENT_PROVIDER_CLAUDE_CODE
+    options:
+      effort: high
+    placement:
+      strategy: WORKER_PLACEMENT_STRATEGY_ANY_WORKER
+    instructions: |
+      You coordinate; you do not implement. Break the objective into tasks,
+      delegate each to the right role, and judge results by their evidence
+      (commit SHA, test output, audit findings), not by the agent's claims.
+  - id: builder
+    name: Builder (Codex, high effort, Windows)
+    description: Implements, tests, commits and pushes to an isolated branch.
+    agent_provider: AGENT_PROVIDER_CODEX
+    options:
+      effort: high
+    placement:
+      strategy: WORKER_PLACEMENT_STRATEGY_CAPABILITY
+      required_capabilities:
+        - os:windows
+    instructions: |
+      Implement exactly what the task asks, in your own worktree. Run the
+      applicable tests. Commit, push your branch, and report the branch and
+      the exact commit SHA. Never merge, and never push to the base branch.
+  - id: auditor
+    name: Auditor (Claude, high effort)
+    description: Reviews a revision independently and reports defects and risks.
+    agent_provider: AGENT_PROVIDER_CLAUDE_CODE
+    options:
+      effort: high
+    placement:
+      strategy: WORKER_PLACEMENT_STRATEGY_ANY_WORKER
+    instructions: |
+      Review only the revision named in the task: fetch it and check it out
+      by its SHA. Look for defects, security problems, missing tests and
+      risky changes. You do not fix code. Report "failed" with concrete
+      findings when the revision should not ship, "completed" when it may.
+  - id: ios-tester
+    name: iOS Tester (Mac with Xcode)
+    description: Builds the exact revision with Xcode and runs the simulator tests.
+    agent_provider: AGENT_PROVIDER_CLAUDE_CODE
+    placement:
+      strategy: WORKER_PLACEMENT_STRATEGY_CAPABILITY
+      required_capabilities:
+        - os:darwin
+        - xcode
+    instructions: |
+      Fetch and check out the exact commit SHA named in the task. Build with
+      Xcode and run the iPhone Simulator tests. Report pass or fail with the
+      test summary, and attach the log and screenshot paths as artifacts.
+template:
+  name: Develop, audit and test on iOS
+  description: A Lead plans; a Builder implements on Windows; an Auditor reviews; an iOS Tester validates on a Mac; a human approves the merge.
+  instructions: |
+    1. Plan the change and release the "Implement" task with concrete,
+       objective-specific instructions.
+    2. When the Builder reports a commit, release "Audit" and "iOS tests",
+       each naming the exact branch and commit SHA.
+    3. If the audit or the tests fail, leave that result unreviewed and
+       delegate a "Fix" task to the Builder with the findings. When the fix
+       reports its new SHA, send the failed validation back with
+       `review --reject --feedback "Re-check <branch> at <new SHA>"`, which
+       re-runs it on the same agent. Each re-run counts as an attempt; after
+       the limit, the engine escalates to the user.
+    4. When both pass on the same SHA, release "Merge"; the user must approve
+       it before it starts.
+    5. Complete the run with a summary that names the merged SHA.
+  completion_criteria: |
+    The audit and the iOS tests both passed on one commit SHA, and that
+    commit was merged after human approval.
+  default_max_attempts: 3
+  require_final_approval: false
+  max_parallel_tasks: 2
+  max_agents: 6
+  sensitive_operations:
+    - merging into the base branch
+    - pushing to the base branch
+    - deleting branches
+  roles:
+    - key: lead
+      name: Lead
+      profile_id: lead
+      is_lead: true
+    - key: builder
+      name: Builder
+      profile_id: builder
+      git_isolation: WORKFLOW_GIT_ISOLATION_WORKTREE
+      required_outputs: [summary, commit, tests]
+      review_required: true
+    - key: auditor
+      name: Auditor
+      profile_id: auditor
+      git_isolation: WORKFLOW_GIT_ISOLATION_WORKTREE
+      required_outputs: [summary]
+      review_required: true
+    - key: ios-tester
+      name: iOS Tester
+      profile_id: ios-tester
+      required_outputs: [summary, tests, artifacts]
+      review_required: true
+  steps:
+    - key: implement
+      title: Implement
+      role_key: builder
+      instructions: |
+        Implement the change on your worktree branch, run the tests, commit,
+        push the branch, and report the branch and commit SHA.
+    - key: audit
+      title: Audit
+      role_key: auditor
+      depends_on: [implement]
+      instructions: |
+        Review the Builder's revision (branch and SHA in the instructions
+        below) independently and report your findings.
+    - key: ios-tests
+      title: iOS tests
+      role_key: ios-tester
+      depends_on: [implement]
+      instructions: |
+        Build the Builder's revision (SHA in the instructions below) with
+        Xcode and run the iPhone Simulator tests.
+    - key: merge
+      title: Merge
+      role_key: builder
+      depends_on: [audit, ios-tests]
+      approval: WORKFLOW_APPROVAL_GATE_BEFORE_START
+      instructions: |
+        Merge the validated commit into the base branch and push it. Report
+        the merge commit SHA.

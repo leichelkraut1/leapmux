@@ -117,22 +117,35 @@ export function createPremeasureQueue(deps: PremeasureQueueDeps) {
       setUnsettledPremeasureKeys(nextUnsettled)
   })
 
-  const premeasureCandidates = createMemo<ChatDomPremeasureCandidate[]>(() => {
+  let candidateCache = new Map<string, { candidate: ChatDomPremeasureCandidate, heightKey: string | undefined }>()
+  const premeasureCandidates = createMemo<ChatDomPremeasureCandidate[]>((previous) => {
     const ids = pendingPremeasureIds()
-    if (ids.size === 0)
-      return []
+    if (ids.size === 0) {
+      candidateCache.clear()
+      return previous?.length === 0 ? previous : []
+    }
     const entries = deps.visibleEntryById()
     const unsettled = unsettledPremeasureKeys()
     const candidates: ChatDomPremeasureCandidate[] = []
+    const nextCache = new Map<string, { candidate: ChatDomPremeasureCandidate, heightKey: string | undefined }>()
     for (const item of deps.virtualItems()) {
       const unsettledKeyMatches = unsettled.has(item.id) && unsettled.get(item.id) === item.heightKey
       if (!ids.has(item.id) || (deps.virt.hasMeasuredHeight(item.id) && !unsettledKeyMatches))
         continue
       const entry = entries.get(item.id)
-      if (entry)
-        candidates.push({ entry, item })
+      if (entry) {
+        // ChatHiddenPremeasure keys its For by candidate identity. Settling a
+        // sibling must not rebuild this pending row's entire hidden bubble.
+        const cached = candidateCache.get(item.id)
+        const candidate = cached?.candidate.entry === entry && cached.candidate.item === item && cached.heightKey === item.heightKey
+          ? cached.candidate
+          : { entry, item }
+        candidates.push(candidate)
+        nextCache.set(item.id, { candidate, heightKey: item.heightKey })
+      }
     }
-    return candidates
+    candidateCache = nextCache
+    return previous?.length === candidates.length && candidates.every((candidate, index) => previous[index] === candidate) ? previous : candidates
   })
 
   const onMeasure = (id: string, height: number, heightKey: string | undefined, measureDurationMs: number, settled: boolean): boolean => {

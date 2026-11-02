@@ -1,17 +1,17 @@
 ---
 title: "CLI Reference"
-description: "A quick-lookup cheat-sheet for the leapmux command line: every daemon mode and its flags, the version command, and the environment variables LeapMux reads."
+description: "A quick-lookup cheat-sheet for the leapmux command line: every daemon mode and its flags, local activity reports, the version command, and the environment variables LeapMux reads."
 type: docs
 weight: 1
 ---
 
-This is the quick-lookup cheat-sheet for the `leapmux` command line. It covers the top-level command list, a synopsis and flag table for each daemon mode (`solo`, `hub`, `worker`, `dev`), the `version` command, the environment variables LeapMux reads, and outlines of the three large command groups — `recover` (offline break-glass), `control` (user-facing scripting), and `control admin` (hub administration) — which have their own dedicated chapters.
+This is the quick-lookup cheat-sheet for the `leapmux` command line. It covers the top-level command list, a synopsis and flag table for each daemon mode (`solo`, `hub`, `worker`, `dev`), the `report` and `version` commands, the environment variables LeapMux reads, and outlines of the three large command groups — `recover` (offline break-glass), `control` (user-facing scripting), and `control admin` (hub administration) — which have their own dedicated chapters.
 
 For task-oriented walkthroughs rather than reference tables, see [Running LeapMux](/docs/admin/running-leapmux/) (run modes, ports, data dirs, Docker), [Configuration](/docs/admin/configuration/) (full config-key reference and storage backends), [Recovery](/docs/admin/recover/), and [Control CLI](/docs/using/control-cli/).
 
 ## Top-level usage
 
-`leapmux` is a single binary with seven commands:
+`leapmux` is a single binary with eight commands:
 
 ```text
 Usage: leapmux <command> [flags]
@@ -23,6 +23,7 @@ Commands:
   dev       Run Hub + Worker for development
   recover   Offline break-glass recovery (opens the database directly)
   control   Remotely control LeapMux from a script or another LeapMux agent
+  report    Report this Codex session's activity to the local Worker
   version   Print version and exit
 
 Common options:
@@ -41,6 +42,7 @@ Any command name can be shortened as far as it stays unambiguous.
 | `dev` | Hub + Worker in one process with real auth (development) | [Running LeapMux](/docs/admin/running-leapmux/) |
 | `recover` | Offline break-glass: first-admin bootstrap, password reset, keys, db | [Recovery](/docs/admin/recover/) |
 | `control` | Drive a running Hub over RPC (scripts / spawned agents) | [Control CLI](/docs/using/control-cli/) |
+| `report` | Report this Codex session's activity to the local Worker | [below](#report) |
 | `version` | Print the build version and exit | [below](#version) |
 
 Notes on dispatch:
@@ -227,6 +229,31 @@ Dev mode uses the **same flag set as solo**.
 
 The other differences from solo: dev enables `signup_enabled=true` by default, and the bundled Worker's auto-registration is deferred until the first admin completes `/setup`. The runtime knobs (`session_duration_seconds`, `limits`, `timeouts`, …) are `leapmux control admin settings` keys. The default `-listen` is `:4327` (all interfaces), and the config/data location is `~/.config/leapmux/dev/`.
 
+## report
+
+Write a private local activity report for the current Codex session. The dashboard labels these statuses **agent-reported**: the command records the caller's claim and does not observe or control the chat.
+
+```bash
+leapmux report --status working --name "Update the dashboard"
+leapmux report --status waiting --name "Update the dashboard"
+leapmux report --status idle --name "Update the dashboard"
+```
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--status` | required | `working`, `waiting`, or `idle` |
+| `--session-id` | `CODEX_THREAD_ID` | Session identifier: 1–128 ASCII letters, digits, underscores, or hyphens |
+| `--name` | empty | Optional chat name; normalized to one line and capped at 160 Unicode code points |
+| `--pid` | nearest verified Codex CLI ancestor | Explicit running native Codex CLI process owned by the same user |
+
+Use `working` while making progress, `waiting` when user input is needed, and `idle` when finished. Only the top-level agent should report; subagents can inherit the same session identifier. Repeat the same `--name` on every update to keep the title.
+
+Each report expires after **15 minutes** unless refreshed. An expired report appears as unknown, and reports older than 24 hours are ignored. The Worker only displays reports that still match a running process's identity; process presence alone never refreshes the status.
+
+The command checks process ownership and creation time before writing. If it cannot verify the ancestor, it fails without selecting an unrelated process; `--pid` provides an explicit fallback with the same identity checks. Reports contain session metadata, not prompts, transcripts, or credentials. The command installs no hooks and changes no provider settings.
+
+Success prints a JSON receipt containing `status`, `sessionId`, `reportedAt`, and `expiresAt`. Report files are stored under `~/.config/leapmux/agent-reports/codex`, accessible only to the reporting user.
+
 ## version
 
 Print the build version and exit. The output is a single line with fields joined by ` · `:
@@ -275,6 +302,7 @@ leapmux control auth login --hub https://hub.example.com   # authorize first
 | `tab` | `list`, `get`, `open`, `close`, `rename`, `move` |
 | `worker` | `list`, `get`; subgroup `pins`: `list`, `show`, `remove` |
 | `agent` | `send`, `interrupt`, `get`, `providers`, `messages`, `set`, `send-control-response` |
+| `workflow` | `context`, `delegate`, `send`, `review`, `request-approval`, `complete`, `report`, `progress` — only inside a workflow agent; see [Workflows](/docs/using/workflows/#how-agents-take-part) |
 | `tile` | `list`, `split`, `close`, `make-grid`, `remove-grid`, `set-ratios`, `set-grid-ratios` |
 | `layout` | `get`, `set` |
 | `file` | `list`, `read`, `stat` |
@@ -311,6 +339,7 @@ The Worker reads:
 | `LEAPMUX_WORKER_ENCRYPTION_MODE` | worker `encryption_mode` | `post-quantum` |
 | `LEAPMUX_WORKER_LOG_LEVEL` | worker `log_level` | `info` |
 | `LEAPMUX_WORKER_AGENT_STARTUP_CONCURRENCY` | worker `agent_startup_concurrency` | `4` |
+| `LEAPMUX_WORKER_CAPABILITIES` | extra [workflow placement](/docs/using/workflows/#choosing-computers) capabilities, comma-separated (read directly, not a config key) | `gpu,ios-simulator` |
 
 The prefix strip lowercases the remainder but does **not** translate `_` into `.`, so nested storage keys such as `storage.type` and `storage.postgres.dsn` cannot be set cleanly via env vars — use the YAML config file or the dedicated `-storage-*` flags instead. See [Configuration](/docs/admin/configuration/) for the full list and precedence rules (defaults < config file < env vars < explicitly-set CLI flags).
 
@@ -329,8 +358,18 @@ The prefix strip lowercases the remainder but does **not** translate `_` into `.
 | `LEAPMUX_CONTROL_TERMINAL_ID` | spawned terminals | The terminal you are inside (default for `--tab-id` on `terminal ...`). In a Quake panel it is the only id set — a panel gets no `_TAB_ID` / `_TAB_TYPE`. |
 | `LEAPMUX_CONTROL_WORKING_DIR` | spawned agents | Working directory at spawn |
 | `LEAPMUX_CONTROL_AGENT_PROVIDER` | spawned agents | Agent provider (agents only) |
+| `LEAPMUX_WORKFLOW_RUN_ID` | workflow agents | The workflow run the agent belongs to |
+| `LEAPMUX_WORKFLOW_ROLE` | workflow agents | The agent's role key |
+| `LEAPMUX_WORKFLOW_COORDINATOR_WORKER_ID` | workflow agents | The computer that coordinates the run |
+| `LEAPMUX_WORKFLOW_TOKEN` | workflow agents | The agent's credential for its run |
 
 The `LEAPMUX_CONTROL_*` variables other than `_CONFIG_DIR` are injected automatically by the Worker into the agents and terminals it spawns; you do not set them by hand. See [Control CLI](/docs/using/control-cli/) for how they drive entity-ID resolution.
+
+### Local activity reports (`leapmux report`)
+
+| Variable | Used by | Meaning |
+|----------|---------|---------|
+| `CODEX_THREAD_ID` | `report` | Session identifier when `--session-id` is omitted |
 
 ## Config and data locations
 

@@ -4249,6 +4249,32 @@ const DOMAINS = [
     },
   },
   {
+    name: 'native-conversations',
+    emit(out, read) {
+      const value = read('native-conversations')
+      const tables = [
+        { json: 'formats', go: 'NativeConversationFormat', ts: 'NATIVE_CONVERSATION_FORMAT' },
+        { json: 'directions', go: 'NativeConversationDirection', ts: 'NATIVE_CONVERSATION_DIRECTION' },
+      ]
+      const go = tables.map(table => `const (\n${goConstBlock(Object.entries(value[table.json]).map(([name, token]) => ({ name: table.go + name, value: jsonString(token) })))}\n)`).join('\n\n')
+      const ts = tables.map(table => `export const ${table.ts} = {\n${Object.entries(value[table.json]).map(([name, token]) => `  ${name}: ${jsonString(token)},`).join('\n')}\n} as const`).join('\n\n')
+      out['backend/generated/contracts/native-conversations.go'] = `${GO_HEADER('native-conversations.json')}package contracts\n\n${go}\n`
+      out['frontend/src/generated/contracts/native-conversations.ts'] = `${TS_HEADER('native-conversations.json')}\n${ts}\n`
+    },
+  },
+  {
+    name: 'native-session-control',
+    emit(out, read) {
+      const value = read('native-session-control')
+      mustBe(value.PollMilliseconds < value.LeaseSeconds * 1000, 'native-session-control.json', 'poll interval must renew the control lease before expiry')
+      const entries = Object.entries(value).filter(([name]) => name !== '_readme')
+      const go = goConstBlock(entries.map(([name, number]) => ({ name: `NativeSessionControl${name}`, value: String(number) })))
+      const ts = entries.map(([name, number]) => `  ${name}: ${number},`).join('\n')
+      out['backend/generated/contracts/native-session-control.go'] = `${GO_HEADER('native-session-control.json')}package contracts\n\nconst (\n${go}\n)\n`
+      out['frontend/src/generated/contracts/native-session-control.ts'] = `${TS_HEADER('native-session-control.json')}\nexport const NATIVE_SESSION_CONTROL = {\n${ts}\n} as const\n`
+    },
+  },
+  {
     name: 'worker-vocab',
     requiresDescriptor: true,
     emit(out, read, descriptorSet) {

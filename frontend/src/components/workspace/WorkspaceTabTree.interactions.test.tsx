@@ -15,6 +15,7 @@ import { withPreferences } from '~/test-support/preferencesProvider'
 import * as iconButtonStyles from '../common/IconButton.css'
 import { label as workingTreeLabel } from '../common/WorkingTree.css'
 import { labelWithStats } from '../tree/sharedTree.css'
+import { AgentTreeStatusContext } from './AgentTreeStatus'
 import { WorkspaceTabTree } from './WorkspaceTabTree'
 import { buildTree } from './workspaceTabTree.model'
 
@@ -148,6 +149,18 @@ function reasonOf(el: Element): string {
 }
 
 describe('WorkspaceTabTree interactions', () => {
+  it('names removal of a linked chat without closing its original conversation', () => {
+    const tab = { ...makeTab(TabType.NATIVE_CONVERSATION, 'native-one', 'Linked chat'), agentProvider: AgentProvider.CODEX }
+    const onClose = vi.fn()
+    renderTree(() => <WorkspaceTabTree repoGitStore={repoGitStore} tabs={[tab]} activeTabKey={null} onTabClick={() => {}} tabItemOps={{ onClose }} isLocalWorkerFn={() => false} workspaceId="ws-1" />)
+    expect(screen.getByTestId('workspace-tab-close')).toHaveAccessibleName('Remove from LeapMux')
+    expect(screen.getByTestId('linked-chat-badge')).toHaveTextContent('Linked')
+    const menu = within(screen.getByTestId('tab-tree-leaf-menu'))
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Remove from LeapMux', hidden: true }))
+    expect(onClose).toHaveBeenCalledExactlyOnceWith(tab)
+    expect(menu.queryByRole('menuitem', { name: 'Close', hidden: true })).not.toBeInTheDocument()
+  })
+
   it('uses a 24px close button with a 14px icon', () => {
     renderTree(() => (
       <WorkspaceTabTree
@@ -1188,6 +1201,45 @@ describe('WorkspaceTabTree interactions', () => {
     expect(screen.getAllByTestId('tab-menu-close')).toHaveLength(2)
   })
 
+  it('moves the selected live tab through its context menu', () => {
+    const onMove = vi.fn()
+    const tab = makeTab(TabType.AGENT, 'move-agent', 'Agent Move')
+    renderTree(() => (
+      <WorkspaceTabTree
+        repoGitStore={repoGitStore}
+        tabs={[tab]}
+        activeTabKey={null}
+        onTabClick={() => {}}
+        isLocalWorkerFn={() => false}
+        workspaceId="ws-1"
+        tabItemOps={{ moveTargets: () => [{ id: 'ws-2', label: 'Project B' }], onMove }}
+      />
+    ))
+
+    expect(onMove).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('sidebar-tab-drag-handle')).not.toBeInTheDocument()
+    fireEvent.contextMenu(screen.getByTestId('tab-tree-leaf'))
+    fireEvent.click(screen.getByTestId('tab-menu-move'))
+    fireEvent.click(screen.getByText('Project B'))
+    expect(onMove).toHaveBeenCalledExactlyOnceWith(tab, 'ws-2')
+  })
+
+  it('offers no move for an archived chat', () => {
+    renderTree(() => (
+      <WorkspaceTabTree
+        repoGitStore={repoGitStore}
+        tabs={[makeTab(TabType.AGENT, 'archived-agent')]}
+        activeTabKey={null}
+        onTabClick={() => {}}
+        isLocalWorkerFn={() => false}
+        workspaceId="ws-1"
+        archived
+        tabItemOps={{ moveTargets: () => [{ id: 'ws-2', label: 'Project B' }], onMove: vi.fn() }}
+      />
+    ))
+    expect(screen.queryByTestId('tab-menu-move')).not.toBeInTheDocument()
+  })
+
   it('dispatches with each row’s own identity (closure capture, not shared state)', async () => {
     // Per-row menus close over their row's branch data via the <For>
     // loop's closure. Picking the same action from different rows must
@@ -1671,21 +1723,17 @@ describe('WorkspaceTabTree interactions', () => {
       expect(leaves[0]?.textContent).toContain('Agent Two')
     })
 
-    /**
-     * `TabDragContext` renders the sidebar drag overlay from the `data` object
-     * the row handed solid-dnd, and reads it when the drag STARTS. The row now
-     * survives every metadata-only change, so a captured string would pin the
-     * overlay to the title the tab had when its row mounted.
-     */
-    it('reports the live title to the drag overlay', () => {
+    it('keeps the row and live title without registering a draggable', () => {
       draggableData.length = 0
       const setTabs = renderTabs([bareAgent])
-      expect(draggableData).toHaveLength(1)
-      expect(draggableData[0]?.title).toBe('Agent')
+      const row = screen.getByTestId('tab-tree-leaf')
+      expect(draggableData).toHaveLength(0)
+      expect(screen.queryByTestId('sidebar-tab-drag-handle')).not.toBeInTheDocument()
 
       setTabs([{ ...bareAgent, title: 'Agent Kiwi' } as Tab])
-      expect(draggableData, 'the row must not have remounted').toHaveLength(1)
-      expect(draggableData[0]?.title).toBe('Agent Kiwi')
+      expect(screen.getByTestId('tab-tree-leaf')).toBe(row)
+      expect(row).toHaveTextContent('Agent Kiwi')
+      expect(draggableData).toHaveLength(0)
     })
 
     /**
@@ -2163,5 +2211,34 @@ describe('WorkspaceTabTree activity marker', () => {
     setTabs([])
 
     expect(screen.queryByTestId(MARKER)).not.toBeInTheDocument()
+  })
+})
+
+describe('WorkspaceTabTree agent activity', () => {
+  it('updates the agent label in place without labeling terminals or changing row selection', () => {
+    const [status, setStatus] = createSignal<'working' | 'waiting' | 'idle'>('working')
+    const onSelect = vi.fn()
+    renderTree(() => (
+      <AgentTreeStatusContext.Provider value={status}>
+        <WorkspaceTabTree
+          repoGitStore={repoGitStore}
+          tabs={[makeTab(TabType.AGENT, 'live-agent', 'Live agent'), makeTab(TabType.TERMINAL, 'terminal', 'Terminal')]}
+          activeTabKey={null}
+          onTabClick={onSelect}
+          isLocalWorkerFn={() => false}
+          workspaceId="ws-1"
+        />
+      </AgentTreeStatusContext.Provider>
+    ))
+    const badge = screen.getByTestId('agent-tree-status')
+    expect(badge).toHaveTextContent('Running')
+    const row = badge.closest('[data-testid="tab-tree-leaf"]')!
+    expect(row).toHaveAttribute('data-tab-id', 'live-agent')
+    setStatus('waiting')
+    expect(screen.getByTestId('agent-tree-status')).toBe(badge)
+    expect(badge).toHaveTextContent('Waiting')
+    setStatus('idle')
+    expect(badge).toHaveTextContent('Idle')
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })

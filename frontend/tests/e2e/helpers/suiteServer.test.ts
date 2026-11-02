@@ -1,11 +1,12 @@
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { Server } from 'node:net'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { withCleanup } from './cleanup'
-import { ancestorInstructionsReport, refusedHostsReport, startSuiteServer } from './suiteServer'
+import { ancestorInstructionsReport, refusedHostsReport, startSuiteServer, suiteLocalListen } from './suiteServer'
 
 /**
  * Every E2E run tests successful suite startup.
@@ -34,6 +35,21 @@ function scratchRoot(): string {
 // of 5 seconds fails a correct run on a busy machine. The limit is generous because no
 // case waits on it: a case ends as soon as its start settles.
 const START_SUITE_SERVER_TEST_TIMEOUT_MS = 60_000
+
+describe('suiteLocalListen', () => {
+  it('gives each Windows suite a distinct named pipe instead of a Unix socket or shared default', () => {
+    const first = suiteLocalListen(join(tmpdir(), 'lm-e2e-sock-first'), 'win32')
+    const second = suiteLocalListen(join(tmpdir(), 'lm-e2e-sock-second'), 'win32')
+    expect(first).toBe('npipe:leapmux-e2e-lm-e2e-sock-first')
+    expect(second).toBe('npipe:leapmux-e2e-lm-e2e-sock-second')
+    expect(first).not.toBe(second)
+  })
+
+  it.each(['linux', 'darwin'] as const)('keeps the dedicated short Unix socket for %s', (platform) => {
+    const directory = join(tmpdir(), 'lm-e2e-sock-example')
+    expect(suiteLocalListen(directory, platform)).toBe(`unix:${join(directory, 'hub.sock')}`)
+  })
+})
 
 describe('startSuiteServer', { timeout: START_SUITE_SERVER_TEST_TIMEOUT_MS }, () => {
   it('rejects when the binary does not exist', async () => {

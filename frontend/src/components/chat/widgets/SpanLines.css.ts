@@ -16,6 +16,7 @@ import {
   CONTAINER_PAD_RIGHT,
   LINE_THICKNESS,
   SPAN_BRIDGE_GAP_VAR,
+  SPAN_COLUMN_SCALE_VAR,
 } from './SpanLines.geometry'
 
 // ─── Span Column Geometry ───────────────────────────────────────────
@@ -45,6 +46,10 @@ import {
 // Geometry constants live in SpanLines.geometry.ts so runtime helpers can
 // share the same math without exporting functions from this CSS module.
 
+function scaledHorizontal(value: number): string {
+  return `calc(${value}px * var(${SPAN_COLUMN_SCALE_VAR}, 1))`
+}
+
 // ─── Styles ─────────────────────────────────────────────────────────
 
 /**
@@ -56,6 +61,7 @@ import {
  * precedence the band already has: the rails stay legible on top.
  */
 export const spanLinesContainer = style({
+  boxSizing: 'border-box',
   display: 'flex',
   flexDirection: 'row',
   alignItems: 'stretch',
@@ -67,8 +73,8 @@ export const spanLinesContainer = style({
 
 /** Base style for a single span line column. */
 const spanLineColumnBase = style({
-  width: `${COL_WIDTH}px`,
-  marginLeft: `${-COL_OVERLAP}px`,
+  width: scaledHorizontal(COL_WIDTH),
+  marginLeft: scaledHorizontal(-COL_OVERLAP),
   position: 'relative',
   flexShrink: 0,
 })
@@ -107,7 +113,7 @@ export const spanLineConnector = style([spanLineColumnBase, {
     position: 'absolute',
     left: '50%',
     top: `${CONNECTOR_Y}px`,
-    right: `${CONNECTOR_GAP}px`,
+    right: scaledHorizontal(CONNECTOR_GAP),
     height: `${LINE_THICKNESS}px`,
     backgroundColor: 'var(--span-line-color, var(--border))',
   },
@@ -130,7 +136,7 @@ export const spanLineConnectorEnd = style([spanLineColumnBase, {
     position: 'absolute',
     left: '50%',
     top: `${CONNECTOR_Y}px`,
-    right: `${CONNECTOR_GAP}px`,
+    right: scaledHorizontal(CONNECTOR_GAP),
     height: `${LINE_THICKNESS}px`,
     backgroundColor: 'var(--span-line-color, var(--border))',
   },
@@ -142,8 +148,8 @@ export const spanLineConnectorEnd = style([spanLineColumnBase, {
  */
 function passthroughGradient(rightEnd: string) {
   const c = 'var(--span-passthrough-color, var(--border))'
-  const gapL = `calc(50% - ${BRIDGE_RADIUS - BRIDGE_SEAM}px)`
-  const gapR = `calc(50% + ${BRIDGE_RADIUS - BRIDGE_SEAM}px)`
+  const gapL = `calc(50% - ${scaledHorizontal(BRIDGE_RADIUS - BRIDGE_SEAM)})`
+  const gapR = `calc(50% + ${scaledHorizontal(BRIDGE_RADIUS - BRIDGE_SEAM)})`
   return `linear-gradient(to right, ${c} 0, ${c} ${gapL}, transparent ${gapL}, transparent ${gapR}, ${c} ${gapR}, ${c} ${rightEnd}${rightEnd !== '100%' ? `, transparent ${rightEnd}` : ''})`
 }
 
@@ -169,14 +175,14 @@ export const spanLineActivePassthrough = style([spanLineColumnBase, {
     boxSizing: 'border-box',
     left: '50%',
     top: `${BRIDGE_TOP}px`,
-    width: `${BRIDGE_DIAMETER}px`,
+    width: scaledHorizontal(BRIDGE_DIAMETER),
     height: `${BRIDGE_BOTTOM - BRIDGE_TOP + BRIDGE_SEAM}px`,
     transform: 'translateX(-50%)',
     borderLeft: `${LINE_THICKNESS}px solid var(--span-passthrough-color, var(--border))`,
     borderRight: `${LINE_THICKNESS}px solid var(--span-passthrough-color, var(--border))`,
     borderTop: `${LINE_THICKNESS}px solid var(--span-passthrough-color, var(--border))`,
     borderBottom: 'none',
-    borderRadius: `${BRIDGE_RADIUS}px ${BRIDGE_RADIUS}px 0 0`,
+    borderRadius: `${scaledHorizontal(BRIDGE_RADIUS)} ${scaledHorizontal(BRIDGE_RADIUS)} 0 0`,
   },
 }])
 
@@ -195,10 +201,10 @@ export const spanLinePassthrough = style([spanLineColumnBase, {
 
 /** Shorten the rightmost passthrough column so it doesn't touch the message content. */
 globalStyle(`${spanLineActivePassthrough}:last-child`, {
-  backgroundImage: passthroughGradient(`calc(100% - ${CONNECTOR_GAP}px)`),
+  backgroundImage: passthroughGradient(`calc(100% - ${scaledHorizontal(CONNECTOR_GAP)})`),
 })
 globalStyle(`${spanLinePassthrough}:last-child::before`, {
-  right: `${CONNECTOR_GAP}px`,
+  right: scaledHorizontal(CONNECTOR_GAP),
 })
 
 /**

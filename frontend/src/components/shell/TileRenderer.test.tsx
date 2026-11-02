@@ -1,3 +1,4 @@
+import type { NativeAgentConversationContentProps } from '~/components/dashboard/NativeAgentTranscriptViewer'
 import type { ImperativeRef } from '~/lib/imperativeRef'
 import type { createFloatingWindowStore } from '~/stores/floatingWindow.store'
 import type { Tab } from '~/stores/tab.types'
@@ -57,6 +58,20 @@ vi.mock('~/components/fileviewer/FileViewer', () => ({
   ),
 }))
 
+vi.mock('~/components/dashboard/NativeAgentTranscriptViewer', () => ({
+  NativeAgentConversationContent: (props: NativeAgentConversationContentProps) => (
+    <div
+      data-testid="native-conversation-pane"
+      data-source-worker={props.conversation.workerId}
+      data-source-name={props.conversation.workerName}
+      data-session={props.conversation.sessionId}
+      data-online={String(props.online)}
+      data-active={String(props.active)}
+      data-readonly={String(props.readOnly)}
+    />
+  ),
+}))
+
 /**
  * The two rename RPCs, as spies. The rest of the module stays REAL: this tree
  * calls `workerRpc` from many places, and a whole-module replacement would
@@ -94,6 +109,7 @@ type RendererSetup = ReturnType<typeof createTestTabStores> & {
   addAgent: (id: string, tileId: string, title?: string) => Tab
   /** Same, for a FILE tab. */
   addFile: (id: string, tileId: string) => Tab
+  addNativeConversation: (id: string, tileId: string) => Tab
 }
 
 interface RenderRendererOptions {
@@ -113,6 +129,11 @@ interface RenderRendererOptions {
   withComposer?: boolean
   /** The agent operation that records an approval of a denied auto-review. */
   handleApproveAutoReviewDenial?: (agentId: string, messageId: string, reviewId: string) => Promise<void>
+  archived?: boolean
+  nativeConversation?: {
+    isWorkerKnownOnline: (workerId: string) => boolean
+    workerName: (workerId: string) => string | undefined
+  }
 }
 
 function renderRenderer(s: RendererSetup, focusedTileId: string, options: RenderRendererOptions = {}) {
@@ -172,7 +193,7 @@ function renderRenderer(s: RendererSetup, focusedTileId: string, options: Render
       },
       workspace: {
         isActiveWorkspaceMutatable: () => true,
-        isActiveWorkspaceArchived: () => false,
+        isActiveWorkspaceArchived: () => options.archived ?? false,
         activeWorkspace: () => ({ id: s.workspaceId }),
         getCurrentTabContext: () => ({ workerId: 'worker-1', workingDir: '/repo', homeDir: '/home/me', gitToplevel: '/repo' }),
         getMruAgentContext,
@@ -205,6 +226,7 @@ function renderRenderer(s: RendererSetup, focusedTileId: string, options: Render
         store: s.floatingWindowStore,
       },
       settingsLoading: { loading: () => false } as any,
+      ...(options.nativeConversation ? { nativeConversation: options.nativeConversation } : {}),
     })
     options.onRenderer?.(r)
     return (
@@ -261,6 +283,13 @@ function createSetup(existingHarness?: ReturnType<typeof installTestBridge>): Re
         stores.selection.setActiveById(TabType.FILE, id)
         return stores.view.getById(TabType.FILE, id)!
       },
+      addNativeConversation(id, tileId) {
+        nextPosition += 1
+        emitAddTab({ type: TabType.NATIVE_CONVERSATION, id, tileId, position: `p${nextPosition}`, workerId: 'worker-1' })
+        stores.metadata.patch(id, { title: 'Linked generated chat', workingDir: '/destination/repo', sourceWorkerId: 'source-pc', agentProvider: AgentProvider.CODEX, sessionId: 'generated-native-session', displayName: 'Generated source chat' })
+        stores.selection.setActiveById(TabType.NATIVE_CONVERSATION, id)
+        return stores.view.getNativeConversationTab(id)!
+      },
     }
   })
 }
@@ -281,6 +310,48 @@ describe('message contexts in tiles', () => {
       s.addAgent('another-inactive-agent', 'other-root')
       expect(subscribe.mock.calls.map(([agentId]) => agentId)).toEqual(['active-agent'])
     })
+  })
+})
+
+describe('native conversation panes in tiles', () => {
+  it('routes history and control to the original computer instead of the destination worktree', () => {
+    const harness = installTestBridge()
+    const s = createSetup(harness)
+    s.addNativeConversation('native-one', harness.rootTileId)
+    const online = vi.fn((id: string) => id === 'source-pc')
+    renderRenderer(s, harness.rootTileId, { nativeConversation: { isWorkerKnownOnline: online, workerName: id => id === 'source-pc' ? 'Source PC' : 'Destination PC' } })
+    const pane = screen.getByTestId('native-conversation-pane')
+    expect(pane).toHaveAttribute('data-source-worker', 'source-pc')
+    expect(pane).toHaveAttribute('data-source-name', 'Source PC')
+    expect(pane).toHaveAttribute('data-session', 'generated-native-session')
+    expect(pane).toHaveAttribute('data-online', 'true')
+    expect(online).not.toHaveBeenCalledWith('worker-1')
+  })
+
+  it('retains the pane across metadata updates and pauses it when another tab is selected', () => {
+    const harness = installTestBridge()
+    const s = createSetup(harness)
+    s.addNativeConversation('native-one', harness.rootTileId)
+    renderRenderer(s, harness.rootTileId, { nativeConversation: { isWorkerKnownOnline: () => false, workerName: () => 'Source PC' } })
+    const pane = screen.getByTestId('native-conversation-pane')
+    expect(pane).toHaveAttribute('data-active', 'true')
+    expect(pane).toHaveAttribute('data-online', 'false')
+    s.metadata.patch('native-one', { title: 'Renamed link', hasNotification: true })
+    expect(screen.getByTestId('native-conversation-pane')).toBe(pane)
+    s.addTerminal('terminal-one', harness.rootTileId)
+    expect(screen.getByTestId('native-conversation-pane')).toBe(pane)
+    expect(pane).toHaveAttribute('data-active', 'false')
+    s.selection.setActiveById(TabType.NATIVE_CONVERSATION, 'native-one')
+    expect(screen.getByTestId('native-conversation-pane')).toBe(pane)
+    expect(pane).toHaveAttribute('data-active', 'true')
+  })
+
+  it('keeps an archived linked conversation read only', () => {
+    const harness = installTestBridge()
+    const s = createSetup(harness)
+    s.addNativeConversation('native-one', harness.rootTileId)
+    renderRenderer(s, harness.rootTileId, { archived: true, nativeConversation: { isWorkerKnownOnline: () => true, workerName: () => 'Source PC' } })
+    expect(screen.getByTestId('native-conversation-pane')).toHaveAttribute('data-readonly', 'true')
   })
 })
 

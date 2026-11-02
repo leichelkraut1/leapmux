@@ -25,6 +25,8 @@ vi.mock('./nativeToolExecution', async importOriginal => ({
 
 vi.mock('./ui', async importOriginal => ({
   ...await importOriginal<typeof import('./ui')>(),
+  revealActivityTarget: vi.fn(async () => {}),
+  expandActivityGroups: vi.fn(async () => {}),
   sendMessage: vi.fn(async (_page: unknown, text: string) => {
     browser.events.push(`send:${text}`)
   }),
