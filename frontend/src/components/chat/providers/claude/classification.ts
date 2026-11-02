@@ -8,6 +8,7 @@ import { isNotificationThreadWrapper } from '../../messageUtils'
 import { classifyNotifications } from '../../notificationClassification'
 import { claudeNotificationEntry, claudeReadsSystemSubtype, claudeSystemSubtypeHidden } from './extractors/notification'
 import { claudeExitPlanText } from './extractors/plan'
+import { claudeNativeMetadata } from './nativeMetadata'
 import { canonicalClaudeToolName, claudeToolRowHidden } from './toolKinds'
 
 /**
@@ -167,6 +168,9 @@ export function classifyClaudeCodeMessage(
 
   if (!parentObject)
     return { kind: 'unknown' }
+
+  if (claudeNativeMetadata(parentObject))
+    return { kind: 'hidden' }
 
   const type = pickString(parentObject, 'type')
 

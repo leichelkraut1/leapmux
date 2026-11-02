@@ -8,6 +8,7 @@ import { NATIVE_CONVERSATION_FORMAT } from '~/generated/contracts/native-convers
 import { AgentChatMessageSchema, AgentProvider, ContentCompression, MessageSource } from '~/generated/proto/leapmux/v1/agent_pb'
 import { parseImageBlock } from '~/lib/imageBlocks'
 import { isObject, pickObject, pickString } from '~/lib/jsonPick'
+import { codexNativeEventItem } from './nativeEventItems'
 
 interface NativeEntry {
   record: NativeConversationRecord
@@ -49,9 +50,11 @@ function parsedEntries(records: readonly NativeConversationRecord[], sessionId: 
     const payload = pickObject(object, 'payload') ?? {}
     if (object.type === 'session_meta' && payload.id !== sessionId)
       return []
+    if (object.type === 'event_msg' && payload.thread_id !== undefined && payload.thread_id !== sessionId)
+      return []
     if (object.type === 'turn_context')
       turnId = pickString(payload, 'turn_id')
-    else if (object.type === 'event_msg' && ['task_started', 'turn_started'].includes(pickString(payload, 'type')))
+    else if (object.type === 'event_msg' && typeof payload.turn_id === 'string')
       turnId = pickString(payload, 'turn_id') || turnId
     entries.push({ record, envelope: object, payload, turnId, index: entries.length })
   }
@@ -97,28 +100,45 @@ export function codexExternalUserAttachments(payload: Record<string, unknown> | 
   })
 }
 
-function mirrorText(entry: NativeEntry): { role: string, text: string } | null {
-  if (entry.envelope.type !== 'event_msg' || typeof entry.payload.message !== 'string')
+function mirrorText(entry: NativeEntry): { role: string, text: string, rank: number } | null {
+  if (entry.envelope.type === 'response_item' && entry.payload.type === 'message' && ['user', 'assistant'].includes(pickString(entry.payload, 'role'))) {
+    const content = contentText(entry.payload)
+    return content.unsupported || content.images.length ? null : { role: pickString(entry.payload, 'role'), text: content.text, rank: 3 }
+  }
+  if (entry.envelope.type !== 'event_msg')
     return null
-  if (entry.payload.type === 'user_message')
-    return { role: 'user', text: entry.payload.message }
-  if (entry.payload.type === 'agent_message')
-    return { role: 'assistant', text: entry.payload.message }
+  if (typeof entry.payload.message === 'string') {
+    if (entry.payload.type === 'user_message')
+      return { role: 'user', text: entry.payload.message, rank: 1 }
+    if (entry.payload.type === 'agent_message')
+      return { role: 'assistant', text: entry.payload.message, rank: 1 }
+  }
+  const item = codexNativeEventItem(entry.payload)
+  if (item?.type === CODEX_ITEM.AgentMessage)
+    return { role: 'assistant', text: pickString(item, 'text'), rank: entry.payload.type === 'item_completed' ? 2 : 0 }
+  const nativeItem = pickObject(entry.payload, 'item')
+  if (['item_started', 'item_completed'].includes(pickString(entry.payload, 'type')) && nativeItem?.type === 'UserMessage') {
+    const content = contentText(nativeItem)
+    return content.unsupported || content.images.length ? null : { role: 'user', text: content.text, rank: entry.payload.type === 'item_completed' ? 2 : 0 }
+  }
   return null
 }
 
-function mirroredByResponse(entry: NativeEntry, entries: readonly NativeEntry[]): boolean {
+function mirroredByMessage(entry: NativeEntry, entries: readonly NativeEntry[]): boolean {
   const mirror = mirrorText(entry)
   if (!mirror)
     return false
+  if (entry.envelope.type === 'event_msg' && Array.isArray(entry.payload.images) && entry.payload.images.length)
+    return false
   return entries.some((candidate) => {
-    if (candidate.envelope.type !== 'response_item' || candidate.payload.type !== 'message' || candidate.payload.role !== mirror.role)
+    const other = mirrorText(candidate)
+    if (!other || other.rank <= mirror.rank || other.role !== mirror.role)
       return false
     if (entry.turnId && candidate.turnId && entry.turnId !== candidate.turnId)
       return false
     if ((!entry.turnId || !candidate.turnId) && Math.abs(entry.index - candidate.index) > 3)
       return false
-    return contentText(candidate.payload).text === mirror.text
+    return other.text === mirror.text
   })
 }
 
@@ -190,7 +210,7 @@ export function projectCodexNativeConversation(
     // These records describe the store/configuration, not a conversation item.
     if (envelope.type === 'session_meta' || envelope.type === 'turn_context')
       continue
-    if (mirroredByResponse(entry, entries))
+    if (mirroredByMessage(entry, entries))
       continue
     if (envelope.type === 'response_item') {
       const type = pickString(payload, 'type')
@@ -215,6 +235,13 @@ export function projectCodexNativeConversation(
           push({ item: { ...payload, type: CODEX_ITEM.Reasoning, summary: text, content: [] } })
           continue
         }
+        // An encrypted-only reasoning item contains no readable chat text.
+        // Keep the native bytes, but use the same hidden empty-thinking row as
+        // managed sessions instead of reporting an unsupported message.
+        if (typeof payload.encrypted_content === 'string' && summary.length === 0 && content.length === 0) {
+          push({ item: { ...payload, type: CODEX_ITEM.Reasoning, summary: [], content: [] } })
+          continue
+        }
       }
       const callId = pickString(payload, 'call_id')
       if (callId && ['function_call', 'function_call_output', 'custom_tool_call', 'custom_tool_call_output'].includes(type)) {
@@ -237,11 +264,45 @@ export function projectCodexNativeConversation(
           push(undefined, MessageSource.AGENT, 1)
         continue
       }
+      const item = codexNativeEventItem(payload)
+      if (item) {
+        push({
+          item,
+          threadId: sessionId,
+          turnId: entry.turnId,
+          ...(typeof payload.started_at_ms === 'number' ? { startedAtMs: payload.started_at_ms } : {}),
+          ...(typeof payload.completed_at_ms === 'number' ? { completedAtMs: payload.completed_at_ms } : {}),
+        }, MessageSource.AGENT, 0, pickString(item, 'id'), pickString(item, 'type'))
+        continue
+      }
+      const nativeItem = pickObject(payload, 'item')
+      if (['item_started', 'item_completed'].includes(pickString(payload, 'type')) && nativeItem?.type === 'UserMessage') {
+        const content = contentText(nativeItem)
+        const displayed = Boolean(content.text) || content.images.length > 0
+        if (displayed)
+          push({ content: content.text, nativeHistory: true, attachments: content.images.map(image => ({ filename: 'Attached image', mime_type: image.mimeType, image: { url: image.url } })) }, MessageSource.USER)
+        if (content.unsupported || !displayed)
+          push(undefined, MessageSource.AGENT, displayed ? 1 : 0)
+        continue
+      }
       if (payload.type === 'agent_reasoning' && typeof payload.text === 'string') {
         push({ item: { type: CODEX_ITEM.Reasoning, text: payload.text } })
         continue
       }
-      if (payload.type === 'token_count')
+      if (['task_complete', 'turn_complete', 'turn_aborted'].includes(pickString(payload, 'type'))) {
+        const error = pickObject(payload, 'error')
+        const lastText = pickString(payload, 'last_agent_message')
+        // Older rollouts can have only the completion's final answer in a loaded
+        // window. Keep it unless a loaded authored message proves it is a mirror.
+        if (lastText && !entries.some((candidate) => {
+          const text = mirrorText(candidate)
+          return text?.role === 'assistant' && text.text === lastText && candidate.turnId === entry.turnId
+        }))
+          push({ item: { type: CODEX_ITEM.AgentMessage, id: entry.record.id, text: lastText } })
+        push({ turn: { id: entry.turnId, status: error ? 'failed' : payload.type === 'turn_aborted' ? 'interrupted' : 'completed', ...(error ? { error } : {}) } }, MessageSource.AGENT, lastText ? 1 : 0)
+        continue
+      }
+      if (['token_count', 'task_started', 'turn_started'].includes(pickString(payload, 'type')))
         continue
     }
     push()
