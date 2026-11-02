@@ -47,8 +47,8 @@ export const AttachNativeConversationDialog: Component<AttachNativeConversationD
   const worktrees = createMemo(() => props.destinations.filter(destination => destination.workspaceId === workspaceId()))
   const destination = createMemo(() => worktrees().find(item => item.id === destinationId()))
   const filteredWorktrees = createMemo(() => {
-    const query = filter().trim().toLocaleLowerCase()
-    return worktrees().filter(item => !query || `${item.label} ${item.branchName ?? ''} ${item.workingDir} ${item.workerName}`.toLocaleLowerCase().includes(query))
+    const staticQuery = filter().trim().toLocaleLowerCase()
+    return worktrees().filter(item => !staticQuery || `${item.label} ${item.branchName ?? ''} ${item.workingDir} ${item.workerName}`.toLocaleLowerCase().includes(staticQuery))
   })
   const selectWorkspace = (id: string) => {
     setWorkspaceId(id)
@@ -190,7 +190,7 @@ export const AttachNativeConversationDialog: Component<AttachNativeConversationD
           <Show when={props.error}>{error => <p class={styles.error} role="alert">{error()}</p>}</Show>
         </section>
         <footer class={actionsFooter}>
-          <button type="button" class="outline" disabled={props.busy} onClick={props.onClose}>Cancel</button>
+          <button type="button" class="outline" disabled={props.busy} onClick={() => props.onClose()}>Cancel</button>
           <button type="submit" disabled={!!props.busy || !destination() || !!destination()?.disabledReason}>
             {props.busy ? 'Adding…' : 'Add to worktree'}
           </button>

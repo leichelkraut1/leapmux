@@ -80,7 +80,7 @@ describe('AttachNativeConversationDialog', () => {
     const [destinations, setDestinations] = createSignal([first, { ...first, id: 'fixture-other', workingDir: '/generated/other', label: 'other worktree' }])
     const onConfirm = vi.fn()
     render(() => <AttachNativeConversationDialog conversation={conversation} destinations={destinations()} onConfirm={onConfirm} onClose={() => {}} />)
-    setDestinations(destinations().filter(item => item.id !== first.id))
+    setDestinations(current => current.filter(item => item.id !== first.id))
     expect(screen.getByRole('status')).toHaveTextContent('The selected worktree is no longer available.')
     expect(screen.getByRole('button', { name: 'Add to worktree' })).toBeDisabled()
     fireEvent.submit(screen.getByRole('button', { name: 'Add to worktree' }).closest('form')!)

@@ -1,7 +1,7 @@
 import type { Component } from 'solid-js'
 import type { ChatScrollApi } from '~/components/chat/ChatView'
 import type { NativeConversationRef } from '~/components/chat/nativeConversation'
-import { createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, Show } from 'solid-js'
+import { createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, Show, untrack } from 'solid-js'
 import { ChatView } from '~/components/chat/ChatView'
 import { nativeConversationKey } from '~/components/chat/nativeConversation'
 import { PromptCacheNotice } from '~/components/chat/PromptCacheNotice'
@@ -49,15 +49,15 @@ export const NativeAgentConversationContent: Component<NativeAgentConversationCo
   const restoreDraft = () => {
     const generation = ++draftGeneration
     const revision = ++draftRevision
-    const key = draftKey()
+    const staticDraftKey = untrack(draftKey)
     setDraft('')
-    void loadDraft(key).then((saved) => {
-      if (!disposed && generation === draftGeneration && revision === draftRevision && key === draftKey())
+    void loadDraft(staticDraftKey).then((saved) => {
+      if (!disposed && generation === draftGeneration && revision === draftRevision && staticDraftKey === untrack(draftKey))
         setDraft(saved.content)
     }).catch(() => {})
   }
   createEffect(on(() => nativeConversationKey(props.conversation), restoreDraft))
-  const unsubscribeAccount = onStorageAccountChange(restoreDraft)
+  const unsubscribeAccount = onStorageAccountChange(() => untrack(restoreDraft))
   onCleanup(() => {
     disposed = true
     draftGeneration++
@@ -337,9 +337,9 @@ export const NativeAgentConversationContent: Component<NativeAgentConversationCo
 export const NativeAgentTranscriptViewer: Component<Omit<NativeAgentConversationContentProps, 'embedded' | 'onTitleChange'> & {
   onClose: () => void
 }> = (props) => {
-  const [title, setTitle] = createSignal(props.conversation.sessionId)
+  const [title, setTitle] = createSignal('')
   return (
-    <Dialog title={title()} huge tall data-testid="native-agent-transcript" onClose={props.onClose}>
+    <Dialog title={title() || props.conversation.displayName || props.conversation.sessionId} huge tall data-testid="native-agent-transcript" onClose={props.onClose}>
       <NativeAgentConversationContent {...props} onTitleChange={setTitle} />
     </Dialog>
   )
