@@ -145,9 +145,12 @@ describe('useShortcuts', () => {
     executeCommand('app.scrollActiveTabPageUp')
     activeTabType = TabType.TERMINAL
     executeCommand('app.scrollActiveTabPageDown')
+    activeTabType = TabType.NATIVE_CONVERSATION
+    executeCommand('app.scrollActiveTabPageUp')
 
     expect(props.scrollFocusedTabPage).toHaveBeenNthCalledWith(1, -1)
     expect(props.scrollFocusedTabPage).toHaveBeenNthCalledWith(2, 1)
+    expect(props.scrollFocusedTabPage).toHaveBeenNthCalledWith(3, -1)
   })
 
   it('routes terminal write commands through the focused terminal dispatcher', () => {
@@ -184,7 +187,7 @@ describe('useShortcuts', () => {
     expect(props.tabOps.handleTabClose).toHaveBeenCalledWith(tab)
   })
 
-  it.each([TabType.AGENT, TabType.TERMINAL, TabType.FILE, TabType.IMAGE])(
+  it.each([TabType.AGENT, TabType.TERMINAL, TabType.FILE, TabType.IMAGE, TabType.NATIVE_CONVERSATION])(
     'refuses to close tab type %s in an archived workspace',
     (type) => {
       const props = makeProps() as any
@@ -522,6 +525,7 @@ describe('useShortcuts', () => {
       ['a terminal tab', { type: TabType.TERMINAL, id: 't1', workerId: 'w1', workingDir: '/repo' }],
       ['a file viewer', { type: TabType.FILE, id: 'f1', workerId: 'w1', workingDir: '/repo' }],
       ['an image viewer', { type: TabType.IMAGE, id: 'i1', workerId: 'w1', workingDir: '/repo' }],
+      ['an outside chat viewer', { type: TabType.NATIVE_CONVERSATION, id: 'n1', workerId: 'destination-pc', sourceWorkerId: 'source-pc', workingDir: '/destination/worktree' }],
     ])('toggles the panel from %s too', (_label, tab) => {
       const panel = run(quakeProps(tab), 'terminal.toggleQuake')
       expect(panel.toggle).toHaveBeenCalledWith(tab)

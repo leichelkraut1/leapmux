@@ -17,7 +17,7 @@ import { repoKey } from './repoGit'
 // failed a 5s test on a cold Vite cache. `./tab.helpers` already pulls
 // `./repoGit` into the static graph, so nothing here forces the dynamic form.
 import { createRepoGitStore } from './repoGit.store'
-import { agentTabSupportsInterrupt, agentTabToInfo, canCloseTab, canRenameTab, deriveOptionGroupTabFields, descendantAgentTabs, isSameRepo, isSteerableAgentTab, isSubagentTab, isTabReadyForGitStatus, keepLiveTerminalStatus, LIVE_CATALOG_FIELDS, LIVE_STATUS_FIELDS, mruSteerableAgentTab, openedAgentTabFields, openedTerminalMetadata, planOptimisticRepoGit, protoToAgentTabFields, resolveOptimisticGitInfo, rootAgentIdFor, setOptionValue, tabDisplayLabel, tabTooltipShowWhen, tabTooltipText, TERMINAL_LIVE_STATUS_FIELDS, terminalMetadata, terminalProgressBarProps, withoutLiveCatalogFields, withoutLiveStatusFields } from './tab.helpers'
+import { agentTabSupportsInterrupt, agentTabToInfo, canCloseTab, canRenameTab, deriveOptionGroupTabFields, descendantAgentTabs, isSameRepo, isSteerableAgentTab, isSubagentTab, isTabReadyForGitStatus, keepLiveTerminalStatus, LIVE_CATALOG_FIELDS, LIVE_STATUS_FIELDS, mruSteerableAgentTab, openedAgentTabFields, openedTerminalMetadata, parseTabKey, planOptimisticRepoGit, protoToAgentTabFields, resolveOptimisticGitInfo, rootAgentIdFor, setOptionValue, tabDisplayLabel, tabKey, tabTooltipShowWhen, tabTooltipText, TERMINAL_LIVE_STATUS_FIELDS, terminalMetadata, terminalProgressBarProps, withoutLiveCatalogFields, withoutLiveStatusFields } from './tab.helpers'
 import { createTabMetadataStore } from './tabMetadata.store'
 
 // `tabDisplayLabel` is the shared "what should we render in the tab strip
@@ -36,11 +36,21 @@ function terminal(overrides: Partial<Extract<Tab, { type: TabType.TERMINAL }>> =
   return { type: TabType.TERMINAL, id: 't1', workspaceId: 'ws-1', ...overrides }
 }
 
+function nativeConversation(overrides: Partial<Extract<Tab, { type: TabType.NATIVE_CONVERSATION }>> = {}): Tab {
+  return { type: TabType.NATIVE_CONVERSATION, id: 'native-1', workspaceId: 'ws-1', ...overrides }
+}
+
 describe('tabDisplayLabel', () => {
   it('prefers an explicit title over every fallback', () => {
     expect(tabDisplayLabel(file({ title: 'Renamed', filePath: '/repo/notes.txt' }))).toBe('Renamed')
     expect(tabDisplayLabel(agent({ title: 'My Agent' }))).toBe('My Agent')
     expect(tabDisplayLabel(terminal({ title: 'zsh' }))).toBe('zsh')
+    expect(tabDisplayLabel(nativeConversation({ title: 'Saved title', displayName: 'Native title' }))).toBe('Saved title')
+  })
+
+  it('names an outside conversation from its payload and keeps a chat placeholder before hydration', () => {
+    expect(tabDisplayLabel(nativeConversation({ displayName: 'Generated outside chat' }))).toBe('Generated outside chat')
+    expect(tabDisplayLabel(nativeConversation())).toBe('Outside chat')
   })
 
   it('falls back to ptyTitle when the terminal has no title', () => {
@@ -1107,6 +1117,14 @@ describe('agentTabSupportsInterrupt', () => {
 })
 
 describe('mruSteerableAgentTab', () => {
+  it('never treats an outside reference as a managed writable agent or process owner', () => {
+    const native = nativeConversation({ agentProvider: AgentProvider.CODEX, sessionId: 'generated-session' })
+    expect(isSteerableAgentTab(native)).toBe(false)
+    expect(agentTabSupportsInterrupt(native)).toBe(false)
+    expect(agentTabToInfo(native)).toBeUndefined()
+    expect(mruSteerableAgentTab([native, agent()])?.id).toBe('a1')
+    expect(parseTabKey(tabKey(native))).toEqual({ type: TabType.NATIVE_CONVERSATION, id: 'native-1' })
+  })
   it('returns the first steerable agent tab in MRU order', () => {
     const tabs: Tab[] = [
       file(),
@@ -1168,6 +1186,7 @@ describe('canCloseTab and canRenameTab', () => {
     expect(canRenameTab(false, file)).toBe(false)
     expect(canRenameTab(false, image)).toBe(false)
     expect(canRenameTab(true, file)).toBe(false)
+    expect(canRenameTab(false, nativeConversation())).toBe(false)
   })
 
   it('refuses every rename in an archived workspace', () => {

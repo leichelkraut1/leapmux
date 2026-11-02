@@ -222,6 +222,14 @@ describe('BranchStatusInfo', () => {
     expect(screen.getByText('1 agent will be stopped, 3 files will be closed.')).toBeInTheDocument()
   })
 
+  it('describes outside chats as closing views while original agents keep their process ownership', () => {
+    render(() => (
+      <BranchStatusInfo branch={branch()} affectedTabs={affectedTabs({ nativeConversations: 1 })} />
+    ))
+    expect(screen.getByText('1 outside chat view will be closed.')).toBeInTheDocument()
+    expect(screen.queryByText(/will be stopped/)).toBeNull()
+  })
+
   it('hides the clean message when gitState is undefined (fast-path skipped)', () => {
     // The fast path that skips the snapshot leaves the field ABSENT rather
     // than writing undefined -- the component's Show reads either the same.

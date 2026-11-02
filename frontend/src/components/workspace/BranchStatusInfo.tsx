@@ -50,6 +50,8 @@ export interface AffectedTabs {
    * "1 file will be closed" would name something the user never opened.
    */
   images: number
+  /** Closing a reference removes its view while the original app keeps the chat. */
+  nativeConversations?: number
   /** True when these tabs will be stopped; false when they keep running. */
   willStop: boolean
 }
@@ -126,7 +128,7 @@ export const BranchStatusInfo: Component<BranchStatusInfoProps> = (props) => {
           </>
         )}
       </Show>
-      <Show when={props.affectedTabs.agents > 0 || props.affectedTabs.terminals > 0 || props.affectedTabs.files > 0 || props.affectedTabs.images > 0}>
+      <Show when={props.affectedTabs.agents > 0 || props.affectedTabs.terminals > 0 || props.affectedTabs.files > 0 || props.affectedTabs.images > 0 || (props.affectedTabs.nativeConversations ?? 0) > 0}>
         <div>{formatAffectedTabs(props.affectedTabs)}</div>
       </Show>
     </div>
@@ -148,6 +150,8 @@ function formatAffectedTabs(t: AffectedTabs): string {
     viewerParts.push(pluralize(t.files, 'file'))
   if (t.images > 0)
     viewerParts.push(pluralize(t.images, 'image'))
+  if ((t.nativeConversations ?? 0) > 0)
+    viewerParts.push(pluralize(t.nativeConversations ?? 0, 'outside chat view'))
   const closed = viewerParts.join(' and ')
   if (processParts.length > 0) {
     const verb = t.willStop ? 'will be stopped' : 'will keep running'
