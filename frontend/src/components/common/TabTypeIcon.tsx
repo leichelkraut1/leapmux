@@ -4,6 +4,7 @@ import type { Tab } from '~/stores/tab.types'
 import CornerDownRight from 'lucide-solid/icons/corner-down-right'
 import FileText from 'lucide-solid/icons/file-text'
 import ImageIcon from 'lucide-solid/icons/image'
+import Link from 'lucide-solid/icons/link'
 import Terminal from 'lucide-solid/icons/terminal'
 import { Match, Show, Switch } from 'solid-js'
 import { AgentProviderIcon } from '~/components/common/AgentProviderIcon'
@@ -56,6 +57,22 @@ export const TabTypeIcon: Component<TabTypeIconProps> = (props) => {
                   <CornerDownRight size={Math.round(iconSize[tokenSize()] * 0.6)} />
                 </span>
               </Show>
+            </span>
+          )
+        }}
+      </Match>
+      <Match when={props.tab.type === TabType.NATIVE_CONVERSATION ? props.tab : false}>
+        {(tab) => {
+          const providerProps = () => {
+            const provider = tab().agentProvider
+            return provider !== undefined ? { provider } : {}
+          }
+          return (
+            <span class={styles.wrapper}>
+              <AgentProviderIcon {...providerProps()} size={iconSize[tokenSize()]} {...classProps()} />
+              <span class={styles.subagentOverlay}>
+                <Link size={Math.round(iconSize[tokenSize()] * 0.6)} />
+              </span>
             </span>
           )
         }}

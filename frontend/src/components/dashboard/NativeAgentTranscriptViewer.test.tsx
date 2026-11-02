@@ -15,7 +15,7 @@ const hooks = vi.hoisted(() => ({ transcript: vi.fn(), control: vi.fn() }))
 vi.mock('~/hooks/useNativeAgentTranscript', () => ({ useNativeAgentTranscript: (...args: unknown[]) => hooks.transcript(...args) }))
 vi.mock('~/hooks/useNativeAgentControl', () => ({ useNativeAgentControl: (...args: unknown[]) => hooks.control(...args) }))
 vi.mock('~/lib/shikiWorkerClient', () => ({ tokenizeAsync: vi.fn().mockResolvedValue(null) }))
-const { NativeAgentTranscriptViewer } = await import('./NativeAgentTranscriptViewer')
+const { NativeAgentConversationContent, NativeAgentTranscriptViewer } = await import('./NativeAgentTranscriptViewer')
 const prototype = HTMLDialogElement.prototype
 const originalShow = Object.getOwnPropertyDescriptor(prototype, 'showModal')
 const originalClose = Object.getOwnPropertyDescriptor(prototype, 'close')
@@ -102,6 +102,19 @@ function approvalFixture() {
 }
 
 describe('NativeAgentTranscriptViewer', () => {
+  it('offers attachment without sending input or changing the native owner', () => {
+    fixture()
+    const state = controlFixture(true)
+    const onAdd = vi.fn()
+    render(() => <PreferencesProvider><NativeAgentTranscriptViewer conversation={conversation} online onAddToWorktree={onAdd} onClose={() => {}} /></PreferencesProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Add to worktree' }))
+    expect(onAdd).toHaveBeenCalledExactlyOnceWith({ ...conversation, displayName: 'Generated chat title' })
+    expect(state.send).not.toHaveBeenCalled()
+    expect(state.interrupt).not.toHaveBeenCalled()
+    expect(state.answerApproval).not.toHaveBeenCalled()
+    expect(screen.getByText('Owner: Generated CLI owner · Generated bridge')).toBeInTheDocument()
+  })
+
   it('shows a saved-history estimate before the original-chat composer without sending', () => {
     fixture()
     const state = controlFixture(true)
@@ -368,6 +381,44 @@ describe('NativeAgentTranscriptViewer', () => {
     expect(screen.getByRole('region', { name: 'Approval: Run generated command?' }).querySelector('pre')?.textContent).toBe(prompt.detail)
     expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled()
+    expect(state.answerApproval).not.toHaveBeenCalled()
+  })
+})
+
+describe('NativeAgentConversationContent', () => {
+  it('embeds the same conversation without a dialog and preserves a draft across tab switches', () => {
+    fixture()
+    const state = controlFixture(true)
+    const [active, setActive] = createSignal(true)
+    const onTitleChange = vi.fn()
+    render(() => <PreferencesProvider><NativeAgentConversationContent conversation={conversation} online embedded active={active()} onTitleChange={onTitleChange} /></PreferencesProvider>)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByText(/The conversation keeps its original computer and working folder/)).toBeInTheDocument()
+    expect(onTitleChange).toHaveBeenCalledWith('Generated chat title')
+    const editor = screen.getByRole('textbox', { name: 'Message to original chat' })
+    fireEvent.input(editor, { target: { value: 'Generated linked-chat draft' } })
+    setActive(false)
+    expect(screen.getByRole('button', { name: 'Send to original chat' })).toBeDisabled()
+    expect(hooks.transcript.mock.lastCall?.[2]()).toBe(false)
+    expect(hooks.control.mock.lastCall?.[2]()).toBe(false)
+    setActive(true)
+    expect(screen.getByRole('textbox', { name: 'Message to original chat' })).toBe(editor)
+    expect(editor).toHaveValue('Generated linked-chat draft')
+    expect(state.send).not.toHaveBeenCalled()
+  })
+
+  it('shows archived history and pending approvals without allowing a chat mutation', () => {
+    fixture()
+    const state = controlFixture(true, true)
+    state.setApprovals([approvalFixture()])
+    render(() => <PreferencesProvider><NativeAgentConversationContent conversation={conversation} online embedded readOnly /></PreferencesProvider>)
+    expect(screen.getByText('Archived workspace · Read only.')).toBeInTheDocument()
+    expect(screen.getByTestId('native-transcript-history')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Message to original chat' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Interrupt current turn' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled()
+    expect(state.send).not.toHaveBeenCalled()
+    expect(state.interrupt).not.toHaveBeenCalled()
     expect(state.answerApproval).not.toHaveBeenCalled()
   })
 })

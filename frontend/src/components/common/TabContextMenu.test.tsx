@@ -40,6 +40,14 @@ describe('TabContextMenu', () => {
     expect(screen.getByTestId('tab-menu-close')).toBeInTheDocument()
   })
 
+  it('labels a reference removal without changing the close action', () => {
+    const onClose = vi.fn()
+    render(() => <TabContextMenu onClose={onClose} closeLabel="Remove from LeapMux" />)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from LeapMux' }))
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('menuitem', { name: 'Close' })).not.toBeInTheDocument()
+  })
+
   it('hides rename for a tab that cannot be renamed', () => {
     render(() => <TabContextMenu onClose={() => {}} />)
 

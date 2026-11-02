@@ -18,7 +18,7 @@ function refusedBeforeDelivery(failure: unknown): boolean {
 }
 
 /** Existing owners only: capability reads never start, resume, or claim a chat. */
-export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, online: Accessor<boolean>) {
+export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, online: Accessor<boolean>, active: Accessor<boolean> = () => true) {
   const [capabilities, setCapabilities] = createSignal<InspectNativeSessionControlResponse>()
   const [checking, setChecking] = createSignal(false)
   const [expired, setExpired] = createSignal(true)
@@ -40,7 +40,7 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
   let sendAttempt: { bindingToken: string, text: string, requestId: string, inputBehavior: NativeSessionInputBehavior, uncertain: boolean } | undefined
   let interruptAttempt: { bindingToken: string, turnId: string, requestId: string } | undefined
 
-  const available = createMemo(() => online() && !expired() && !inspectError() && !!capabilities()?.bindingToken)
+  const available = createMemo(() => online() && active() && !expired() && !inspectError() && !!capabilities()?.bindingToken)
   const inputBehavior = () => capabilities()?.inputBehavior ?? NativeSessionInputBehavior.UNSPECIFIED
   const knownBehavior = () => inputBehavior() === NativeSessionInputBehavior.QUEUE_NEXT_TURN || inputBehavior() === NativeSessionInputBehavior.SEND_NOW
   const canSend = createMemo(() => available() && !!capabilities()?.canSend && knownBehavior())
@@ -107,13 +107,13 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
   }
 
   function refresh(): Promise<void> {
-    if (disposed || !untrack(online))
+    if (disposed || !untrack(online) || !untrack(active))
       return Promise.resolve()
     if (inspection) {
       if (!queuedInspection) {
         const run = generation
         const queued = inspection.then(async () => {
-          if (disposed || run !== generation || !untrack(online))
+          if (disposed || run !== generation || !untrack(online) || !untrack(active))
             return
           if (queuedInspection === queued)
             queuedInspection = undefined
@@ -135,7 +135,7 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
   }
 
   async function inspectOnce(): Promise<void> {
-    if (disposed || !untrack(online))
+    if (disposed || !untrack(online) || !untrack(active))
       return
     const source = untrack(ref)
     const key = nativeConversationKey(source)
@@ -397,7 +397,7 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
     }
   }
 
-  createEffect(on(() => [nativeConversationKey(ref()), online()] as const, ([key], previous) => {
+  createEffect(on(() => [nativeConversationKey(ref()), online(), active()] as const, ([key], previous) => {
     generation++
     cancelProbe()
     batch(() => {
@@ -418,17 +418,21 @@ export function useNativeAgentControl(ref: Accessor<NativeConversationRef>, onli
         interruptAttempt = undefined
       }
     })
-    if (online())
+    if (online() && active())
       void refresh()
   }))
-  const timer = setInterval(() => {
-    if (!inspection)
-      void refresh()
-  }, REFRESH_INTERVAL_MS)
+  createEffect(() => {
+    if (!online() || !active())
+      return
+    const timer = setInterval(() => {
+      if (!inspection)
+        void refresh()
+    }, REFRESH_INTERVAL_MS)
+    onCleanup(() => clearInterval(timer))
+  })
   onCleanup(() => {
     disposed = true
     generation++
-    clearInterval(timer)
     cancelProbe()
   })
   return { capabilities, checking, connected, canSend, canInterrupt, canAnswer, pendingApprovals, canAnswerApproval, approvalAnswerState: (promptId: string) => approvalAnswers()[promptId], answerApproval, hasComposer, inputBehavior, unavailableReason, pending, receipt, error, recoverableText, refresh, send, interrupt }
