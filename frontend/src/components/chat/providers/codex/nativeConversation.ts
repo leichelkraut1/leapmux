@@ -9,6 +9,7 @@ import { AgentChatMessageSchema, AgentProvider, ContentCompression, MessageSourc
 import { parseImageBlock } from '~/lib/imageBlocks'
 import { isObject, pickObject, pickString } from '~/lib/jsonPick'
 import { codexNativeEventItem } from './nativeEventItems'
+import { codexNativeRecordMirrored } from './nativeHistoryMirrors'
 
 interface NativeEntry {
   record: NativeConversationRecord
@@ -52,11 +53,14 @@ function parsedEntries(records: readonly NativeConversationRecord[], sessionId: 
       return []
     if (object.type === 'event_msg' && payload.thread_id !== undefined && payload.thread_id !== sessionId)
       return []
+    const eventTurnId = object.type === 'event_msg' ? pickString(payload, 'turn_id') : ''
     if (object.type === 'turn_context')
       turnId = pickString(payload, 'turn_id')
-    else if (object.type === 'event_msg' && typeof payload.turn_id === 'string')
-      turnId = pickString(payload, 'turn_id') || turnId
-    entries.push({ record, envelope: object, payload, turnId, index: entries.length })
+    else if (object.type === 'event_msg' && ['task_started', 'turn_started'].includes(pickString(payload, 'type')))
+      turnId = eventTurnId || turnId
+    // An asynchronous event can refer to a previous turn. It owns its explicit
+    // turn id, but cannot change the context of subsequent response records.
+    entries.push({ record, envelope: object, payload, turnId: eventTurnId || turnId, index: entries.length })
   }
   return entries
 }
@@ -100,26 +104,26 @@ export function codexExternalUserAttachments(payload: Record<string, unknown> | 
   })
 }
 
-function mirrorText(entry: NativeEntry): { role: string, text: string, rank: number } | null {
+function mirrorText(entry: NativeEntry): { role: string, text: string, rank: number, nativeId: string } | null {
   if (entry.envelope.type === 'response_item' && entry.payload.type === 'message' && ['user', 'assistant'].includes(pickString(entry.payload, 'role'))) {
     const content = contentText(entry.payload)
-    return content.unsupported || content.images.length ? null : { role: pickString(entry.payload, 'role'), text: content.text, rank: 3 }
+    return content.unsupported || content.images.length ? null : { role: pickString(entry.payload, 'role'), text: content.text, rank: 3, nativeId: pickString(entry.payload, 'id') }
   }
   if (entry.envelope.type !== 'event_msg')
     return null
   if (typeof entry.payload.message === 'string') {
     if (entry.payload.type === 'user_message')
-      return { role: 'user', text: entry.payload.message, rank: 1 }
+      return { role: 'user', text: entry.payload.message, rank: 1, nativeId: '' }
     if (entry.payload.type === 'agent_message')
-      return { role: 'assistant', text: entry.payload.message, rank: 1 }
+      return { role: 'assistant', text: entry.payload.message, rank: 1, nativeId: '' }
   }
   const item = codexNativeEventItem(entry.payload)
   if (item?.type === CODEX_ITEM.AgentMessage)
-    return { role: 'assistant', text: pickString(item, 'text'), rank: entry.payload.type === 'item_completed' ? 2 : 0 }
+    return { role: 'assistant', text: pickString(item, 'text'), rank: entry.payload.type === 'item_completed' ? 2 : 0, nativeId: pickString(item, 'id') }
   const nativeItem = pickObject(entry.payload, 'item')
   if (['item_started', 'item_completed'].includes(pickString(entry.payload, 'type')) && nativeItem?.type === 'UserMessage') {
     const content = contentText(nativeItem)
-    return content.unsupported || content.images.length ? null : { role: 'user', text: content.text, rank: entry.payload.type === 'item_completed' ? 2 : 0 }
+    return content.unsupported || content.images.length ? null : { role: 'user', text: content.text, rank: entry.payload.type === 'item_completed' ? 2 : 0, nativeId: pickString(nativeItem, 'id') }
   }
   return null
 }
@@ -133,6 +137,8 @@ function mirroredByMessage(entry: NativeEntry, entries: readonly NativeEntry[]):
   return entries.some((candidate) => {
     const other = mirrorText(candidate)
     if (!other || other.rank <= mirror.rank || other.role !== mirror.role)
+      return false
+    if (mirror.nativeId && other.nativeId && mirror.nativeId !== other.nativeId)
       return false
     if (entry.turnId && candidate.turnId && entry.turnId !== candidate.turnId)
       return false
@@ -210,7 +216,7 @@ export function projectCodexNativeConversation(
     // These records describe the store/configuration, not a conversation item.
     if (envelope.type === 'session_meta' || envelope.type === 'turn_context')
       continue
-    if (mirroredByMessage(entry, entries))
+    if (mirroredByMessage(entry, entries) || codexNativeRecordMirrored(entry, entries))
       continue
     if (envelope.type === 'response_item') {
       const type = pickString(payload, 'type')
