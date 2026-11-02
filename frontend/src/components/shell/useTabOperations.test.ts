@@ -11,6 +11,7 @@ import { TerminalProcessSchema } from '~/generated/proto/leapmux/v1/terminal_pb'
 import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import { ChannelError } from '~/lib/channelError'
 import { createChatStore, MAX_BACKGROUND_CHAT_MESSAGES } from '~/stores/chat.store'
+import { repoKey } from '~/stores/repoGit'
 import { createRepoGitStore } from '~/stores/repoGit.store'
 import { emitAddTab, emitRemoveTab } from '~/stores/tabOps'
 import { flush } from '~/test-support/async'
@@ -198,7 +199,7 @@ describe('useTabOperations', () => {
     const at = { workspaceId: 'ws-test', workerId: 'w-1', workingDir: '/generated/worktree' }
     const seed = (s: ReturnType<typeof setup>) => {
       s.metadata.patch('agent-a', { workingDir: at.workingDir, gitToplevel: at.workingDir })
-      s.repoGitStore.upsert(('w-1\0' + at.workingDir) as never, { workerId: 'w-1', repoRoot: at.workingDir, toplevel: at.workingDir, branch: 'fixture' })
+      s.repoGitStore.upsert(repoKey('w-1', at.workingDir), { workerId: 'w-1', repoRoot: at.workingDir, toplevel: at.workingDir, branch: 'fixture' })
     }
 
     it('persists destination placement separately from source identity and focuses the same link on repeat', async () => {
