@@ -4,7 +4,7 @@ import { create } from '@bufbuild/protobuf'
 import { createRoot, createSignal } from 'solid-js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useTabOperations } from '~/components/shell/useTabOperations'
-import { MessageSource } from '~/generated/proto/leapmux/v1/agent_pb'
+import { AgentProvider, MessageSource } from '~/generated/proto/leapmux/v1/agent_pb'
 import { WorktreeAction, WorktreeRemovalOutcome } from '~/generated/proto/leapmux/v1/common_pb'
 import { LastTabCloseTarget } from '~/generated/proto/leapmux/v1/git_pb'
 import { TerminalProcessSchema } from '~/generated/proto/leapmux/v1/terminal_pb'
@@ -108,6 +108,7 @@ function setup(
   const stores = createTestTabStores(opts.unbootstrapped ? 'ws-never-bootstrapped' : 'ws-test')
   const { view, metadata, selection, layoutStore } = stores
   const chatStore = createChatStore()
+  const repoGitStore = createRepoGitStore()
 
   const tileId = 'tile-1'
   layoutStore.setFocusedTile(tileId)
@@ -148,11 +149,12 @@ function setup(
       probeMany: async () => [],
     },
     workerOnlineState,
-    repoGitStore: createRepoGitStore(),
+    repoGitStore,
   })
 
   return {
     ...stores,
+    repoGitStore,
     chatStore,
     ops,
     tileId,
@@ -188,6 +190,69 @@ describe('useTabOperations', () => {
     mockRevokeTabPayload.mockImplementation(() => Promise.resolve({}))
     mockShowWarnToast.mockReset()
     mockShowInfoToast.mockReset()
+  })
+
+
+  describe('linked native conversations', () => {
+    const ref = { workerId: 'source-mac', workerName: 'Source Mac', agentProvider: AgentProvider.CLAUDE_CODE, sessionId: 'c3eda383-638f-46df-a5fc-83f6cecd1a92', displayName: 'Generated test conversation' }
+    const at = { workspaceId: 'ws-test', workerId: 'w-1', workingDir: '/generated/worktree' }
+    const seed = (s: ReturnType<typeof setup>) => {
+      s.metadata.patch('agent-a', { workingDir: at.workingDir, gitToplevel: at.workingDir })
+      s.repoGitStore.upsert(('w-1\0' + at.workingDir) as never, { workerId: 'w-1', repoRoot: at.workingDir, toplevel: at.workingDir, branch: 'fixture' })
+    }
+
+    it('persists destination placement separately from source identity and focuses the same link on repeat', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          seed(s)
+          const tab = await s.ops.handleNativeConversationAttach(ref, at)
+          expect(tab).toMatchObject({ type: TabType.NATIVE_CONVERSATION, workerId: 'w-1', workingDir: at.workingDir, sourceWorkerId: 'source-mac', sessionId: ref.sessionId, agentProvider: ref.agentProvider })
+          expect(mockRegisterTabPayload).toHaveBeenCalledWith('w-1', expect.objectContaining({ payload: { workingDir: at.workingDir, kind: { case: 'nativeConversation', value: { sourceWorkerId: 'source-mac', agentProvider: ref.agentProvider, sessionId: ref.sessionId, displayName: ref.displayName } } } }))
+          expect((await s.ops.handleNativeConversationAttach(ref, at)).id).toBe(tab.id)
+          expect(mockRegisterTabPayload).toHaveBeenCalledTimes(1)
+          expect(s.selection.activeTabForWorkspace('ws-test')?.id).toBe(tab.id)
+          expect(s.handleAgentClose).not.toHaveBeenCalled()
+          expect(s.handleTerminalClose).not.toHaveBeenCalled()
+        }
+        finally { dispose() }
+      })
+    })
+
+    it('unlinks with KEEP even when bulk close requests REMOVE, without inspecting or interrupting the source', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          seed(s)
+          const tab = await s.ops.handleNativeConversationAttach(ref, at)
+          await s.ops.closeTabWithAction(tab, WorktreeAction.REMOVE)
+          expect(mockRevokeTabPayload).toHaveBeenCalledWith('w-1', { tabId: tab.id, worktreeAction: WorktreeAction.KEEP })
+          expect(mockInspectLastTabClose).not.toHaveBeenCalled()
+          expect(s.handleAgentClose).not.toHaveBeenCalled()
+          expect(s.handleTerminalClose).not.toHaveBeenCalled()
+          expect(s.view.getById(TabType.NATIVE_CONVERSATION, tab.id)).toBeUndefined()
+        }
+        finally { dispose() }
+      })
+    })
+
+    it('refuses an offline destination and removes a saved payload if its anchor disappears during registration', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const offline = setup(DEFAULT_SCROLL_STATE, () => false)
+          seed(offline)
+          await expect(offline.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('online')
+          expect(mockRegisterTabPayload).not.toHaveBeenCalled()
+          const s = setup()
+          seed(s)
+          mockRegisterTabPayload.mockImplementationOnce(async () => { emitRemoveTab(TabType.AGENT, 'agent-a'); return {} })
+          await expect(s.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('no longer available')
+          expect(mockRevokeTabPayload).toHaveBeenCalledWith('w-1', expect.objectContaining({ worktreeAction: WorktreeAction.KEEP }))
+          expect(s.view.all().some(tab => tab.type === TabType.NATIVE_CONVERSATION)).toBe(false)
+        }
+        finally { dispose() }
+      })
+    })
   })
 
   describe('file-tab E2EE worker round-trip', () => {

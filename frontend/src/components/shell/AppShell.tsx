@@ -1,3 +1,4 @@
+import type { NativeConversationDestination } from '~/components/dashboard/AttachNativeConversationDialog'
 import type { Component } from 'solid-js'
 import type { AppShellDialogStates, ChangeBranchState, DeleteBranchState, EmptyArchiveConfirmPayload, KeyPinConfirmState, NewTabTarget, NewWorkspacePayload, SectionConfirmPayload, WorkspaceConfirmPayload } from './AppShellDialogs'
 import type { SectionNamePayload } from './SectionNameDialog'
@@ -29,6 +30,7 @@ import { nativeConversationFromParams, nativeConversationKey, nativeConversation
 import { pluginFor } from '~/components/chat/providers/registry'
 import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
 import { BootSplash } from '~/components/common/BootSplash'
+import { AttachNativeConversationDialog } from '~/components/dashboard/AttachNativeConversationDialog'
 import { AgentDashboard } from '~/components/dashboard/AgentDashboard'
 import { NativeAgentTranscriptViewer } from '~/components/dashboard/NativeAgentTranscriptViewer'
 import { CliPathDialog } from '~/components/desktop/CliPathDialog'
@@ -98,6 +100,7 @@ import { FloatingWindowLayer } from './FloatingWindowLayer'
 import { GridPopoverHostProvider } from './GridPopoverHost'
 import { handleBranchChanged } from './handleBranchChanged'
 import { createMobileOverlayState, MobileLayout } from './MobileLayout'
+import { nativeConversationDestinations } from './nativeConversationPlacement'
 import { mruAgentEditorDeps } from './mruAgentEditorDeps'
 import { openSubagentTab } from './openSubagentTab'
 import { QuakeTerminalPanel } from './QuakeTerminalPanel'
@@ -917,6 +920,7 @@ export const AppShell: Component = () => {
     getScrollState: () => getScrollStateRef()?.(),
     getActiveWorkspaceId: () => workspace.activeWorkspaceId() ?? undefined,
     workerOnlineState: workerId => workerOnlineState(workerSection.workers(), workerId),
+    isWorkspaceMutatable: isWorkspaceMutatableById,
     repoGitStore,
   })
 
@@ -1495,6 +1499,10 @@ export const AppShell: Component = () => {
     onOpenBackgroundTask,
     onGoalAction: runGoalAction,
     onOpenChatImage: tabOps.handleChatImageOpen,
+    nativeConversation: {
+      isWorkerKnownOnline: id => workerSection.workers().some(worker => worker.id === id && worker.online),
+      workerName: id => workerSection.workerInfoFn(id)?.name,
+    },
     branch: {
       actions: branchActions,
       isWorkerKnownOnline: workerId => isWorkerKnownOnline(workerSection.workers(), workerId),
@@ -1606,6 +1614,47 @@ export const AppShell: Component = () => {
       return
     setNativeConversation(conversation)
     setSearchParams({ externalWorker: conversation.workerId, externalProvider: provider, externalSession: conversation.sessionId }, { replace: true })
+  }
+  const [attachNativeConversation, setAttachNativeConversation] = createSignal<NativeConversationRef>()
+  const [nativeAttachBusy, setNativeAttachBusy] = createSignal(false)
+  const [nativeAttachError, setNativeAttachError] = createSignal('')
+  const nativeDestinations = createMemo(() => nativeConversationDestinations({
+    tabs: tabView.all(),
+    workspaces: workspaceStore.state.workspaces.map(w => ({ id: w.id, name: w.title })),
+    git: repoGitStore,
+    isWorkspaceMutatable: isWorkspaceMutatableById,
+    workerOnline: id => workerSection.workers().some(worker => worker.id === id && worker.online),
+    workerName: id => workerSection.workerInfoFn(id)?.name,
+  }))
+  const openNativeAttach = (conversation: NativeConversationRef) => {
+    setNativeAttachError('')
+    setAttachNativeConversation(conversation)
+  }
+  const confirmNativeAttach = async (destination: NativeConversationDestination) => {
+    const conversation = attachNativeConversation()
+    if (!conversation || nativeAttachBusy())
+      return
+    // Resolve from the current list, never trust a stale chooser snapshot.
+    const current = nativeDestinations().find(item => item.id === destination.id)
+    if (!current || current.disabledReason) {
+      setNativeAttachError(current?.disabledReason || 'This worktree is no longer available.')
+      return
+    }
+    setNativeAttachBusy(true)
+    setNativeAttachError('')
+    try {
+      const tab = await tabOps.handleNativeConversationAttach(conversation, current)
+      setAttachNativeConversation(undefined)
+      closeNativeConversation()
+      setSearchParams({ dashboard: undefined }, { replace: true })
+      handleSelectWorkspace(tab.workspaceId)
+    }
+    catch (error) {
+      setNativeAttachError(error instanceof Error ? error.message : 'Unable to add this chat. Please try again.')
+    }
+    finally {
+      setNativeAttachBusy(false)
+    }
   }
   const closeAgentDashboard = () => {
     setNativeConversation(undefined)
@@ -1986,7 +2035,21 @@ export const AppShell: Component = () => {
               conversation={conversation}
               workerName={workerSection.workerInfoFn(conversation.workerId)?.name || conversation.workerName}
               online={workerSection.workers().some(worker => worker.id === conversation.workerId && worker.online)}
+              onAddToWorktree={openNativeAttach}
               onClose={closeNativeConversation}
+            />
+          )}
+        </Show>
+
+        <Show when={attachNativeConversation()} keyed>
+          {conversation => (
+            <AttachNativeConversationDialog
+              conversation={conversation}
+              destinations={nativeDestinations()}
+              busy={nativeAttachBusy()}
+              error={nativeAttachError()}
+              onConfirm={destination => void confirmNativeAttach(destination)}
+              onClose={() => { if (!nativeAttachBusy()) setAttachNativeConversation(undefined) }}
             />
           )}
         </Show>
