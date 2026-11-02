@@ -4,7 +4,7 @@ import type { GitRepoStatus } from '~/generated/proto/leapmux/v1/common_pb'
 import { create } from '@bufbuild/protobuf'
 import { createRoot, createSignal } from 'solid-js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentActivityState, AgentStatus, AgentStatusChangeSchema, AvailableOptionGroupSchema, AvailableOptionSchema } from '~/generated/proto/leapmux/v1/agent_pb'
+import { AgentActivityState, AgentProvider, AgentStatus, AgentStatusChangeSchema, AvailableOptionGroupSchema, AvailableOptionSchema } from '~/generated/proto/leapmux/v1/agent_pb'
 import { GitRepoStatusSchema, TabHydrationStatus } from '~/generated/proto/leapmux/v1/common_pb'
 import { TerminalStatus, TerminalStatusChangeSchema } from '~/generated/proto/leapmux/v1/terminal_pb'
 import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
@@ -1048,6 +1048,39 @@ describe('useTabHydrators', () => {
       expect(i1 && isImageTab(i1) && i1.imageIndex).toBe(1)
       expect(i1?.title).toBe('Read')
       expect(i1?.workingDir).toBe('/repo')
+      d()
+    })
+
+    it('hydrates an outside chat reference through the payload owner without resuming its source session', async () => {
+      mockGetTabPayload.mockResolvedValueOnce({
+        payload: {
+          workingDir: '/destination/worktree',
+          kind: { case: 'nativeConversation', value: { sourceWorkerId: 'source-pc', agentProvider: AgentProvider.CODEX, sessionId: 'generated-native-session', displayName: 'Generated outside chat' } },
+        },
+      })
+      const s = setup()
+      const d = createRoot((dispose) => {
+        s.add(TabType.NATIVE_CONVERSATION, 'native-1')
+        s.mount()
+        return dispose
+      })
+      await flush()
+      await flush()
+
+      expect(mockGetTabPayload).toHaveBeenCalledTimes(1)
+      expect(mockGetTabPayload).toHaveBeenCalledWith('w1', { tabId: 'native-1' })
+      expect(s.view.getNativeConversationTab('native-1')).toMatchObject({
+        workerId: 'w1',
+        sourceWorkerId: 'source-pc',
+        agentProvider: AgentProvider.CODEX,
+        sessionId: 'generated-native-session',
+        displayName: 'Generated outside chat',
+        title: 'Generated outside chat',
+        workingDir: '/destination/worktree',
+      })
+      expect(s.metadata.get('native-1')?.hydrated).toBe(true)
+      expect(mockListAgents).not.toHaveBeenCalled()
+      expect(mockListTerminals).not.toHaveBeenCalled()
       d()
     })
 

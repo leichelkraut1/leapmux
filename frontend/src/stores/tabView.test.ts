@@ -335,6 +335,40 @@ describe('tabView', () => {
     })
   })
 
+  it('assembles outside chat identity without confusing its source worker and destination placement', () => {
+    withTestBridge((harness) => {
+      createRoot((dispose) => {
+        const { view, metadata } = mountView()
+        emitAddTab({ type: TabType.NATIVE_CONVERSATION, id: 'native-1', tileId: harness.rootTileId, position: 'M', workerId: 'destination-pc' })
+        metadata.patch('native-1', {
+          hydrated: true,
+          title: 'Generated native chat',
+          workingDir: '/destination/worktree',
+          sourceWorkerId: 'source-pc',
+          agentProvider: AgentProvider.CODEX,
+          sessionId: 'generated-native-session',
+          displayName: 'Generated native chat',
+        })
+        const tab = view.getNativeConversationTab('native-1')!
+        expect(tab).toMatchObject({
+          type: TabType.NATIVE_CONVERSATION,
+          workspaceId: harness.workspaceId,
+          workerId: 'destination-pc',
+          workingDir: '/destination/worktree',
+          sourceWorkerId: 'source-pc',
+          agentProvider: AgentProvider.CODEX,
+          sessionId: 'generated-native-session',
+          displayName: 'Generated native chat',
+          title: 'Generated native chat',
+        })
+        expect(view.getFileTab('native-1')).toBeUndefined()
+        expect(view.getAgentTab('native-1')).toBeUndefined()
+        expect(view.getNativeConversationTab('missing')).toBeUndefined()
+        dispose()
+      })
+    })
+  })
+
   // A tab whose tile is not in the projection yet must stay put rather than
   // blink out. The hub now orders a split's frames so this cannot happen for
   // the routine case, but a tile tombstoned by another client mid-flight, or
