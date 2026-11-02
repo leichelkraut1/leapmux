@@ -31,7 +31,86 @@ function event(payload: Record<string, unknown>) {
   return { timestamp: '2026-10-28T01:00:00Z', type: 'event_msg', payload: { turn_id: 'generated-turn', ...payload } }
 }
 
+function tokenUsageRecord() {
+  const counters = { input_tokens: 10, cached_input_tokens: 4, cache_write_input_tokens: 0, output_tokens: 2, reasoning_output_tokens: 1, total_tokens: 12 }
+  return {
+    timestamp: '2026-11-02T01:00:00.123456Z',
+    ordinal: 146,
+    type: 'token_usage_record',
+    payload: {
+      thread_id: session,
+      turn_id: 'generated-turn',
+      session_id: session,
+      root_turn_id: 'generated-turn',
+      response_id: 'resp_generated_counter_fixture',
+      usage: { ...counters },
+      turn_token_usage: { ...counters },
+      thread_token_usage: { ...counters },
+    },
+  }
+}
+
 describe('projectCodexNativeConversation', () => {
+  it('hides known top-level usage accounting and legacy counters without changing source bytes or page offsets', () => {
+    const source = nativeRecords([
+      { type: 'session_meta', payload: { id: session, cwd: '/harmless' } },
+      response({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Generated question' }] }),
+      tokenUsageRecord(),
+      event({ type: 'token_count', info: { total_token_usage: { total_tokens: 12 } } }),
+      response({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Generated answer' }] }),
+    ])
+    const original = source.map(record => ({ ...record, nativeJson: record.nativeJson.slice() }))
+    const messages = projectCodexNativeConversation([...source.slice(3), ...source.slice(0, 3)], format, session)
+    expect(messages.map(message => prepareChatRow(message).extraction)).toMatchObject([
+      { kind: 'row', row: { kind: 'user', text: 'Generated question' } },
+      { kind: 'row', row: { kind: 'assistant-text', text: 'Generated answer' } },
+    ])
+    expect(messages.map(message => message.seq)).toEqual([source[1]!.seq, source[4]!.seq])
+    expect(messages.map(message => message.content)).toEqual([source[1]!.nativeJson, source[4]!.nativeJson])
+    const nextPage = projectCodexNativeConversation(source.slice(2), format, session)
+    expect(nextPage).toHaveLength(1)
+    expect(nextPage[0]!.seq).toBe(source[4]!.seq)
+    expect(nextPage[0]!.content).toEqual(source[4]!.nativeJson)
+    expect(source).toEqual(original)
+  })
+
+  it('keeps malformed, foreign and future usage-like records visible as their unchanged native source', () => {
+    const known = tokenUsageRecord()
+    const records = [
+      { ...known, type: 'token_usage_records' },
+      event({ type: 'token_usage_record', ...known.payload }),
+      { ...known, timestamp: 'not-a-generated-date' },
+      { ...known, ordinal: -1 },
+      { ...known, ordinal: 1.5 },
+      { ...known, ordinal: Number.MAX_SAFE_INTEGER + 1 },
+      { ...known, text: 'Generated future authored envelope text' },
+      { ...known, payload: { ...known.payload, message: 'Generated future authored payload text' } },
+      { ...known, payload: { ...known.payload, thread_id: 'foreign-session' } },
+      { ...known, payload: { ...known.payload, session_id: 'foreign-session' } },
+      { ...known, payload: { ...known.payload, root_turn_id: 'different-root-turn' } },
+      { ...known, payload: { ...known.payload, turn_id: null } },
+      { ...known, payload: { ...known.payload, response_id: '' } },
+      { ...known, payload: { ...known.payload, usage: null } },
+      { ...known, payload: { ...known.payload, usage: [] } },
+      { ...known, payload: { ...known.payload, usage: { input_tokens: 10 } } },
+      { ...known, payload: { ...known.payload, usage: { ...known.payload.usage, input_tokens: '10' } } },
+      { ...known, payload: { ...known.payload, usage: { ...known.payload.usage, cached_input_tokens: -1 } } },
+      { ...known, payload: { ...known.payload, turn_token_usage: { ...known.payload.turn_token_usage, output_tokens: 1.5 } } },
+      { ...known, payload: { ...known.payload, thread_token_usage: { ...known.payload.thread_token_usage, total_tokens: Number.MAX_SAFE_INTEGER + 1 } } },
+      { ...known, payload: { ...known.payload, thread_token_usage: {} } },
+      { ...known, payload: { ...known.payload, usage: { ...known.payload.usage, future_text: 'Generated future usage detail' } } },
+      { ...known, payload: { ...known.payload, usage: { ...known.payload.usage, future_counter: 1 } } },
+    ]
+    for (const record of records) {
+      const source = nativeRecords([record])
+      const messages = projectCodexNativeConversation(source, format, session)
+      expect(messages).toHaveLength(1)
+      expect(messages[0]!.content).toEqual(source[0]!.nativeJson)
+      expect(messages[0]!.seq).toBe(source[0]!.seq)
+      expect(prepareChatRow(messages[0]!).extraction.kind).toBe('unsupported')
+    }
+  })
+
   it('renders user and assistant text while retaining exact raw source bytes', () => {
     const records = nativeRecords([
       { type: 'session_meta', payload: { id: session, cwd: '/harmless' } },

@@ -23,6 +23,37 @@ const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 const encoder = new TextEncoder()
 const maxSeq = 9223372036854775807n
 const inlineImage = /^data:(image\/(?:png|jpeg|gif|webp));base64,[A-Za-z0-9+/]+={0,2}$/
+const tokenUsageCounterKeys = ['input_tokens', 'cached_input_tokens', 'cache_write_input_tokens', 'output_tokens', 'reasoning_output_tokens', 'total_tokens']
+
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key))
+}
+
+/** Recognize only the recorded top-level accounting shape, without hiding future content. */
+function knownTokenUsageRecord(envelope: Record<string, unknown>, sessionId: string): boolean {
+  if (envelope.type !== 'token_usage_record'
+    || !exactKeys(envelope, ['timestamp', 'ordinal', 'type', 'payload'])
+    || typeof envelope.timestamp !== 'string' || envelope.timestamp.length > 128 || !Number.isFinite(Date.parse(envelope.timestamp))
+    || typeof envelope.ordinal !== 'number' || !Number.isSafeInteger(envelope.ordinal) || envelope.ordinal < 0)
+    return false
+  const payload = pickObject(envelope, 'payload')
+  if (!payload || !exactKeys(payload, ['thread_id', 'turn_id', 'session_id', 'root_turn_id', 'response_id', 'usage', 'turn_token_usage', 'thread_token_usage'])
+    || payload.thread_id !== sessionId || payload.session_id !== sessionId
+    || !['turn_id', 'root_turn_id', 'response_id'].every((key) => {
+      const id = payload[key]
+      return typeof id === 'string' && id.length > 0 && id.length <= 256
+    })
+    || payload.turn_id !== payload.root_turn_id)
+    return false
+  return ['usage', 'turn_token_usage', 'thread_token_usage'].every((key) => {
+    const counters = pickObject(payload, key)
+    return counters !== null && exactKeys(counters, tokenUsageCounterKeys)
+      && tokenUsageCounterKeys.every((key) => {
+        const count = counters[key]
+        return typeof count === 'number' && Number.isSafeInteger(count) && count >= 0
+      })
+  })
+}
 
 function parsedEntries(records: readonly NativeConversationRecord[], sessionId: string): NativeEntry[] {
   const unique = new Map<string, NativeConversationRecord>()
@@ -215,6 +246,8 @@ export function projectCodexNativeConversation(
     }
     // These records describe the store/configuration, not a conversation item.
     if (envelope.type === 'session_meta' || envelope.type === 'turn_context')
+      continue
+    if (knownTokenUsageRecord(envelope, sessionId))
       continue
     if (mirroredByMessage(entry, entries) || codexNativeRecordMirrored(entry, entries))
       continue
