@@ -38,13 +38,16 @@ function reasoningParts(item: Record<string, unknown>, core: boolean): unknown[]
       return undefined
     const result: string[] = []
     for (const block of value) {
-      if (typeof block === 'string')
+      if (typeof block === 'string') {
         result.push(block)
+      }
       else if (!core && isObject(block) && ['summary_text', 'reasoning_text', 'text'].includes(pickString(block, 'type'))
-        && typeof block.text === 'string' && Object.keys(block).every(key => key === 'type' || key === 'text'))
+        && typeof block.text === 'string' && Object.keys(block).every(key => key === 'type' || key === 'text')) {
         result.push(block.text)
-      else
+      }
+      else {
         return undefined
+      }
     }
     return result
   }
@@ -62,8 +65,9 @@ function coreItem(entry: NativeMirrorEntry, eventType: string): Record<string, u
 function mirroredReasoning(entry: NativeMirrorEntry, entries: readonly NativeMirrorEntry[]): boolean {
   const item = coreItem(entry, 'item_started') ?? coreItem(entry, 'item_completed')
   if (item?.type !== 'Reasoning' || !pickString(item, 'id')
-    || Object.keys(item).some(key => !['type', 'id', 'summary_text', 'raw_content'].includes(key)))
+    || Object.keys(item).some(key => !['type', 'id', 'summary_text', 'raw_content'].includes(key))) {
     return false
+  }
   const parts = reasoningParts(item, true)
   return parts !== undefined && entries.some(candidate => sameTurn(entry, candidate)
     && candidate.envelope.type === 'response_item' && candidate.payload.type === 'reasoning'
@@ -75,8 +79,10 @@ function supersededToolStart(entry: NativeMirrorEntry, entries: readonly NativeM
   const item = coreItem(entry, 'item_started')
   if (!item || !codexNativeEventItem(entry.payload))
     return false
-  const lifecycle = item.type === 'DynamicToolCall' ? ['status', 'content_items', 'success', 'error', 'duration']
-    : item.type === 'CommandExecution' ? ['status', 'aggregated_output', 'exit_code', 'duration']
+  const lifecycle = item.type === 'DynamicToolCall'
+    ? ['status', 'content_items', 'success', 'error', 'duration']
+    : item.type === 'CommandExecution'
+      ? ['status', 'aggregated_output', 'exit_code', 'duration']
       : item.type === 'McpToolCall' ? ['status', 'result', 'error', 'duration'] : undefined
   if (!lifecycle || lifecycle.some(field => field !== 'status' && item[field] !== undefined && item[field] !== null))
     return false
@@ -140,8 +146,9 @@ function mirroredFunctionPair(entry: NativeMirrorEntry, entries: readonly Native
   const request = requests[0]!.payload
   const result = results[0]!.payload
   if (Object.keys(request).some(key => !['type', 'id', 'call_id', 'name', 'namespace', 'arguments', 'status'].includes(key))
-    || Object.keys(result).some(key => !['type', 'id', 'call_id', 'output', 'is_error', 'status'].includes(key)))
+    || Object.keys(result).some(key => !['type', 'id', 'call_id', 'output', 'is_error', 'status'].includes(key))) {
     return false
+  }
   const args = argumentsValue(request.arguments)
   const output = outputParts(result.output)
   if (args === undefined || output === undefined)

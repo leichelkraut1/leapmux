@@ -1,10 +1,10 @@
-import type { NativeConversationPlacement } from './nativeConversationPlacement'
-import type { NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { BusyTabConfirmState } from './BusyTabCloseDialog'
+import type { NativeConversationPlacement } from './nativeConversationPlacement'
 import type { TabBusyProbe, TabBusyReason } from './tabBusyProbe'
 import type { TabContext } from './tabContext'
 import type { useAgentOperations } from './useAgentOperations'
 import type { useTerminalOperations } from './useTerminalOperations'
+import type { NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { WorktreeCloseSummary } from '~/components/shell/closeResultToast'
 import type { LastTabCloseChoice, LastTabConfirmState } from '~/components/shell/LastTabCloseDialog'
 import type { CloseTabResult } from '~/generated/proto/leapmux/v1/common_pb'
@@ -799,14 +799,14 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
       let placed = false
       try {
         await workerRpc.registerTabPayload(at.workerId, {
-        tabId,
-        payload: nativeConversationTabPayload({
-          sourceWorkerId: ref.workerId,
-          agentProvider: ref.agentProvider,
-          sessionId: ref.sessionId,
-          displayName: ref.displayName || 'Linked conversation',
-          workingDir: at.workingDir,
-        }),
+          tabId,
+          payload: nativeConversationTabPayload({
+            sourceWorkerId: ref.workerId,
+            agentProvider: ref.agentProvider,
+            sessionId: ref.sessionId,
+            displayName: ref.displayName || 'Linked conversation',
+            workingDir: at.workingDir,
+          }),
         })
         // Re-check after the RPC: the chooser can outlive a move, archive or close.
         const anchor = assertDestination()
@@ -822,7 +822,10 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
           sessionId: ref.sessionId,
         })
         const batchId = emitAddTab({
-          type: TabType.NATIVE_CONVERSATION, id: tabId, workerId: at.workerId, tileId,
+          type: TabType.NATIVE_CONVERSATION,
+          id: tabId,
+          workerId: at.workerId,
+          tileId,
           position: positionAfterKey(view.forTile(tileId), tabKey(anchor)),
         })
         if (!batchId)

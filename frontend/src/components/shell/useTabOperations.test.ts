@@ -261,7 +261,10 @@ describe('useTabOperations', () => {
           expect(mockRegisterTabPayload).not.toHaveBeenCalled()
           const s = setup()
           seed(s)
-          mockRegisterTabPayload.mockImplementationOnce(async () => { emitRemoveTab(TabType.AGENT, 'agent-a'); return {} })
+          mockRegisterTabPayload.mockImplementationOnce(async () => {
+            emitRemoveTab(TabType.AGENT, 'agent-a')
+            return {}
+          })
           await expect(s.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('no longer available')
           expect(mockRevokeTabPayload).toHaveBeenCalledWith('w-1', expect.objectContaining({ worktreeAction: WorktreeAction.KEEP }))
           expect(s.view.all().some(tab => tab.type === TabType.NATIVE_CONVERSATION)).toBe(false)

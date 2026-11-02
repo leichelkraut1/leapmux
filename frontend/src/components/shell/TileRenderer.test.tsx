@@ -1,5 +1,5 @@
-import type { ImperativeRef } from '~/lib/imperativeRef'
 import type { NativeAgentConversationContentProps } from '~/components/dashboard/NativeAgentTranscriptViewer'
+import type { ImperativeRef } from '~/lib/imperativeRef'
 import type { createFloatingWindowStore } from '~/stores/floatingWindow.store'
 import type { Tab } from '~/stores/tab.types'
 import { fireEvent, render, screen, waitFor } from '@solidjs/testing-library'

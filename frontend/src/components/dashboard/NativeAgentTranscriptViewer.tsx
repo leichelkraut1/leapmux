@@ -100,10 +100,15 @@ export const NativeAgentConversationContent: Component<NativeAgentConversationCo
         <p class={styles.description}>{`${agentProviderLabel(props.conversation.agentProvider)} · ${props.workerName ?? props.conversation.workerName}`}</p>
         <div class={styles.headingActions}>
           <Show when={props.onAddToWorktree}>
-            <button type="button" onClick={() => props.onAddToWorktree?.({
-              ...props.conversation,
-              displayName: transcript.title() || props.conversation.displayName || 'Linked conversation',
-            })}>Add to worktree</button>
+            <button
+              type="button"
+              onClick={() => props.onAddToWorktree?.({
+                ...props.conversation,
+                displayName: transcript.title() || props.conversation.displayName || 'Linked conversation',
+              })}
+            >
+              Add to worktree
+            </button>
           </Show>
           <button
             type="button"
@@ -188,7 +193,7 @@ export const NativeAgentConversationContent: Component<NativeAgentConversationCo
             tabActive={active()}
             workingDir={transcript.workingDir()}
             messageContext={transcript.resolver()}
-              {...(props.onScrollApiReady ? { onScrollApiReady: props.onScrollApiReady } : {})}
+            {...(props.onScrollApiReady ? { onScrollApiReady: props.onScrollApiReady } : {})}
             pagination={{
               hasOlderMessages: transcript.hasOlder() && props.online,
               fetchingOlder: transcript.fetchingOlder(),
@@ -313,10 +318,14 @@ export const NativeAgentConversationContent: Component<NativeAgentConversationCo
               <button type="button" onClick={() => updateDraft(control.recoverableText())}>Restore message to editor</button>
             </Show>
             <Show when={control.capabilities()?.canInterrupt}>
-              <button type="button" disabled={!mutable() || !control.canInterrupt() || !!control.pending()} onClick={() => {
-                if (mutable())
-                  void control.interrupt()
-              }}>
+              <button
+                type="button"
+                disabled={!mutable() || !control.canInterrupt() || !!control.pending()}
+                onClick={() => {
+                  if (mutable())
+                    void control.interrupt()
+                }}
+              >
                 {control.pending() === 'interrupt' ? 'Interrupting…' : 'Interrupt current turn'}
               </button>
             </Show>

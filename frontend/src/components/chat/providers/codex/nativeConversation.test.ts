@@ -212,7 +212,10 @@ describe('projectCodexNativeConversation', () => {
     expect(messages).toHaveLength(1)
     expect(messages[0]!.content).toEqual(source[3]!.nativeJson)
     expect(createTranscriptScenario({ archive: messages }).toolRow(messages[0]!.id).call).toMatchObject({
-      kind: 'mcp', status: 'failed', request: { tool: 'generated', args: { z: 2, keep_snake_case: 'input' } }, result: { content: [{ type: 'text', text: 'Generated failure detail' }] },
+      kind: 'mcp',
+      status: 'failed',
+      request: { tool: 'generated', args: { z: 2, keep_snake_case: 'input' } },
+      result: { content: [{ type: 'text', text: 'Generated failure detail' }] },
     })
   })
 

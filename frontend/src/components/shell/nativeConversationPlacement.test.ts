@@ -14,7 +14,7 @@ describe('native conversation worktree placement', () => {
         const git = createRepoGitStore()
         for (const workerId of ['windows', 'mac'])
           git.upsert(repoKey(workerId, '/generated/tree'), { workerId, repoRoot: '/generated/tree', toplevel: '/generated/tree', branch: 'fixture' })
-        const tab = (id: string, workspaceId: string, workerId: string): Tab => ({ id, workspaceId, workerId, tileId: 'tile-' + id, type: TabType.TERMINAL, gitToplevel: '/generated/tree' })
+        const tab = (id: string, workspaceId: string, workerId: string): Tab => ({ id, workspaceId, workerId, tileId: `tile-${id}`, type: TabType.TERMINAL, gitToplevel: '/generated/tree' })
         const tabs = [tab('a', 'open', 'windows'), tab('b', 'open', 'windows'), tab('c', 'open', 'mac'), tab('d', 'archived', 'mac'), { ...tab('e', 'open', 'unknown'), gitToplevel: undefined }]
         const destinations = nativeConversationDestinations({ tabs, workspaces: [{ id: 'open', name: 'Open' }, { id: 'archived', name: 'Archive' }], git, isWorkspaceMutatable: id => id === 'open', workerOnline: id => id === 'windows', workerName: id => id })
         expect(destinations).toHaveLength(2)

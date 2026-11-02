@@ -1615,6 +1615,10 @@ export const AppShell: Component = () => {
     setNativeConversation(conversation)
     setSearchParams({ externalWorker: conversation.workerId, externalProvider: provider, externalSession: conversation.sessionId }, { replace: true })
   }
+  const closeAgentDashboard = () => {
+    setNativeConversation(undefined)
+    setSearchParams({ dashboard: undefined, externalWorker: undefined, externalProvider: undefined, externalSession: undefined }, { replace: true })
+  }
   const [attachNativeConversation, setAttachNativeConversation] = createSignal<NativeConversationRef>()
   const [nativeAttachBusy, setNativeAttachBusy] = createSignal(false)
   const [nativeAttachError, setNativeAttachError] = createSignal('')
@@ -1654,10 +1658,6 @@ export const AppShell: Component = () => {
     finally {
       setNativeAttachBusy(false)
     }
-  }
-  const closeAgentDashboard = () => {
-    setNativeConversation(undefined)
-    setSearchParams({ dashboard: undefined, externalWorker: undefined, externalProvider: undefined, externalSession: undefined }, { replace: true })
   }
   const openDashboardAgent = (row: DashboardAgent) => {
     // Resolve again on click: a live row may have moved or closed while shown.
