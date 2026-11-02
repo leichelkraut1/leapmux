@@ -73,6 +73,7 @@ vi.mock('~/context/AuthContext', () => ({
 
 vi.mock('@solidjs/router', () => ({
   useNavigate: () => vi.fn(),
+  useSearchParams: () => [{}, vi.fn()],
 }))
 
 const {

@@ -78,7 +78,9 @@ export const AttachNativeConversationDialog: Component<AttachNativeConversationD
           event.preventDefault()
           confirm()
         }}
-        onKeyDown={(event) => {
+        // Native binding runs before Dialog's native keydown listener. A
+        // delegated Solid handler would prevent default after Dialog submitted.
+        on:keydown={(event) => {
           if (event.key === 'Enter' && event.target instanceof HTMLInputElement && event.target.closest('[popover]'))
             event.preventDefault()
         }}
