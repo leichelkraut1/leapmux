@@ -48,6 +48,12 @@ export const worktreeMenu = style({
   gap: 'var(--space-1)',
 })
 
+export const worktreeOptions = style({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 'var(--space-1)',
+})
+
 export const error = style({
   margin: 0,
   color: 'var(--danger)',
