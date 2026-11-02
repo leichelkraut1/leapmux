@@ -12,6 +12,7 @@ import X from 'lucide-solid/icons/x'
 import { createMemo, createSignal, on, Show, useContext } from 'solid-js'
 import { createContextMenuAnchor } from '~/components/common/DropdownMenu'
 import { IconButton, IconButtonState } from '~/components/common/IconButton'
+import { LinkedChatBadge } from '~/components/common/LinkedChatBadge'
 import { NotificationDot } from '~/components/common/NotificationDot'
 import { TabContextMenu } from '~/components/common/TabContextMenu'
 import { TabTypeIcon } from '~/components/common/TabTypeIcon'
@@ -166,6 +167,7 @@ const TabLeaf: Component<{
           </span>
         </Tooltip>
       </Show>
+      <LinkedChatBadge tab={props.tab} />
       <Show when={!props.isEditing}>
         <AgentTreeStatus tab={props.tab} />
       </Show>
