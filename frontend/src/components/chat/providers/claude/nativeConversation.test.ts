@@ -173,6 +173,8 @@ describe('Claude read-only native conversation projection', () => {
       { type: 'progress', data: { type: 'future-progress', output: 'Generated progress' } },
       { type: 'queue-operation', operation: 'enqueue', content: 'Generated pending question' },
       { type: 'custom-title', message: { content: [{ type: 'future-block', text: 'Generated unexpected message' }] } },
+      { type: 'custom-title', message: 'Generated unexpected native message' },
+      { type: 'cost-state', error: 'Generated storage error' },
     )
     const frames = projectClaudeNativeConversation(raw, format, session)
     expect(frames[0]!.content).toBe(raw[0]!.nativeJson)

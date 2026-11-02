@@ -1,4 +1,4 @@
-import { isObject, pickString } from '~/lib/jsonPick'
+import { pickString } from '~/lib/jsonPick'
 
 /**
  * Claude's saved session store mixes conversation frames with UI/state records.
@@ -29,7 +29,7 @@ const STORAGE_RECORD_TYPES = new Set([
 export function claudeNativeMetadata(payload: Record<string, unknown>): boolean {
   // A record carrying message/content blocks is not merely a storage update,
   // even if a future CLI reuses one of the metadata names above.
-  if (isObject(payload.message) || payload.content !== undefined)
+  if (payload.message !== undefined || payload.content !== undefined || payload.text !== undefined || payload.error !== undefined)
     return false
   const type = pickString(payload, 'type')
   if (STORAGE_RECORD_TYPES.has(type))

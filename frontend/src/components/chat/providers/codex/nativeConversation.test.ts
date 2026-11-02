@@ -152,6 +152,7 @@ describe('projectCodexNativeConversation', () => {
 
   it('deduplicates proved core text mirrors without losing distinct turns or future content', () => {
     const records = nativeRecords([
+      { type: 'turn_context', payload: { turn_id: 'generated-turn' } },
       event({ type: 'item_started', item: { type: 'AgentMessage', id: 'generated-answer', content: [{ type: 'Text', text: 'Generated answer' }] } }),
       event({ type: 'agent_message', message: 'Generated answer' }),
       event({ type: 'item_completed', item: { type: 'AgentMessage', id: 'generated-answer', content: [{ type: 'Text', text: 'Generated answer' }] } }),
@@ -162,10 +163,10 @@ describe('projectCodexNativeConversation', () => {
     const messages = projectCodexNativeConversation(records, format, session)
     expect(messages).toHaveLength(3)
     expect(messages.map(message => prepareChatRow(message).extraction.kind)).toEqual(['row', 'row', 'unsupported'])
-    expect(messages.map(message => message.content)).toEqual([records[3]!.nativeJson, records[4]!.nativeJson, records[5]!.nativeJson])
+    expect(messages.map(message => message.content)).toEqual([records[4]!.nativeJson, records[5]!.nativeJson, records[6]!.nativeJson])
     // Loading a response mirror removes only its duplicated core row; unrelated
     // message IDs do not depend on how much history happens to be loaded.
-    expect(projectCodexNativeConversation(records.slice(4), format, session).map(message => message.id)).toEqual(messages.slice(1).map(message => message.id))
+    expect(projectCodexNativeConversation(records.slice(5), format, session).map(message => message.id)).toEqual(messages.slice(1).map(message => message.id))
   })
 
   it('reads core command outcomes and output without treating completion as success', () => {
@@ -175,12 +176,71 @@ describe('projectCodexNativeConversation', () => {
     ])
     const messages = projectCodexNativeConversation(records, format, session)
     const scenario = createTranscriptScenario({ archive: messages })
-    expect(messages.map(message => [message.spanId, message.spanType])).toEqual([['generated-command', 'commandExecution'], ['generated-command', 'commandExecution']])
-    expect(scenario.toolRow(messages[1]!.id)).toMatchObject({
+    expect(messages.map(message => [message.spanId, message.spanType])).toEqual([['generated-command', 'commandExecution']])
+    expect(scenario.toolRow(messages[0]!.id)).toMatchObject({
       role: 'result',
       call: { kind: 'execute', status: 'failed', request: { command: 'printf generated', cwd: '/harmless' }, result: { commands: [{ output: 'Generated stderr', exitCode: 2, durationMs: 1500 }] } },
     })
-    expect(messages[1]!.content).toEqual(records[1]!.nativeJson)
+    expect(messages[0]!.content).toEqual(records[1]!.nativeJson)
+  })
+
+  it('deduplicates only exact reasoning mirrors with the same native id and turn', () => {
+    const reasoning = response({ type: 'reasoning', id: 'generated-reasoning', summary: [{ type: 'summary_text', text: 'Generated summary' }], content: [] })
+    const core = event({ type: 'item_completed', item: { type: 'Reasoning', id: 'generated-reasoning', summary_text: ['Generated summary'], raw_content: [] } })
+    const source = nativeRecords([{ type: 'turn_context', payload: { turn_id: 'generated-turn' } }, reasoning, core])
+    const messages = projectCodexNativeConversation(source, format, session)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]!.content).toEqual(source[1]!.nativeJson)
+    for (const different of [
+      { ...core, payload: { ...core.payload, turn_id: 'different-turn' } },
+      event({ type: 'item_completed', item: { type: 'Reasoning', id: 'different-id', summary_text: ['Generated summary'], raw_content: [] } }),
+      event({ type: 'item_completed', item: { type: 'Reasoning', id: 'generated-reasoning', summary_text: ['Generated different summary'], raw_content: [] } }),
+      event({ type: 'item_completed', item: { type: 'Reasoning', id: 'generated-reasoning', summary_text: ['Generated summary'], raw_content: ['Generated additional content'] } }),
+    ])
+      expect(projectCodexNativeConversation(nativeRecords([{ type: 'turn_context', payload: { turn_id: 'generated-turn' } }, reasoning, different]), format, session)).toHaveLength(2)
+  })
+
+  it('keeps one native completed tool for an exact raw call and result mirror', () => {
+    const source = nativeRecords([
+      { type: 'turn_context', payload: { turn_id: 'generated-turn' } },
+      event({ type: 'item_started', item: { type: 'DynamicToolCall', id: 'generated-tool', tool: 'generated', arguments: { z: 2, keep_snake_case: 'input' }, status: 'in_progress' }, started_at_ms: 1000 }),
+      response({ type: 'function_call', call_id: 'generated-tool', name: 'generated', arguments: '{"keep_snake_case":"input","z":2}' }),
+      event({ type: 'item_completed', item: { type: 'DynamicToolCall', id: 'generated-tool', tool: 'generated', arguments: { z: 2, keep_snake_case: 'input' }, status: 'failed', content_items: [{ type: 'inputText', text: 'Generated failure detail' }] }, started_at_ms: 1000, completed_at_ms: 1010 }),
+      response({ type: 'function_call_output', call_id: 'generated-tool', output: 'Generated failure detail', is_error: true }),
+    ])
+    const messages = projectCodexNativeConversation(source, format, session)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]!.content).toEqual(source[3]!.nativeJson)
+    expect(createTranscriptScenario({ archive: messages }).toolRow(messages[0]!.id).call).toMatchObject({
+      kind: 'mcp', status: 'failed', request: { tool: 'generated', args: { z: 2, keep_snake_case: 'input' } }, result: { content: [{ type: 'text', text: 'Generated failure detail' }] },
+    })
+  })
+
+  it('retains raw tool data when content or ownership cannot prove an exact mirror', () => {
+    const raw = response({ type: 'function_call', call_id: 'generated-tool', name: 'generated', arguments: '{"generated":true}' })
+    const result = response({ type: 'function_call_output', call_id: 'generated-tool', output: 'Generated output' })
+    for (const core of [
+      event({ type: 'item_completed', item: { type: 'DynamicToolCall', id: 'generated-tool', tool: 'generated', arguments: { generated: true, extra_option: true }, status: 'completed', content_items: [{ type: 'inputText', text: 'Generated output' }] } }),
+      event({ type: 'item_completed', turn_id: 'different-turn', item: { type: 'DynamicToolCall', id: 'generated-tool', tool: 'generated', arguments: { generated: true }, status: 'completed', content_items: [{ type: 'inputText', text: 'Generated output' }] } }),
+      event({ type: 'item_completed', item: { type: 'DynamicToolCall', id: 'generated-tool', tool: 'generated', arguments: { generated: true }, status: 'completed', content_items: [{ type: 'inputText', text: 'Generated output', future_data: true }] } }),
+    ]) {
+      const source = nativeRecords([{ type: 'turn_context', payload: { turn_id: 'generated-turn' } }, raw, core, result])
+      const messages = projectCodexNativeConversation(source, format, session)
+      expect(messages).toHaveLength(3)
+      expect(messages.map(message => message.content)).toEqual(source.slice(1).map(record => record.nativeJson))
+    }
+  })
+
+  it('does not let delayed item events change ownership of the current response stream', () => {
+    const source = nativeRecords([
+      { type: 'turn_context', payload: { turn_id: 'current-turn' } },
+      response({ type: 'function_call', call_id: 'generated-call', name: 'generated', arguments: '{}' }),
+      event({ type: 'item_completed', turn_id: 'earlier-turn', item: { type: 'Plan', id: 'earlier-plan', text: 'Generated earlier plan' } }),
+      response({ type: 'function_call_output', call_id: 'generated-call', output: 'Generated current output' }),
+    ])
+    const messages = projectCodexNativeConversation(source, format, session)
+    expect(messages.map(message => prepareMessage(message).resolved.parentObject?.turnId)).toEqual(['current-turn', 'earlier-turn', 'current-turn'])
+    expect(createTranscriptScenario({ archive: messages }).toolRow(messages[2]!.id).call).toMatchObject({ request: { tool: 'generated' }, result: { content: [{ type: 'text', text: 'Generated current output' }] } })
   })
 
   it('reads native dynamic tool results without renaming user argument or result keys', () => {
@@ -193,6 +253,12 @@ describe('projectCodexNativeConversation', () => {
       call: { kind: 'mcp', status: 'completed', request: { server: 'generated', tool: 'inspect', args: { keep_snake_case: 'generated input' } }, result: { content: [{ type: 'text', text: 'Generated tool output' }], durationMs: 10 } },
     })
     expect(message.content).toEqual(records[0]!.nativeJson)
+  })
+
+  it('preserves a native dynamic tool error even when no output content was recorded', () => {
+    const source = nativeRecords([event({ type: 'item_completed', item: { type: 'DynamicToolCall', id: 'generated-error', tool: 'generated', arguments: {}, status: 'failed', error: 'Generated error without output' }, completed_at_ms: 1010 })])
+    const message = projectCodexNativeConversation(source, format, session)[0]!
+    expect(createTranscriptScenario({ archive: [message] }).toolRow(message.id).call).toMatchObject({ kind: 'mcp', status: 'failed', result: { content: [], error: 'Generated error without output' } })
   })
 
   it('renders native end and interruption markers while suppressing turn-start telemetry', () => {
