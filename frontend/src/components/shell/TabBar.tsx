@@ -19,6 +19,7 @@ import { AgentProviderIcon, agentProviderLabel } from '~/components/common/Agent
 import { DragHandle } from '~/components/common/DragHandle'
 import { createContextMenuAnchor, DropdownMenu, DropdownMenuCheckableItem } from '~/components/common/DropdownMenu'
 import { IconButton, IconButtonState } from '~/components/common/IconButton'
+import { LinkedChatBadge } from '~/components/common/LinkedChatBadge'
 import { NewTabMenuItems } from '~/components/common/NewTabMenuItems'
 import { providerButton } from '~/components/common/NewTabMenuItems.css'
 import { NotificationDot } from '~/components/common/NotificationDot'
@@ -486,6 +487,7 @@ export const TabBar: Component<TabBarProps> = (props) => {
         >
           <TabRenameInput tab={tab} />
         </Show>
+        <LinkedChatBadge tab={tab()} />
         <Show when={tab().hasNotification}>
           <NotificationDot testId="tab-notification" />
         </Show>

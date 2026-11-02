@@ -154,6 +154,7 @@ describe('WorkspaceTabTree interactions', () => {
     const onClose = vi.fn()
     renderTree(() => <WorkspaceTabTree repoGitStore={repoGitStore} tabs={[tab]} activeTabKey={null} onTabClick={() => {}} tabItemOps={{ onClose }} isLocalWorkerFn={() => false} workspaceId="ws-1" />)
     expect(screen.getByTestId('workspace-tab-close')).toHaveAccessibleName('Remove from LeapMux')
+    expect(screen.getByTestId('linked-chat-badge')).toHaveTextContent('Linked')
     const menu = within(screen.getByTestId('tab-tree-leaf-menu'))
     fireEvent.click(menu.getByRole('menuitem', { name: 'Remove from LeapMux', hidden: true }))
     expect(onClose).toHaveBeenCalledExactlyOnceWith(tab)

@@ -257,6 +257,7 @@ describe('tabBar archived prop', () => {
     const tab = { ...makeTab(TabType.NATIVE_CONVERSATION, 'native-one', 'Linked chat'), agentProvider: AgentProvider.CODEX }
     render(() => <PreferencesProvider><TabBar {...defaultProps} tabs={[tab]} onClose={onClose} /></PreferencesProvider>)
     expect(screen.getByTestId('tab-close')).toHaveAccessibleName('Remove from LeapMux')
+    expect(screen.getByTestId('linked-chat-badge')).toHaveTextContent('Linked')
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from LeapMux' }))
     expect(onClose).toHaveBeenCalledExactlyOnceWith(tab)
     expect(screen.queryByRole('menuitem', { name: 'Close' })).not.toBeInTheDocument()
