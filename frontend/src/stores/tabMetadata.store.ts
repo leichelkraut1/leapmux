@@ -218,12 +218,20 @@ export interface ImageMeta {
   imageIndex?: number | undefined
 }
 
+/** An E2EE reference to an outside session, without transcript or credentials. */
+export interface NativeConversationMeta {
+  sourceWorkerId?: string | undefined
+  agentProvider?: AgentProvider | undefined
+  sessionId?: string | undefined
+  displayName?: string | undefined
+}
+
 /**
  * Everything about a tab the CRDT does not carry. The intersection is what
  * `patch` accepts, so a caller may still write any field -- see `SharedMeta`
  * for why that laxity is deliberate rather than an oversight.
  */
-export type TabMetadata = SharedMeta & AgentMeta & TerminalMeta & StartupMeta & FileMeta & ImageMeta
+export type TabMetadata = SharedMeta & AgentMeta & TerminalMeta & StartupMeta & FileMeta & ImageMeta & NativeConversationMeta
 
 /** Narrowing helpers for callers that only hold a `FileViewMode`-ish value. */
 export type { FileDiffBase, FileViewMode }
@@ -246,6 +254,14 @@ export function tabPayloadMetadata(payload: TabPayloadView): TabMetadata {
   assignDefined(shared, 'workingDir', payload.workingDir || undefined)
   if (payload.kind === 'file') {
     assignDefined(shared, 'filePath', payload.filePath || undefined)
+    return shared
+  }
+  if (payload.kind === 'nativeConversation') {
+    assignDefined(shared, 'sourceWorkerId', payload.sourceWorkerId || undefined)
+    assignDefined(shared, 'agentProvider', payload.agentProvider || undefined)
+    assignDefined(shared, 'sessionId', payload.sessionId || undefined)
+    assignDefined(shared, 'displayName', payload.displayName || undefined)
+    assignDefined(shared, 'title', payload.displayName || undefined)
     return shared
   }
   assignDefined(shared, 'title', payload.title || undefined)
