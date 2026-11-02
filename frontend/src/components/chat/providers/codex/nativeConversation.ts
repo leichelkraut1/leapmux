@@ -34,8 +34,9 @@ function knownTokenUsageRecord(envelope: Record<string, unknown>, sessionId: str
   if (envelope.type !== 'token_usage_record'
     || !exactKeys(envelope, ['timestamp', 'ordinal', 'type', 'payload'])
     || typeof envelope.timestamp !== 'string' || envelope.timestamp.length > 128 || !Number.isFinite(Date.parse(envelope.timestamp))
-    || typeof envelope.ordinal !== 'number' || !Number.isSafeInteger(envelope.ordinal) || envelope.ordinal < 0)
+    || typeof envelope.ordinal !== 'number' || !Number.isSafeInteger(envelope.ordinal) || envelope.ordinal < 0) {
     return false
+  }
   const payload = pickObject(envelope, 'payload')
   if (!payload || !exactKeys(payload, ['thread_id', 'turn_id', 'session_id', 'root_turn_id', 'response_id', 'usage', 'turn_token_usage', 'thread_token_usage'])
     || payload.thread_id !== sessionId || payload.session_id !== sessionId
@@ -43,8 +44,9 @@ function knownTokenUsageRecord(envelope: Record<string, unknown>, sessionId: str
       const id = payload[key]
       return typeof id === 'string' && id.length > 0 && id.length <= 256
     })
-    || payload.turn_id !== payload.root_turn_id)
+    || payload.turn_id !== payload.root_turn_id) {
     return false
+  }
   return ['usage', 'turn_token_usage', 'thread_token_usage'].every((key) => {
     const counters = pickObject(payload, key)
     return counters !== null && exactKeys(counters, tokenUsageCounterKeys)
