@@ -4,7 +4,7 @@ let instanceId = null
 let version = null
 let bridge = null
 let registered = false
-let polling = false
+let polling = null
 let activeTurn = null
 let stopped = false
 const outcomes = []
@@ -82,9 +82,7 @@ async function deliver($, command) {
   }
 }
 
-async function tick($) {
-  if (polling || !sessionId) return
-  polling = true
+async function tickOnce($) {
   try {
     pruneSeen(await $.clock.now())
     const descriptor = JSON.parse(await $.fs.read(__LEAPMUX_DESCRIPTOR_JSON__))
@@ -101,7 +99,8 @@ async function tick($) {
       registered = true
     }
     const batch = outcomes.slice(0, 64)
-    const response = await post($, '/poll', { activeTurn: activeTurn ?? '', stopped, outcomes: batch,
+    const acknowledged = { sessionId, instanceId, epoch: bridge.epoch, activeTurn: activeTurn ?? '', stopped }
+    const response = await post($, '/poll', { activeTurn: acknowledged.activeTurn, stopped: acknowledged.stopped, outcomes: batch,
       approvalIds: [...heldApprovals.keys()] })
     outcomes.splice(0, batch.length)
     const acknowledgedAt = await $.clock.now()
@@ -110,10 +109,22 @@ async function tick($) {
       if (record?.terminal) record.ackedAt = acknowledgedAt
     }
     for (const command of response.commands ?? []) await deliver($, command)
+    return acknowledged
   } catch {
     // Keep the original chat running. Retain outcomes, but never replay sends.
     registered = false
-  } finally { polling = false }
+    return null
+  }
+}
+
+function tick($) {
+  if (!sessionId) return Promise.resolve(null)
+  if (polling) return polling
+  const running = tickOnce($).finally(() => {
+    if (polling === running) polling = null
+  })
+  polling = running
+  return running
 }
 
 // This event is the real permission request, after Claude's normal checks. It
@@ -123,15 +134,33 @@ async function tick($) {
 // Bridge loss returns no decision and keeps the native flow.
 async function approval($, e, next) {
   if (!sessionId || !registered || !bridge || !activeTurn || stopped || e.agent_id !== undefined ||
-      e.session_id !== sessionId || heldApprovals.size >= __LEAPMUX_MAX_APPROVALS__) return next(e)
+      e.session_id !== sessionId || next.signal.aborted || heldApprovals.size >= __LEAPMUX_MAX_APPROVALS__) return next(e)
   const title = 'Tool approval: ' + e.tool_name
   const detail = JSON.stringify({ tool: e.tool_name, input: e.tool_input, cwd: e.cwd }, null, 2)
   if (new TextEncoder().encode(title).length > __LEAPMUX_APPROVAL_TEXT_BYTES__ ||
       new TextEncoder().encode(detail).length > __LEAPMUX_APPROVAL_DETAIL_BYTES__ ||
       title.includes('\0') || detail.includes('\0')) return next(e)
-  const id = crypto.randomUUID()
   const turnId = activeTurn
   const epoch = bridge.epoch
+  const requestSession = sessionId
+  const requestInstance = instanceId
+  const current = () => !next.signal.aborted && sessionId === requestSession && instanceId === requestInstance &&
+    registered && bridge?.epoch === epoch && activeTurn === turnId && !stopped
+  try {
+    // Finish an older in-flight poll, then acknowledge a fresh current-turn
+    // heartbeat. Awaiting only the polling flag can leave the server on the
+    // previous turn and silently fall back before this request is registered.
+    if (polling) await polling
+    if (!current()) return next(e)
+    const acknowledged = await tick($)
+    if (!current() || !acknowledged || acknowledged.sessionId !== requestSession ||
+        acknowledged.instanceId !== requestInstance || acknowledged.epoch !== epoch ||
+        acknowledged.activeTurn !== turnId || acknowledged.stopped ||
+        heldApprovals.size >= __LEAPMUX_MAX_APPROVALS__) return next(e)
+  } catch {
+    return next(e)
+  }
+  const id = crypto.randomUUID()
   heldApprovals.set(id, { turnId, epoch })
   const abandoned = () => {
     heldApprovals.delete(id)
