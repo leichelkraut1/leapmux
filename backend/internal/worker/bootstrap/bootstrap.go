@@ -542,6 +542,7 @@ func BuildTabSync(queries *db.Queries, owner userid.UserID) (*leapmuxv1.WorkerTa
 		leapmuxv1.TabType_TAB_TYPE_TERMINAL,
 		leapmuxv1.TabType_TAB_TYPE_FILE,
 		leapmuxv1.TabType_TAB_TYPE_IMAGE,
+		leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION,
 		leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED,
 	} {
 		var ids []string
@@ -553,7 +554,7 @@ func BuildTabSync(queries *db.Queries, owner userid.UserID) (*leapmuxv1.WorkerTa
 			ids, err = queries.ListAllAgentIDs(ctx)
 		case leapmuxv1.TabType_TAB_TYPE_TERMINAL:
 			ids, err = queries.ListAllTerminalIDs(ctx)
-		case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE:
+		case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
 			// A payload-backed tab's CRDT row carries a worker_id (the frontend
 			// stamps ctx.workerId and the validator rejects a live tab without
 			// one), so it lands in workspace_tab_owned and comes back from

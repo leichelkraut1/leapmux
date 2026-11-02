@@ -15,6 +15,9 @@ enum TabType {
   // tab. Holds no pixels: the tab addresses `(agent_id, seq, image_index)` and
   // the client re-fetches the message. See ImageTabPayload.
   TAB_TYPE_IMAGE = 4;
+  // A private reference to an existing native chat. Linking it never creates,
+  // resumes, moves, or takes ownership of the conversation.
+  TAB_TYPE_NATIVE_CONVERSATION = 5;
 }
 
 // WorkspaceArchiveState identifies whether a workspace accepts mutations and

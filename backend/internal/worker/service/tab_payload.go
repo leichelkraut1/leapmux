@@ -8,7 +8,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"google.golang.org/protobuf/proto"
 
@@ -64,7 +67,14 @@ func (s *TabPayloadStore) Register(ctx context.Context, p RegisterTabPayloadPara
 		return fmt.Errorf("register tab payload: %w: %w", ErrInvalidTabPayload, err)
 	}
 	stored.WorkingDir = workingDir
-	release, err := s.lifecycle.admit(workingDir, tabPayloadLinkDir(stored))
+	// A native chat's directory is destination placement, not an open resource.
+	// Its link neither blocks deletion nor claims ownership of either computer's
+	// checkout. Admission must therefore not acquire a directory reference.
+	admissionDir := workingDir
+	if stored.GetNativeConversation() != nil {
+		admissionDir = ""
+	}
+	release, err := s.lifecycle.admit(admissionDir, tabPayloadLinkDir(stored))
 	if err != nil {
 		return fmt.Errorf("register tab payload: %w", err)
 	}
@@ -143,10 +153,29 @@ func tabPayloadType(payload *leapmuxv1.TabPayload) (leapmuxv1.TabType, error) {
 			return leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED, fmt.Errorf("image index must not be negative, got %d", kind.Image.GetImageIndex())
 		}
 		return leapmuxv1.TabType_TAB_TYPE_IMAGE, nil
+	case *leapmuxv1.TabPayload_NativeConversation:
+		native := kind.NativeConversation
+		if !nativeConversationWorkerID.MatchString(native.GetSourceWorkerId()) {
+			return leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED, errors.New("native source_worker_id is invalid")
+		}
+		if native.GetAgentProvider() != leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX &&
+			native.GetAgentProvider() != leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE {
+			return leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED, errors.New("native agent_provider must be Codex or Claude")
+		}
+		if !nativeSessionID.MatchString(native.GetSessionId()) {
+			return leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED, errors.New("native session_id is invalid")
+		}
+		title := native.GetDisplayName()
+		if !utf8.ValidString(title) || utf8.RuneCountInString(title) > maxNativeSessionDisplayNameRunes || strings.ContainsFunc(title, unicode.IsControl) {
+			return leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED, errors.New("native display_name is invalid")
+		}
+		return leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION, nil
 	default:
 		return leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED, errors.New("payload specifies no tab kind")
 	}
 }
+
+var nativeConversationWorkerID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 // tabPayloadLinkDir is the directory whose worktree this tab ref-counts.
 //
@@ -159,6 +188,9 @@ func tabPayloadType(payload *leapmuxv1.TabPayload) (leapmuxv1.TabType, error) {
 // in, so it ref-counts that, which is what keeps the last-tab-close prompt from
 // offering to delete a worktree that still has a visible tab on it.
 func tabPayloadLinkDir(payload *leapmuxv1.TabPayload) string {
+	if payload.GetNativeConversation() != nil {
+		return ""
+	}
 	if file := payload.GetFile(); file != nil {
 		return filepath.Dir(file.GetFilePath())
 	}
