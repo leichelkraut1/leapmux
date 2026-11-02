@@ -146,16 +146,40 @@ describe('Claude read-only native conversation projection', () => {
       ] })
   })
 
-  it('keeps unknown native blocks and storage records available to the raw read-only fallback', () => {
+  it('keeps raw bookkeeping bytes while hiding only recognized non-message records', () => {
     const raw = records(
       { type: 'file-history-snapshot', snapshot: { trackedFileBackups: {} } },
+      { type: 'queue-operation', operation: 'dequeue' },
+      { type: 'custom-title', customTitle: 'Generated native title' },
+      { type: 'agent-name', agentName: 'Generated' },
+      { type: 'cost-state', cost: { inputTokens: 0 } },
+      { type: 'user', message: { content: 'Generated retained question' } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Generated retained answer' }] } },
+    )
+    const frames = projectClaudeNativeConversation(raw, format, session)
+    expect(frames).toHaveLength(raw.length)
+    for (let index = 0; index < 5; index++) {
+      expect(frames[index]!.content).toBe(raw[index]!.nativeJson)
+      expect(prepareChatRow(frames[index]!).extraction).toMatchObject({ kind: 'row', row: { kind: 'hidden' } })
+    }
+    expect(prepareChatRow(frames[5]!).extraction).toMatchObject({ kind: 'row', row: { kind: 'user', text: 'Generated retained question' } })
+    expect(prepareChatRow(frames[6]!).extraction).toMatchObject({ kind: 'row', row: { kind: 'assistant-text', text: 'Generated retained answer' } })
+  })
+
+  it('keeps future records, unknown blocks, progress and queued prompt bodies raw-visible', () => {
+    const raw = records(
+      { type: 'future-storage-record', generatedField: 'kept' },
       { type: 'assistant', message: { content: [{ type: 'future-block', generatedField: 'kept' }] } },
+      { type: 'progress', data: { type: 'future-progress', output: 'Generated progress' } },
+      { type: 'queue-operation', operation: 'enqueue', content: 'Generated pending question' },
+      { type: 'custom-title', message: { content: [{ type: 'future-block', text: 'Generated unexpected message' }] } },
     )
     const frames = projectClaudeNativeConversation(raw, format, session)
     expect(frames[0]!.content).toBe(raw[0]!.nativeJson)
     const unknown = JSON.parse(decoder.decode(frames[1]!.content))
     expect(unknown.message.content).toEqual([{ type: 'future-block', generatedField: 'kept' }])
     expect(classifyClaudeCodeMessage(input(unknown))).toEqual({ kind: 'unknown' })
+    expect(frames.map(frame => prepareChatRow(frame).extraction.kind)).toEqual(raw.map(() => 'unsupported'))
   })
 
   it('renders saved assistant strings as text while preserving their native envelope', () => {
