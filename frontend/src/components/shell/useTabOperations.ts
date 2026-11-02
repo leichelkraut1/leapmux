@@ -29,10 +29,11 @@ import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import { createDialogState, createUpdatableDialogState } from '~/hooks/createDialogState'
 import { makeIdGenerator } from '~/lib/idGenerator'
 import { basename, isAbsolute } from '~/lib/paths'
-import { fileTabPayload, imageTabPayload, nativeConversationTabPayload } from '~/lib/tabPayload'
+import { fileTabPayload, imageTabPayload, nativeConversationTabPayload, tabPayloadView } from '~/lib/tabPayload'
 import { MAX_BACKGROUND_CHAT_MESSAGES } from '~/stores/chat.store'
 import { descendantAgentTabs, isSubagentTab, planOptimisticRepoGit, tabDisplayLabel, tabKey } from '~/stores/tab.helpers'
 import { isPayloadBackedTabType } from '~/stores/tab.types'
+import { tabPayloadMetadata } from '~/stores/tabMetadata.store'
 import { emitAddTab, emitRemoveTab, positionAfterKey } from '~/stores/tabOps'
 import { nativeConversationMatches, nativeConversationPlacementAnchor, nativeConversationPlacementKey } from './nativeConversationPlacement'
 import { openTabInFocusedTile } from './openTabInFocusedTile'
@@ -790,7 +791,30 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
         return anchor
       }
       assertDestination()
-      const existing = view.forWorkspace(at.workspaceId).find(tab => nativeConversationMatches(tab, ref, at))
+      const candidates = () => view.forWorkspace(at.workspaceId)
+        .filter(tab => tab.type === TabType.NATIVE_CONVERSATION && tab.workerId === at.workerId)
+      const identityPending = (tab: Tab) => metadata.get(tab.id)?.hydrated !== true
+        || tab.type !== TabType.NATIVE_CONVERSATION || !tab.workingDir || !tab.sourceWorkerId || !tab.agentProvider || !tab.sessionId
+      const resolveCandidates = async () => {
+        // Placement is account-wide, but private identity can still be loading
+        // after a reload or a visit to another workspace. Unknown is not absent.
+        await Promise.all(candidates().filter(identityPending).map(async (tab) => {
+          const response = await workerRpc.getTabPayload(at.workerId, { tabId: tab.id })
+          const current = view.getById(TabType.NATIVE_CONVERSATION, tab.id)
+          if (!current || current.workerId !== at.workerId)
+            return
+          const payload = tabPayloadView(response.payload)
+          if (payload?.kind !== 'nativeConversation' || !payload.workingDir || !payload.sourceWorkerId || !payload.agentProvider || !payload.sessionId)
+            throw new Error('An existing linked chat could not be resolved. Reload before adding this chat.')
+          metadata.patch(tab.id, tabPayloadMetadata(payload))
+        }))
+        assertDestination()
+        if (candidates().some(identityPending))
+          throw new Error('Linked chats are still loading. Please try again.')
+      }
+      const findExisting = () => candidates().find(tab => nativeConversationMatches(tab, ref, at))
+      await resolveCandidates()
+      const existing = findExisting()
       if (existing) {
         handleTabSelect(existing)
         return existing
@@ -809,6 +833,13 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
           }),
         })
         // Re-check after the RPC: the chooser can outlive a move, archive or close.
+        await resolveCandidates()
+        const appeared = findExisting()
+        if (appeared) {
+          await workerRpc.revokeTabPayload(at.workerId, { tabId, worktreeAction: WorktreeAction.KEEP }).catch(() => {})
+          handleTabSelect(appeared)
+          return appeared
+        }
         const anchor = assertDestination()
         const tileId = anchor.tileId!
         metadata.patch(tabId, {

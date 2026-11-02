@@ -5,7 +5,7 @@ import { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import { repoKey } from '~/stores/repoGit'
 import { createRepoGitStore } from '~/stores/repoGit.store'
-import { nativeConversationDestinations, nativeConversationMatches, nativeConversationPlacementAnchor } from './nativeConversationPlacement'
+import { nativeConversationDestinations, nativeConversationMatches, nativeConversationPlacementAnchor, nativeConversationPlacementKey } from './nativeConversationPlacement'
 
 describe('native conversation worktree placement', () => {
   it('groups existing checkout tabs by workspace and destination PC and excludes archived/unresolved tabs', () => {
@@ -35,5 +35,35 @@ describe('native conversation worktree placement', () => {
     expect(nativeConversationMatches(tab, { ...ref, workerId: 'another-pc' }, at)).toBe(false)
     expect(nativeConversationMatches(tab, ref, { ...at, workingDir: '/another/tree' })).toBe(false)
     expect(nativeConversationMatches(tab, ref, { ...at, workspaceId: 'another-workspace' })).toBe(false)
+  })
+
+  it('uses the same Windows checkout identity for link matches, pending keys, anchors and destinations', () => {
+    createRoot((dispose) => {
+      try {
+        const ref = { workerId: 'source-mac', workerName: 'Mac', agentProvider: AgentProvider.CLAUDE_CODE, sessionId: 'generated-source-session' }
+        const at = { workspaceId: 'workspace', workerId: 'windows', workingDir: 'C:/Generated/Worktree' }
+        const stored = { ...at, workingDir: 'c:\\generated\\worktree' }
+        const linked: Tab = { ...stored, id: 'native-fixture', tileId: 'tile', type: TabType.NATIVE_CONVERSATION, sourceWorkerId: ref.workerId, agentProvider: ref.agentProvider, sessionId: ref.sessionId }
+        expect(nativeConversationMatches(linked, ref, at)).toBe(true)
+        expect(nativeConversationPlacementKey(stored)).toBe(nativeConversationPlacementKey(at))
+        const git = createRepoGitStore()
+        const tabs: Tab[] = ['C:/Generated/Worktree', 'c:\\generated\\worktree'].map((dir, index) => ({ id: `anchor-${index}`, workspaceId: at.workspaceId, workerId: at.workerId, tileId: 'tile', type: TabType.TERMINAL, gitToplevel: dir }))
+        for (const tab of tabs)
+          git.upsert(repoKey(at.workerId, tab.gitToplevel!), { workerId: at.workerId, repoRoot: tab.gitToplevel!, toplevel: tab.gitToplevel!, branch: 'fixture' })
+        expect(nativeConversationPlacementAnchor(tabs, stored, git)?.id).toBe('anchor-0')
+        expect(nativeConversationDestinations({ tabs, workspaces: [{ id: at.workspaceId, name: 'Generated workspace' }], git, isWorkspaceMutatable: () => true, workerOnline: () => true, workerName: id => id })).toHaveLength(1)
+      }
+      finally { dispose() }
+    })
+  })
+
+  it('keeps POSIX case and literal backslashes distinct without rewriting any path', () => {
+    const ref = { workerId: 'source', workerName: 'Source', agentProvider: AgentProvider.CODEX, sessionId: 'generated-session' }
+    const at = { workspaceId: 'workspace', workerId: 'mac', workingDir: '/Generated/Worktree' }
+    const tab: Tab = { ...at, id: 'native-fixture', type: TabType.NATIVE_CONVERSATION, sourceWorkerId: ref.workerId, agentProvider: ref.agentProvider, sessionId: ref.sessionId }
+    expect(nativeConversationMatches(tab, ref, { ...at, workingDir: '/generated/Worktree' })).toBe(false)
+    expect(nativeConversationMatches(tab, ref, { ...at, workingDir: '/Generated\\Worktree' })).toBe(false)
+    expect(nativeConversationPlacementKey(at)).not.toBe(nativeConversationPlacementKey({ ...at, workingDir: '/generated/Worktree' }))
+    expect(tab.workingDir).toBe('/Generated/Worktree')
   })
 })

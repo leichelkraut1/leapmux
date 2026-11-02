@@ -3,7 +3,7 @@ import type { NativeConversationDestination } from '~/components/dashboard/Attac
 import type { RepoGitStore } from '~/stores/repoGit'
 import type { Tab } from '~/stores/tab.types'
 import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
-import { basename } from '~/lib/paths'
+import { basename, detectFlavor, normalizeSeparators } from '~/lib/paths'
 import { repoGitView } from '~/stores/repoGit'
 
 export interface NativeConversationPlacement {
@@ -12,14 +12,22 @@ export interface NativeConversationPlacement {
   workingDir: string
 }
 
+// Git reports Windows checkouts with '/', while the worker stores native '\'.
+// This is comparison only: neither the stored placement nor source cwd changes.
+function workingDirKey(path: string): string {
+  const flavor = detectFlavor(path)
+  const normalized = normalizeSeparators(path, flavor)
+  return flavor === 'win32' ? normalized.toLowerCase() : normalized
+}
+
 /** Destination identity is independent of the source conversation's PC and cwd. */
 export function nativeConversationPlacementKey(at: NativeConversationPlacement): string {
-  return JSON.stringify([at.workspaceId, at.workerId, at.workingDir])
+  return JSON.stringify([at.workspaceId, at.workerId, workingDirKey(at.workingDir)])
 }
 
 export function nativeConversationMatches(tab: Tab, ref: NativeConversationRef, at: NativeConversationPlacement): boolean {
   return tab.type === TabType.NATIVE_CONVERSATION
-    && tab.workspaceId === at.workspaceId && tab.workerId === at.workerId && tab.workingDir === at.workingDir
+    && tab.workspaceId === at.workspaceId && tab.workerId === at.workerId && workingDirKey(tab.workingDir ?? '') === workingDirKey(at.workingDir)
     && tab.sourceWorkerId === ref.workerId && tab.agentProvider === ref.agentProvider && tab.sessionId === ref.sessionId
 }
 
@@ -27,7 +35,7 @@ export function nativeConversationMatches(tab: Tab, ref: NativeConversationRef, 
 export function nativeConversationPlacementAnchor(tabs: readonly Tab[], at: NativeConversationPlacement, git: RepoGitStore): Tab | undefined {
   return tabs.find(tab => tab.type !== TabType.NATIVE_CONVERSATION && !!tab.tileId
     && tab.workspaceId === at.workspaceId && tab.workerId === at.workerId
-    && repoGitView(tab, git).isGitRepo && repoGitView(tab, git).toplevel === at.workingDir)
+    && repoGitView(tab, git).isGitRepo && workingDirKey(repoGitView(tab, git).toplevel ?? '') === workingDirKey(at.workingDir))
 }
 
 export function nativeConversationDestinations(opts: {
