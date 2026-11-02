@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
+	"github.com/leapmux/leapmux/internal/util/testutil"
 	"github.com/leapmux/leapmux/internal/util/userid"
 	"github.com/leapmux/leapmux/internal/worker/channel"
 	db "github.com/leapmux/leapmux/internal/worker/generated/db"
@@ -149,4 +151,52 @@ func TestNativeConversationTabRemoveOnlyUnlinks(t *testing.T) {
 			assert.EqualValues(t, 1, count, "only the stray native association was removed")
 		})
 	}
+}
+
+func TestNativeConversationTabAdmissionDoesNotBlockWorktreeRemoval(t *testing.T) {
+	t.Parallel()
+	fx := setupCloseTabFixture(t, leapmuxv1.TabType_TAB_TYPE_AGENT, "native-admission")
+	ctx := testutil.DeadlineContext(t)
+	removalReady := make(chan struct{})
+	continueRemoval := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(continueRemoval) }) }
+	defer release()
+	fx.svc.beforeWorktreeRemovalFn = func() {
+		close(removalReady)
+		select {
+		case <-continueRemoval:
+		case <-ctx.Done():
+		}
+	}
+	closed := make(chan *leapmuxv1.CloseTabResult, 1)
+	go func() {
+		result, _ := fx.svc.closeAgentTabCommon("user-1", fx.tabID, leapmuxv1.WorktreeAction_WORKTREE_ACTION_REMOVE, dropWorktreeLink)
+		closed <- result
+	}()
+	select {
+	case <-removalReady:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	admitted := make(chan error, 1)
+	go func() {
+		admitted <- fx.svc.TabPayloads.Register(ctx, RegisterTabPayloadParams{UserID: "user-1", TabID: "native-link", Payload: nativeConversationPayloadFor(fx.wtDir)})
+	}()
+	select {
+	case err := <-admitted:
+		require.NoError(t, err, "a placement-only link can register while physical removal is locked")
+	case <-ctx.Done():
+		t.Fatal("native link incorrectly waited for a physical directory lock")
+	}
+	release()
+	select {
+	case result := <-closed:
+		assert.Equal(t, leapmuxv1.WorktreeRemovalOutcome_WORKTREE_REMOVAL_OUTCOME_REMOVED, result.WorktreeRemoval)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	assert.NoDirExists(t, fx.wtDir)
+	_, err := fx.svc.TabPayloads.Get(ctx, "user-1", "native-link")
+	require.NoError(t, err)
 }

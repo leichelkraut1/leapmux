@@ -108,8 +108,9 @@ func TestWorktreeRemovalSerializesTabAdmission(t *testing.T) {
 						payload = &leapmuxv1.TabPayload{WorkingDir: fx.wtDir, Kind: &leapmuxv1.TabPayload_Image{Image: &leapmuxv1.ImageTabPayload{AgentId: fx.tabID, Seq: 1}}}
 					}
 					admitted <- fx.svc.TabPayloads.Register(ctx, RegisterTabPayloadParams{UserID: "user-1", TabID: "new-payload", Payload: payload})
-				case leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
-					// Native links do not participate in physical directory admission.
+				case leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
+					admitted <- fx.svc.TabPayloads.Register(ctx, RegisterTabPayloadParams{UserID: "user-1", TabID: "new-native-link", Payload: nativeConversationPayloadFor(fx.wtDir)})
+				case leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED:
 					admitted <- errors.New("invalid test tab type")
 				}
 			}()
