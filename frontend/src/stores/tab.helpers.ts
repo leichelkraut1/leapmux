@@ -791,6 +791,8 @@ export function tabDisplayLabel(tab: Tab): string {
   // `title` above; this is the pre-hydration placeholder.
   if (tab.type === TabType.IMAGE)
     return 'Image'
+  if (tab.type === TabType.NATIVE_CONVERSATION)
+    return tab.displayName || 'Outside chat'
   return tab.type === TabType.AGENT ? 'Agent' : 'Terminal'
 }
 
@@ -880,7 +882,8 @@ export function canCloseTab(archived: boolean | undefined): boolean {
  * workspace.
  *
  * A payload-backed tab takes its title from what it SHOWS -- a file's path, or
- * the name the image arrived under -- so a user-typed name has nothing to hold.
+ * the name the image or outside conversation arrived under -- so a user-typed
+ * name has nothing to hold.
  * An archived workspace takes no mutation at all.
  *
  * The twin of {@link canCloseTab}, and shared for the same reason: the tab bar
