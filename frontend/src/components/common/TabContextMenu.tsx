@@ -22,6 +22,8 @@ export interface TabContextMenuProps extends ContextMenuTargetProps {
   'onRename'?: () => void
   /** Close the tab. Omit to hide the item -- a tab the surface refuses to close has no Close. */
   'onClose'?: () => void
+  /** A reference tab removes its link while its original conversation remains open. */
+  'closeLabel'?: string
   /** A close is already in flight. The item stays visible, so the row's menu does not reshape mid-click. */
   'isClosing'?: boolean
   'pop'?: TabPopAction
@@ -97,7 +99,7 @@ export const TabContextMenu: Component<TabContextMenuProps> = (props) => {
                 props.onClose!()
             }}
           >
-            Close
+            {props.closeLabel ?? 'Close'}
           </button>
         </Show>
       </DropdownMenu>

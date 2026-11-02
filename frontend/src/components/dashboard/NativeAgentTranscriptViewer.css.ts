@@ -9,6 +9,11 @@ export const viewer = style({
   gap: 'var(--space-2)',
 })
 
+export const embeddedViewer = style({
+  padding: 'var(--space-3)',
+  overflow: 'hidden',
+})
+
 export const heading = style({
   display: 'flex',
   flexWrap: 'wrap',
@@ -16,6 +21,12 @@ export const heading = style({
   justifyContent: 'space-between',
   gap: 'var(--space-2)',
   minWidth: 0,
+})
+
+export const headingActions = style({
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 'var(--space-2)',
 })
 
 export const description = style({

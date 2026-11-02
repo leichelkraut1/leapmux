@@ -252,6 +252,16 @@ afterEach(() => {
 })
 
 describe('tabBar archived prop', () => {
+  it('names a linked chat removal in both the close button and context menu', () => {
+    const onClose = vi.fn()
+    const tab = { ...makeTab(TabType.NATIVE_CONVERSATION, 'native-one', 'Linked chat'), agentProvider: AgentProvider.CODEX }
+    render(() => <PreferencesProvider><TabBar {...defaultProps} tabs={[tab]} onClose={onClose} /></PreferencesProvider>)
+    expect(screen.getByTestId('tab-close')).toHaveAccessibleName('Remove from LeapMux')
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from LeapMux' }))
+    expect(onClose).toHaveBeenCalledExactlyOnceWith(tab)
+    expect(screen.queryByRole('menuitem', { name: 'Close' })).not.toBeInTheDocument()
+  })
+
   it('shows shortcut hints on dialog menu items', () => {
     activateBindings(WORKSPACE_KEYBINDINGS, 'workspace')
     render(() => (

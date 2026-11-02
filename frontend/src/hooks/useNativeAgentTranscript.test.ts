@@ -25,12 +25,13 @@ function page(records = [record('tail', 1000n)], extra: Partial<ReadNativeConver
   return { $typeName: 'leapmux.v1.ReadNativeConversationResponse', format: 'generated-test-v1', sessionId: ref.sessionId, revision: 'generation-one', displayName: 'Generated title', workingDir: '/generated/work', olderCursor: 'before-1000', newerCursor: 'after-1000', observedAt: '2026-10-28T12:00:00Z', records: records.map(value => ({ $typeName: 'leapmux.v1.NativeConversationRecord', ...value })), hasOlder: true, hasNewer: false, resetRequired: false, partialReason: '', ...extra }
 }
 
-function setup() {
+function setup(activeInitially = true) {
   return createRoot((dispose) => {
     disposers.push(dispose)
     const [conversation, setConversation] = createSignal(ref)
     const [online, setOnline] = createSignal(true)
-    return { ...useNativeAgentTranscript(conversation, online), setConversation, setOnline, dispose }
+    const [active, setActive] = createSignal(activeInitially)
+    return { ...useNativeAgentTranscript(conversation, online, active), setConversation, setOnline, setActive, dispose }
   })
 }
 
@@ -47,6 +48,31 @@ afterEach(() => {
 })
 
 describe('useNativeAgentTranscript', () => {
+  it('suspends hidden panes without losing loaded history or the tail cursor', async () => {
+    mocks.read.mockResolvedValueOnce(page()).mockResolvedValueOnce(page([record('next', 2000n)], { newerCursor: 'after-2000' }))
+    const view = setup(false)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(mocks.read).not.toHaveBeenCalled()
+
+    view.setActive(true)
+    await vi.advanceTimersByTimeAsync(0)
+    const rows = view.messages()
+    expect(mocks.read).toHaveBeenCalledOnce()
+    view.setActive(false)
+    await view.refresh()
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(mocks.read).toHaveBeenCalledOnce()
+    expect(view.loaded()).toBe(true)
+    expect(view.messages()).toBe(rows)
+
+    view.setActive(true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mocks.read).toHaveBeenCalledTimes(2)
+    expect(mocks.read.mock.calls[1]![1]).toMatchObject({ direction: 'after', cursor: 'after-1000' })
+    expect(view.messages()[0]).toBe(rows[0])
+    expect(view.messages().map(message => message.id)).toEqual(['tail', 'next'])
+  })
+
   it('accepts genuine native JSON byte views from another realm', async () => {
     const nativeJson = runInNewContext('new Uint8Array([123, 125])') as Uint8Array
     expect(nativeJson).not.toBeInstanceOf(Uint8Array)

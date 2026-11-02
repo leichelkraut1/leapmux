@@ -51,12 +51,13 @@ function approval(extra: MessageInitShape<typeof NativeSessionApprovalSchema> = 
   })
 }
 
-function setup() {
+function setup(activeInitially = true) {
   return createRoot((dispose) => {
     disposers.push(dispose)
     const [conversation, setConversation] = createSignal(ref)
     const [online, setOnline] = createSignal(true)
-    return { ...useNativeAgentControl(conversation, online), setConversation, setOnline, dispose }
+    const [active, setActive] = createSignal(activeInitially)
+    return { ...useNativeAgentControl(conversation, online, active), setConversation, setOnline, setActive, dispose }
   })
 }
 
@@ -75,6 +76,33 @@ afterEach(() => {
 })
 
 describe('useNativeAgentControl', () => {
+  it('pauses hidden panes and verifies the original owner again before enabling input', async () => {
+    const view = setup(false)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(mocks.inspect).not.toHaveBeenCalled()
+    expect(await view.send('generated hidden input')).toBe(false)
+
+    view.setActive(true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mocks.inspect).toHaveBeenCalledOnce()
+    expect(view.canSend()).toBe(true)
+    view.setActive(false)
+    expect(view.canSend()).toBe(false)
+    expect(view.hasComposer()).toBe(true)
+    await view.refresh()
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(mocks.inspect).toHaveBeenCalledOnce()
+    expect(await view.send('generated hidden input')).toBe(false)
+    expect(mocks.send).not.toHaveBeenCalled()
+
+    view.setActive(true)
+    expect(view.canSend()).toBe(false)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mocks.inspect).toHaveBeenCalledTimes(2)
+    expect(mocks.inspect.mock.calls[1]![0]).toBe(ref.workerId)
+    expect(view.canSend()).toBe(true)
+  })
+
   it('keeps unsupported sessions read only and displays their provider reason', async () => {
     mocks.inspect.mockResolvedValue(capability({ canSend: false, bindingToken: '', expiresAt: '', unavailableReason: 'Enable the generated bridge in the original app.' }))
     const view = setup()

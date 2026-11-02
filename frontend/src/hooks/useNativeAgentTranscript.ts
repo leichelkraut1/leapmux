@@ -2,7 +2,7 @@ import type { Accessor } from 'solid-js'
 import type { NativeConversationRecord, NativeConversationRef } from '~/components/chat/nativeConversation'
 import type { AgentChatMessage } from '~/generated/proto/leapmux/v1/agent_pb'
 import { toBinary } from '@bufbuild/protobuf'
-import { batch, createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack } from 'solid-js'
+import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack } from 'solid-js'
 import { readNativeConversation } from '~/api/workerRpc'
 import { createMessageContextResolver } from '~/components/chat/messageContextResolver'
 import { nativeConversationKey } from '~/components/chat/nativeConversation'
@@ -27,7 +27,7 @@ function isNativeJsonBytes(value: unknown): value is Uint8Array {
 }
 
 /** A private read-only window; it never joins the managed-agent store or event stream. */
-export function useNativeAgentTranscript(ref: Accessor<NativeConversationRef>, online: Accessor<boolean>) {
+export function useNativeAgentTranscript(ref: Accessor<NativeConversationRef>, online: Accessor<boolean>, active: Accessor<boolean> = () => true) {
   const [messages, setMessages] = createSignal<AgentChatMessage[]>([])
   const [version, setVersion] = createSignal(0)
   const [title, setTitle] = createSignal('')
@@ -94,7 +94,7 @@ export function useNativeAgentTranscript(ref: Accessor<NativeConversationRef>, o
   }
 
   async function load(direction: Direction): Promise<void> {
-    if (disposed || !untrack(online))
+    if (disposed || !untrack(online) || !untrack(active))
       return
     if (pending)
       return pending
@@ -241,7 +241,7 @@ export function useNativeAgentTranscript(ref: Accessor<NativeConversationRef>, o
     progress: () => undefined,
   })))
 
-  createEffect(on(() => [nativeConversationKey(ref()), online()] as const, ([key], previous) => {
+  createEffect(on(() => [nativeConversationKey(ref()), online(), active()] as const, ([key], previous) => {
     cancel()
     if (!previous || previous[0] !== key) {
       records = []
@@ -264,10 +264,12 @@ export function useNativeAgentTranscript(ref: Accessor<NativeConversationRef>, o
         setVersion(value => value + 1)
       })
     }
-    if (online())
+    if (online() && active())
       void refresh()
   }))
-  onMount(() => {
+  createEffect(() => {
+    if (!online() || !active())
+      return
     const timer = setInterval(() => void refresh(), REFRESH_INTERVAL_MS)
     onCleanup(() => clearInterval(timer))
   })

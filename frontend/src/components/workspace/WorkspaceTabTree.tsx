@@ -3,7 +3,6 @@ import type { BranchRefActions } from './branchActions'
 import type { RepoCheckout } from './repoCheckouts'
 import type { BranchGroup, BranchRef, RepoGroup, TabNode, WorkerProjectionEntry } from './workspaceTabTree.model'
 import type { TabContextMenuProps } from '~/components/common/TabContextMenu'
-import type { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import type { WorkerInfo } from '~/lib/workerInfoCache'
 import type { createRepoGitStore } from '~/stores/repoGit.store'
 import type { Tab, TabItemOps } from '~/stores/tab.types'
@@ -18,6 +17,7 @@ import { TabContextMenu } from '~/components/common/TabContextMenu'
 import { TabTypeIcon } from '~/components/common/TabTypeIcon'
 import { Tooltip } from '~/components/common/Tooltip'
 import { WorkingTreeIcon, workingTreeKindLabel, WorkingTreeRows } from '~/components/common/WorkingTree'
+import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import { PREFIX_TAB_TREE, sessionStorageGet, sessionStorageSet } from '~/lib/browserStorage'
 import { createStableContext } from '~/lib/createStableContext'
 import { createKeyedRows, createKeyLookup, createStableKeys, KeyedFor } from '~/lib/keyedRows'
@@ -188,6 +188,7 @@ const TabLeaf: Component<{
             class={menuTrigger}
             state={props.isClosing ? IconButtonState.Loading : IconButtonState.Enabled}
             data-testid="workspace-tab-close"
+            title={props.tab.type === TabType.NATIVE_CONVERSATION ? 'Remove from LeapMux' : 'Close'}
             onPointerDown={e => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -204,6 +205,7 @@ const TabLeaf: Component<{
       <TabContextMenu
         contextMenuFor={rowEl}
         data-testid="tab-tree-leaf-menu"
+        {...(props.tab.type === TabType.NATIVE_CONVERSATION ? { closeLabel: 'Remove from LeapMux' } : {})}
         {...(props.onRename !== undefined ? { onRename: props.onRename } : {})}
         {...(props.move !== undefined ? { move: props.move } : {})}
         {...(props.canClose && props.onClose !== undefined ? { onClose: props.onClose } : {})}

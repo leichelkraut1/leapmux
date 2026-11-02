@@ -149,6 +149,17 @@ function reasonOf(el: Element): string {
 }
 
 describe('WorkspaceTabTree interactions', () => {
+  it('names removal of a linked chat without closing its original conversation', () => {
+    const tab = { ...makeTab(TabType.NATIVE_CONVERSATION, 'native-one', 'Linked chat'), agentProvider: AgentProvider.CODEX }
+    const onClose = vi.fn()
+    renderTree(() => <WorkspaceTabTree repoGitStore={repoGitStore} tabs={[tab]} activeTabKey={null} onTabClick={() => {}} tabItemOps={{ onClose }} isLocalWorkerFn={() => false} workspaceId="ws-1" />)
+    expect(screen.getByTestId('workspace-tab-close')).toHaveAccessibleName('Remove from LeapMux')
+    const menu = within(screen.getByTestId('tab-tree-leaf-menu'))
+    fireEvent.click(menu.getByRole('menuitem', { name: 'Remove from LeapMux', hidden: true }))
+    expect(onClose).toHaveBeenCalledExactlyOnceWith(tab)
+    expect(menu.queryByRole('menuitem', { name: 'Close', hidden: true })).not.toBeInTheDocument()
+  })
+
   it('uses a 24px close button with a 14px icon', () => {
     renderTree(() => (
       <WorkspaceTabTree
