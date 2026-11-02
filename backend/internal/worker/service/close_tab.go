@@ -93,6 +93,19 @@ func closeWorktreeDispositionFor(action leapmuxv1.WorktreeAction, linkPolicy wor
 // worktree-removal branch. An UNSPECIFIED action never enters that branch
 // anyway, so the shared flow is correct for it.
 func (svc *Service) closePayloadTabCommon(userID, tabID string, tabType leapmuxv1.TabType, action leapmuxv1.WorktreeAction, linkPolicy worktreeLinkPolicy) *leapmuxv1.CloseTabResult {
+	if tabType == leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION {
+		// This row is only a link. Even a direct REMOVE RPC cannot authorize
+		// deleting its placement directory, stopping a quake shell, or sending
+		// anything to the original chat owner. Skip every physical lifecycle hook.
+		result := &leapmuxv1.CloseTabResult{}
+		if err := svc.TabPayloads.RevokeRow(bgCtx(), userID, tabID); err != nil && !errors.Is(err, ErrTabPayloadNotFound) {
+			result.FailureMessage = dbCloseFailureMessage(tabType)
+			result.FailureDetail = err.Error()
+			return result
+		}
+		svc.unregisterTab(tabType, tabID, userID)
+		return result
+	}
 	// Read BEFORE the teardown, because the reap below needs the row's
 	// working_dir and the revoke deletes the row on the way out.
 	//
@@ -448,6 +461,8 @@ func dbCloseFailureMessage(tabType leapmuxv1.TabType) string {
 		return "Failed to close file"
 	case leapmuxv1.TabType_TAB_TYPE_IMAGE:
 		return "Failed to close image"
+	case leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
+		return "Failed to remove native chat link"
 	default:
 		return "Failed to close tab"
 	}
@@ -693,7 +708,7 @@ func (svc *Service) closeTabForConvergence(
 		svc.closeAgentTabCommon(userID, tabID, action, linkPolicy)
 	case leapmuxv1.TabType_TAB_TYPE_TERMINAL:
 		svc.closeTerminalTabCommon(userID, tabID, action, linkPolicy)
-	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE:
+	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
 		// A payload-backed tab owns no process, so this reduces to dropping its
 		// row.
 		svc.closePayloadTabCommon(userID, tabID, tabType, action, linkPolicy)

@@ -20,6 +20,10 @@
     "TAB_TYPE_IMAGE": {
       "wireToken": "image",
       "parseAliases": []
+    },
+    "TAB_TYPE_NATIVE_CONVERSATION": {
+      "wireToken": "native-conversation",
+      "parseAliases": []
     }
   }
 }

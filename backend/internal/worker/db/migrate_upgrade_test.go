@@ -49,7 +49,7 @@ func TestMigrateUpgradesADatabaseThatRecordedOnlyTheInitialMigration(t *testing.
 }
 
 // An older migration manifest must preserve existing chats and new workflow rows.
-func TestWorkflowReleaseOldMigratorAgainstSchemaTwo(t *testing.T) {
+func TestWorkflowReleaseOldMigratorAgainstLatestSchema(t *testing.T) {
 	ctx := t.Context()
 	conn, err := workerdb.Open(filepath.Join(t.TempDir(), "rollback-fixture.db"), sqlitedb.Config{})
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ func TestWorkflowReleaseOldMigratorAgainstSchemaTwo(t *testing.T) {
 	require.NoError(t, err)
 	var before int64
 	require.NoError(t, conn.QueryRowContext(ctx, `SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&before))
-	require.EqualValues(t, 2, before)
+	require.EqualValues(t, 3, before)
 	// A fresh provider avoids reusing the older provider's cached state. This
 	// matches an old executable opening an already upgraded database.
 	oldAgain, createErr := goose.NewProvider(goose.DialectSQLite3, conn, oldFS)
@@ -76,7 +76,7 @@ func TestWorkflowReleaseOldMigratorAgainstSchemaTwo(t *testing.T) {
 	if oldErr == nil {
 		_, oldErr = oldAgain.Up(ctx)
 	}
-	t.Logf("OLD_MIGRATOR_SCHEMA2_ACCEPTED=%t", oldErr == nil)
+	t.Logf("OLD_MIGRATOR_LATEST_SCHEMA_ACCEPTED=%t", oldErr == nil)
 	if oldErr != nil {
 		t.Logf("Generated-fixture older-migrator refusal: %v", oldErr)
 	}

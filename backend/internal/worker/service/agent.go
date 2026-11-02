@@ -1297,11 +1297,6 @@ func registerAgentHandlers(d registrar, svc *Service) {
 		// row itself is what any file-tab client needs, and the pre-existing
 		// precedent is WatchWorkerPrivateEvents, which applies per-kind checks
 		// inside a file:read gate (privateEventVisible).
-		if r.GetWorktreeAction() == leapmuxv1.WorktreeAction_WORKTREE_ACTION_REMOVE &&
-			!caller.Allows(leapmuxv1.Scope_SCOPE_GIT_WRITE) {
-			sendPermissionDenied(sender, "removing a worktree needs the git:write permission")
-			return
-		}
 		// Drive the shared closeTabCommon flow so the worktree-tab link
 		// (and any user-requested `git worktree remove`) is handled
 		// identically to CloseAgent / CloseTerminal. It is idempotent: a
@@ -1327,7 +1322,22 @@ func registerAgentHandlers(d registrar, svc *Service) {
 			}
 			tabType = leapmuxv1.TabType_TAB_TYPE_FILE
 		}
-		result := svc.closePayloadTabCommon(caller.UserID.String(), r.GetTabId(), tabType, r.GetWorktreeAction(), dropWorktreeLink)
+		action := r.GetWorktreeAction()
+		if tabType == leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION {
+			if !callerReadsTabType(caller, tabType) {
+				sendPermissionDenied(sender, "scope required for this tab kind")
+				return
+			}
+			// Native references own neither their source chat nor the destination
+			// worktree. REMOVE has no destructive meaning for this tab kind.
+			action = leapmuxv1.WorktreeAction_WORKTREE_ACTION_KEEP
+		}
+		if action == leapmuxv1.WorktreeAction_WORKTREE_ACTION_REMOVE &&
+			!caller.Allows(leapmuxv1.Scope_SCOPE_GIT_WRITE) {
+			sendPermissionDenied(sender, "removing a worktree needs the git:write permission")
+			return
+		}
+		result := svc.closePayloadTabCommon(caller.UserID.String(), r.GetTabId(), tabType, action, dropWorktreeLink)
 		sendProtoResponse(sender, &leapmuxv1.RevokeTabPayloadResponse{Result: result})
 	})
 
@@ -4524,7 +4534,7 @@ func messageToProto(m *db.Message) (*leapmuxv1.AgentChatMessage, error) {
 // IMAGE payload reached a file:read-only caller in the first place.
 func tabTypeReadScope(tabType leapmuxv1.TabType) (leapmuxv1.Scope, bool) {
 	switch tabType {
-	case leapmuxv1.TabType_TAB_TYPE_AGENT, leapmuxv1.TabType_TAB_TYPE_IMAGE:
+	case leapmuxv1.TabType_TAB_TYPE_AGENT, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
 		return leapmuxv1.Scope_SCOPE_AGENT_READ, true
 	case leapmuxv1.TabType_TAB_TYPE_TERMINAL:
 		return leapmuxv1.Scope_SCOPE_TERMINAL_READ, true
