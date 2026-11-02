@@ -88,7 +88,7 @@ function supersededToolStart(entry: NativeMirrorEntry, entries: readonly NativeM
     return false
   return entries.some((candidate) => {
     const completed = coreItem(candidate, 'item_completed')
-    return sameTurn(entry, candidate) && codexNativeEventItem(candidate.payload) !== undefined && completed?.type === item.type && completed.id === item.id
+    return completed !== undefined && sameTurn(entry, candidate) && codexNativeEventItem(candidate.payload) !== undefined && completed.type === item.type && completed.id === item.id
       && sameValue(withoutFields(item, lifecycle), withoutFields(completed, lifecycle))
   })
 }
