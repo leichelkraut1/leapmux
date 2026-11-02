@@ -73,10 +73,16 @@ export const AttachNativeConversationDialog: Component<AttachNativeConversationD
 
   return (
     <Dialog title="Add chat to worktree" busy={!!props.busy} onClose={props.onClose} data-testid="attach-native-conversation-dialog">
-      <form onSubmit={(event) => {
-        event.preventDefault()
-        confirm()
-      }}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          confirm()
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && event.target instanceof HTMLInputElement && event.target.closest('[popover]'))
+            event.preventDefault()
+        }}
+      >
         <section class={styles.fields}>
           <p class={styles.description}>
             Source:
@@ -132,33 +138,35 @@ export const AttachNativeConversationDialog: Component<AttachNativeConversationD
                 value={filter()}
                 onInput={event => setFilter(event.currentTarget.value)}
               />
-              <For each={filteredWorktrees()}>
-                {(item) => {
-                  const choice = () => (
-                    <DropdownMenuCheckableItem
-                      kind="radio"
-                      label={`${item.label} · ${item.workerName}`}
-                      checked={item.id === destinationId()}
-                      disabled={!!props.busy || !!item.disabledReason}
-                      detail={() => item.disabledReason ? 'Unavailable' : ''}
-                      revealClippedLabel={!item.disabledReason}
-                      data-testid={`native-conversation-destination-${item.id}`}
-                      onSelect={() => {
-                        setDestinationId(item.id)
-                        worktreeMenu?.hidePopover()
-                      }}
-                    />
-                  )
-                  return (
-                    <Show when={item.disabledReason} fallback={choice()}>
-                      {reason => <Tooltip text={reason()}>{choice()}</Tooltip>}
-                    </Show>
-                  )
-                }}
-              </For>
-              <Show when={filteredWorktrees().length === 0}>
-                <p class={styles.description}>No matching worktrees.</p>
-              </Show>
+              <div role="group" aria-label="Worktrees" class={styles.worktreeOptions}>
+                <For each={filteredWorktrees()}>
+                  {(item) => {
+                    const choice = () => (
+                      <DropdownMenuCheckableItem
+                        kind="radio"
+                        label={`${item.label} · ${item.workerName}`}
+                        checked={item.id === destinationId()}
+                        disabled={!!props.busy || !!item.disabledReason}
+                        detail={() => item.disabledReason ? 'Unavailable' : ''}
+                        revealClippedLabel={!item.disabledReason}
+                        data-testid={`native-conversation-destination-${item.id}`}
+                        onSelect={() => {
+                          setDestinationId(item.id)
+                          worktreeMenu?.hidePopover()
+                        }}
+                      />
+                    )
+                    return (
+                      <Show when={item.disabledReason} fallback={choice()}>
+                        {reason => <Tooltip text={reason()}>{choice()}</Tooltip>}
+                      </Show>
+                    )
+                  }}
+                </For>
+                <Show when={filteredWorktrees().length === 0}>
+                  <p class={styles.description}>No matching worktrees.</p>
+                </Show>
+              </div>
             </DropdownMenu>
             <Show when={destination()}>
               {selected => (

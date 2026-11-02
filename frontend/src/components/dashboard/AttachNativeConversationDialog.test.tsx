@@ -66,6 +66,16 @@ describe('AttachNativeConversationDialog', () => {
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
+  it('keeps enter in a worktree filter from submitting the destination', () => {
+    const onConfirm = vi.fn()
+    render(() => <AttachNativeConversationDialog conversation={conversation} destinations={[first]} onConfirm={onConfirm} onClose={() => {}} />)
+    const filter = within(screen.getByTestId('native-conversation-worktree-menu')).getByRole('searchbox', { name: 'Filter worktrees', hidden: true })
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    filter.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
   it('refuses a removed destination instead of silently choosing another', () => {
     const [destinations, setDestinations] = createSignal([first, { ...first, id: 'fixture-other', workingDir: '/generated/other', label: 'other worktree' }])
     const onConfirm = vi.fn()
