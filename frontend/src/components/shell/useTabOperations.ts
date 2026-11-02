@@ -796,7 +796,9 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
         return existing
       }
       const tabId = generateNativeTabId()
-      await workerRpc.registerTabPayload(at.workerId, {
+      let placed = false
+      try {
+        await workerRpc.registerTabPayload(at.workerId, {
         tabId,
         payload: nativeConversationTabPayload({
           sourceWorkerId: ref.workerId,
@@ -805,8 +807,7 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
           displayName: ref.displayName || 'Linked conversation',
           workingDir: at.workingDir,
         }),
-      })
-      try {
+        })
         // Re-check after the RPC: the chooser can outlive a move, archive or close.
         const anchor = assertDestination()
         const tileId = anchor.tileId!
@@ -826,6 +827,7 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
         })
         if (!batchId)
           throw new Error('The workspace connection is not ready to save this link.')
+        placed = true
         const tab = view.getById(TabType.NATIVE_CONVERSATION, tabId)
         if (!tab)
           throw new Error('The linked chat could not be placed in this workspace.')
@@ -833,7 +835,8 @@ export function useTabOperations(opts: UseTabOperationsOpts) {
         return tab
       }
       catch (err) {
-        emitRemoveTab(TabType.NATIVE_CONVERSATION, tabId)
+        if (placed)
+          emitRemoveTab(TabType.NATIVE_CONVERSATION, tabId)
         metadata.remove(tabId)
         await workerRpc.revokeTabPayload(at.workerId, { tabId, worktreeAction: WorktreeAction.KEEP }).catch(() => {})
         throw err

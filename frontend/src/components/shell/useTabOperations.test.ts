@@ -219,6 +219,21 @@ describe('useTabOperations', () => {
       })
     })
 
+    it('cleans an ambiguously registered reference after transport failure without creating a visible tab', async () => {
+      await createRoot(async (dispose) => {
+        try {
+          const s = setup()
+          seed(s)
+          mockRegisterTabPayload.mockRejectedValueOnce(new Error('connection lost after write'))
+          await expect(s.ops.handleNativeConversationAttach(ref, at)).rejects.toThrow('connection lost')
+          expect(mockRevokeTabPayload).toHaveBeenCalledWith('w-1', expect.objectContaining({ worktreeAction: WorktreeAction.KEEP }))
+          expect(s.view.all().some(tab => tab.type === TabType.NATIVE_CONVERSATION)).toBe(false)
+          expect(s.handleAgentClose).not.toHaveBeenCalled()
+        }
+        finally { dispose() }
+      })
+    })
+
     it('unlinks with KEEP even when bulk close requests REMOVE, without inspecting or interrupting the source', async () => {
       await createRoot(async (dispose) => {
         try {
