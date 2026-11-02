@@ -1,4 +1,3 @@
-import type { NativeConversationDestination } from '~/components/dashboard/AttachNativeConversationDialog'
 import type { Component } from 'solid-js'
 import type { AppShellDialogStates, ChangeBranchState, DeleteBranchState, EmptyArchiveConfirmPayload, KeyPinConfirmState, NewTabTarget, NewWorkspacePayload, SectionConfirmPayload, WorkspaceConfirmPayload } from './AppShellDialogs'
 import type { SectionNamePayload } from './SectionNameDialog'
@@ -7,6 +6,7 @@ import type { SidebarElementsOpts } from './SidebarElements'
 import type { TabContext } from './tabContext'
 import type { CliPathStatus } from '~/api/platformBridge'
 import type { NativeConversationRef } from '~/components/chat/nativeConversation'
+import type { NativeConversationDestination } from '~/components/dashboard/AttachNativeConversationDialog'
 import type { SetGoalState } from '~/components/shell/AppShellDialogs'
 import type { BranchRefActions } from '~/components/workspace/branchActions'
 import type { WorkspaceStartActions, WorkspaceStartAt } from '~/components/workspace/workspaceStartActions'
@@ -30,8 +30,8 @@ import { nativeConversationFromParams, nativeConversationKey, nativeConversation
 import { pluginFor } from '~/components/chat/providers/registry'
 import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
 import { BootSplash } from '~/components/common/BootSplash'
-import { AttachNativeConversationDialog } from '~/components/dashboard/AttachNativeConversationDialog'
 import { AgentDashboard } from '~/components/dashboard/AgentDashboard'
+import { AttachNativeConversationDialog } from '~/components/dashboard/AttachNativeConversationDialog'
 import { NativeAgentTranscriptViewer } from '~/components/dashboard/NativeAgentTranscriptViewer'
 import { CliPathDialog } from '~/components/desktop/CliPathDialog'
 import { isWorkspaceMutatable } from '~/components/shell/sectionUtils'
@@ -100,8 +100,8 @@ import { FloatingWindowLayer } from './FloatingWindowLayer'
 import { GridPopoverHostProvider } from './GridPopoverHost'
 import { handleBranchChanged } from './handleBranchChanged'
 import { createMobileOverlayState, MobileLayout } from './MobileLayout'
-import { nativeConversationDestinations } from './nativeConversationPlacement'
 import { mruAgentEditorDeps } from './mruAgentEditorDeps'
+import { nativeConversationDestinations } from './nativeConversationPlacement'
 import { openSubagentTab } from './openSubagentTab'
 import { QuakeTerminalPanel } from './QuakeTerminalPanel'
 import { renameTab } from './renameTab'
@@ -2048,7 +2048,10 @@ export const AppShell: Component = () => {
               busy={nativeAttachBusy()}
               error={nativeAttachError()}
               onConfirm={destination => void confirmNativeAttach(destination)}
-              onClose={() => { if (!nativeAttachBusy()) setAttachNativeConversation(undefined) }}
+              onClose={() => {
+                if (!nativeAttachBusy())
+                  setAttachNativeConversation(undefined)
+              }}
             />
           )}
         </Show>

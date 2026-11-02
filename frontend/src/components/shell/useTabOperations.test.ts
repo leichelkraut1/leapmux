@@ -193,7 +193,6 @@ describe('useTabOperations', () => {
     mockShowInfoToast.mockReset()
   })
 
-
   describe('linked native conversations', () => {
     const ref = { workerId: 'source-mac', workerName: 'Source Mac', agentProvider: AgentProvider.CLAUDE_CODE, sessionId: 'c3eda383-638f-46df-a5fc-83f6cecd1a92', displayName: 'Generated test conversation' }
     const at = { workspaceId: 'ws-test', workerId: 'w-1', workingDir: '/generated/worktree' }
