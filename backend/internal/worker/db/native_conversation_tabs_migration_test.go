@@ -31,7 +31,7 @@ func TestNativeConversationTabsUpgradePreservesPrivateRows(t *testing.T) {
 	oldInitial := strings.ReplaceAll(string(initial), "tab_type IN (3, 4, 5)", "tab_type IN (3, 4)")
 	oldInitial = strings.ReplaceAll(oldInitial, "FROM worker_tab_payloads WHERE tab_type IN (3, 4);", "FROM worker_tab_payloads;")
 	old, err := goose.NewProvider(goose.DialectSQLite3, conn, fstest.MapFS{
-		"00001_initial.sql": {Data: []byte(oldInitial)},
+		"00001_initial.sql":   {Data: []byte(oldInitial)},
 		"00002_workflows.sql": {Data: workflows},
 	})
 	require.NoError(t, err)
@@ -44,7 +44,7 @@ func TestNativeConversationTabsUpgradePreservesPrivateRows(t *testing.T) {
 	for _, row := range []struct {
 		owner, id, dir string
 		kind, archived int
-		blob []byte
+		blob           []byte
 	}{
 		{"owner-a", "same-tab-id", "/generated/file", 3, 0, []byte{0, 1, 0xff, 2}},
 		{"owner-b", "same-tab-id", "/generated/image", 4, 1, []byte{3, 0, 0xfe, 4}},

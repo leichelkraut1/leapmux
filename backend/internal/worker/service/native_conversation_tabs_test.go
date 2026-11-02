@@ -27,19 +27,23 @@ func nativeConversationPayloadFor(dir string) *leapmuxv1.TabPayload {
 func TestNativeConversationTabPayloadValidation(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name string
+		name   string
 		change func(*leapmuxv1.NativeConversationTabPayload)
 	}{
 		{"missing source", func(p *leapmuxv1.NativeConversationTabPayload) { p.SourceWorkerId = "" }},
 		{"source path", func(p *leapmuxv1.NativeConversationTabPayload) { p.SourceWorkerId = "../source" }},
 		{"unbounded source", func(p *leapmuxv1.NativeConversationTabPayload) { p.SourceWorkerId = strings.Repeat("a", 129) }},
-		{"unsupported provider", func(p *leapmuxv1.NativeConversationTabPayload) { p.AgentProvider = leapmuxv1.AgentProvider_AGENT_PROVIDER_GEMINI_CLI }},
+		{"unsupported provider", func(p *leapmuxv1.NativeConversationTabPayload) {
+			p.AgentProvider = leapmuxv1.AgentProvider_AGENT_PROVIDER_GEMINI_CLI
+		}},
 		{"missing session", func(p *leapmuxv1.NativeConversationTabPayload) { p.SessionId = "" }},
 		{"session path", func(p *leapmuxv1.NativeConversationTabPayload) { p.SessionId = "../../chat.jsonl" }},
 		{"unbounded session", func(p *leapmuxv1.NativeConversationTabPayload) { p.SessionId = strings.Repeat("a", 129) }},
 		{"invalid UTF8", func(p *leapmuxv1.NativeConversationTabPayload) { p.DisplayName = string([]byte{0xff}) }},
 		{"multiline title", func(p *leapmuxv1.NativeConversationTabPayload) { p.DisplayName = "one\ntwo" }},
-		{"unbounded title", func(p *leapmuxv1.NativeConversationTabPayload) { p.DisplayName = strings.Repeat("a", maxNativeSessionDisplayNameRunes+1) }},
+		{"unbounded title", func(p *leapmuxv1.NativeConversationTabPayload) {
+			p.DisplayName = strings.Repeat("a", maxNativeSessionDisplayNameRunes+1)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := nativeConversationPayloadFor("")

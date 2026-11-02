@@ -1645,8 +1645,7 @@ export const AppShell: Component = () => {
     try {
       const tab = await tabOps.handleNativeConversationAttach(conversation, current)
       setAttachNativeConversation(undefined)
-      closeNativeConversation()
-      setSearchParams({ dashboard: undefined }, { replace: true })
+      closeAgentDashboard()
       handleSelectWorkspace(tab.workspaceId)
     }
     catch (error) {

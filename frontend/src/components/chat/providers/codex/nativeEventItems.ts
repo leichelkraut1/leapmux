@@ -23,16 +23,18 @@ export function codexNativeEventItem(payload: Record<string, unknown>): Record<s
     }
     case 'Reasoning':
       if (!Array.isArray(item.summary_text) || item.summary_text.some(text => typeof text !== 'string')
-        || (item.raw_content !== undefined && (!Array.isArray(item.raw_content) || item.raw_content.some(text => typeof text !== 'string'))))
+        || (item.raw_content !== undefined && (!Array.isArray(item.raw_content) || item.raw_content.some(text => typeof text !== 'string')))) {
         return undefined
+      }
       return { ...item, type: CODEX_ITEM.Reasoning, summary: item.summary_text, content: item.raw_content ?? [] }
     case 'Plan':
       return typeof item.text === 'string' ? { ...item, type: CODEX_ITEM.Plan } : undefined
     case 'CommandExecution': {
       if (!Array.isArray(item.command) || item.command.some(word => typeof word !== 'string')
         || !['in_progress', 'completed', 'failed', 'declined'].includes(pickString(item, 'status'))
-        || (item.aggregated_output !== undefined && item.aggregated_output !== null && typeof item.aggregated_output !== 'string'))
+        || (item.aggregated_output !== undefined && item.aggregated_output !== null && typeof item.aggregated_output !== 'string')) {
         return undefined
+      }
       const argv: string[] = item.command.filter((word): word is string => typeof word === 'string')
       const durationMs = nativeDurationMs(item.duration)
       return {
@@ -73,13 +75,14 @@ export function codexNativeEventItem(payload: Record<string, unknown>): Record<s
 
 function nativeDurationMs(value: unknown): number | undefined {
   if (!isObject(value) || typeof value.secs !== 'number' || typeof value.nanos !== 'number'
-    || !Number.isSafeInteger(value.secs) || value.secs < 0 || !Number.isInteger(value.nanos) || value.nanos < 0 || value.nanos >= 1e9)
+    || !Number.isSafeInteger(value.secs) || value.secs < 0 || !Number.isInteger(value.nanos) || value.nanos < 0 || value.nanos >= 1e9) {
     return undefined
+  }
   const milliseconds = value.secs * 1000 + value.nanos / 1e6
   return Number.isFinite(milliseconds) ? milliseconds : undefined
 }
 
 /** Display argv accurately as shell words; this string is never executed. */
 function quoteCommandWord(word: string): string {
-  return /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`
+  return /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll('\'', '\'\\\'\'')}'`
 }

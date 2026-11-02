@@ -297,8 +297,9 @@ export function projectCodexNativeConversation(
         if (lastText && !entries.some((candidate) => {
           const text = mirrorText(candidate)
           return text?.role === 'assistant' && text.text === lastText && candidate.turnId === entry.turnId
-        }))
+        })) {
           push({ item: { type: CODEX_ITEM.AgentMessage, id: entry.record.id, text: lastText } })
+        }
         push({ turn: { id: entry.turnId, status: error ? 'failed' : payload.type === 'turn_aborted' ? 'interrupted' : 'completed', ...(error ? { error } : {}) } }, MessageSource.AGENT, lastText ? 1 : 0)
         continue
       }
