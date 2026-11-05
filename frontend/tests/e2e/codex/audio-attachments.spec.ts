@@ -56,10 +56,14 @@ codexTest('falls back once to an exact Worker file when the selected model does 
     throw new Error('The Codex audio fallback proof requires its private configuration directory.')
   const configPath = join(home, 'config.toml')
   const catalogPath = join(runDir, 'codex-file-audio-model-catalog.json')
-  const catalog = codexAudioModelCatalog(MOCK_MODELS.openai)
-  // State the missing capability explicitly so a CLI catalog update cannot turn this into a native audio proof.
-  for (const model of catalog.models)
-    model.input_modalities = ['text', 'image']
+  // Keep the real tool route while explicitly denying native audio in this private catalog.
+  const catalog = {
+    models: codexAudioModelCatalog(MOCK_MODELS.openai).models.map(model => ({
+      ...model,
+      input_modalities: ['text', 'image'],
+      tool_mode: 'code_mode_only',
+    })),
+  }
   const config = `model_catalog_json = ${JSON.stringify(catalogPath)}\n${readFileSync(configPath, 'utf8')}`
   await withNativeConfigurationFile({ path: catalogPath, content: JSON.stringify(catalog), runDir }, async () => {
     await withNativeConfigurationFile({ path: configPath, content: config, runDir }, async () => {
