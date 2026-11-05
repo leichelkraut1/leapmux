@@ -1,6 +1,15 @@
 import { claudeTest } from '../claude-fixtures'
-import { exerciseAttachmentRefusal } from '../helpers/attachmentModelProbe'
+import { exerciseWorkerFileAttachment } from '../helpers/workerFileAttachment'
+import { authenticatedAgentWorkspace } from '../helpers/workspace'
+import { CLAUDE_AGENT } from './scenarios'
 
-claudeTest('refuses audio outside the model API input types and keeps its bytes out of the next request', async ({ native }) => {
-  await exerciseAttachmentRefusal(native, { kind: 'audio', fileName: 'claude-code-refused-audio.wav' })
+const attachmentTest = claudeTest.extend({
+  providerWorkspace: authenticatedAgentWorkspace({
+    ...CLAUDE_AGENT,
+    openOptions: { optionValues: { permissionMode: 'default' } },
+  }),
+})
+
+attachmentTest('makes audio available as an exact Worker file for tools after reload', async ({ native }) => {
+  await exerciseWorkerFileAttachment(native, { kind: 'audio', fileName: 'claude-code-audio.wav' })
 })

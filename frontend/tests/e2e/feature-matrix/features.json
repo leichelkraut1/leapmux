@@ -59,7 +59,7 @@
     {
       "id": "audio-attachments",
       "label": "Audio attachments",
-      "description": "The agent can use an attached audio recording as audio, with its original bytes and media type. A text transcript alone does not count.",
+      "description": "The agent receives an attached audio recording as native audio input or as the original recording file for its available tools, preserving its bytes and media type. File delivery does not promise that those tools can decode the recording. A text transcript alone does not count.",
       "showInMatrix": true,
       "group": "attachments"
     },

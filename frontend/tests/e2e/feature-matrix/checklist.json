@@ -1084,18 +1084,18 @@
     },
     "audio-attachments": {
       "claude-code": {
-        "support": "agent-limit",
-        "userNote": "Audio file attachments are not supported by this agent.",
-        "detailNote": "Claude Code 2.1.310 blindly forwards unknown audio/document blocks in stream-VjAWLx; acceptance by a permissive mock is not valid native audio input. The official Messages API and SDK union have no audio input block, while document sources are PDF or plain text. Native voice capture produces a transcript. Sources:\n- https://platform.claude.com/docs/en/api/messages/create\n- https://platform.claude.com/docs/en/build-with-claude/files\n- https://raw.githubusercontent.com/anthropics/anthropic-sdk-typescript/main/src/resources/messages/messages.ts.\n\nBrowser refusal of a valid WAV passes in e2e-wi2L9n.\n\nTrack the native route and its LeapMux integration: https://github.com/leapmux/leapmux/issues/498.",
+        "support": "supported",
+        "userNote": "Audio is supplied as a private Worker file for the agent's available tools. Decoding or transcription depends on those tools; Claude does not receive native audio input.",
+        "detailNote": "LeapMux saves the original audio bytes in a durable private Worker file and sends a quoted file-reference text block to Claude Code. Send and steer unit coverage checks the exact stored bytes and ensures that no native audio block is invented. Browser verification of this file-delivery route is pending. File delivery does not promise that the available tools can decode or transcribe every audio format.\n\nHistorical native-input audit: Claude Code 2.1.310 forwards unknown audio/document blocks in stream-VjAWLx; acceptance by a permissive mock is not valid native audio input. The official Messages API and SDK union have no audio input block, while document sources are PDF or plain text. Native voice capture produces a transcript. The earlier browser refusal in e2e-wi2L9n is superseded by private file delivery. Sources:\n- https://platform.claude.com/docs/en/api/messages/create\n- https://platform.claude.com/docs/en/build-with-claude/files\n- https://raw.githubusercontent.com/anthropics/anthropic-sdk-typescript/main/src/resources/messages/messages.ts.\n\nTrack the native route and its LeapMux integration: https://github.com/leapmux/leapmux/issues/498.",
         "spec": "frontend/tests/e2e/claude-code/audio-attachments.spec.ts",
-        "audit": "unsupported",
+        "audit": "source-verified",
         "verified": true,
-        "testStatus": "passed"
+        "testStatus": "pending"
       },
       "codex": {
         "support": "supported",
-        "userNote": "Use WAV, MP3, M4A, WebM or Ogg files with a model that declares audio input.",
-        "detailNote": "Codex 0.164.0 accepts native audio data-URI input and forwards it as Responses input_audio.audio_url. model/list inputModalities is the capability authority; unknown or non-audio models retain the input without a native prompt. Root, steering, retry and faster-model paths use the model check. The provider and browser share eleven MIME types for five native formats. Prompted audio, attachment-only audio, unsupported-model refusal and reload are proven in e2e-zIFQ8l (complete 121-case Codex directory). Native audio probes: .tmp/codex-audio-probe/. Other non-audio binary input remains a separate upstream limit.\n\nTrack the native route and its LeapMux integration: https://github.com/leapmux/leapmux/issues/498.",
+        "userNote": "WAV, MP3, M4A, WebM and Ogg use native audio input when the model supports it. Other formats or models receive a private Worker file for available tools; decoding depends on those tools.",
+        "detailNote": "Codex 0.164.0 accepts native audio data-URI input and forwards it as Responses input_audio.audio_url. model/list inputModalities is the capability authority. Root, steering, retry and faster-model paths retain the model check; the provider and browser share eleven MIME types for five native formats. If the format or actual running model cannot accept native audio, LeapMux saves the exact original bytes as a private Worker file and dispatches its text reference for available tools. The decision is made locally before native dispatch; a model-capability refusal can fall back only before admission. A native error or uncertain delivery never replays the input as a file. Browser verification of this file fallback is pending.\n\nHistorical native-audio proof: prompted audio, attachment-only audio, unsupported-model refusal and reload passed in e2e-zIFQ8l (complete 121-case Codex directory). The former unsupported-model refusal is superseded by private file fallback. Native audio probes: .tmp/codex-audio-probe/. Other binary files also use private Worker files for tools, without claiming general binary model input.\n\nTrack the native route and its LeapMux integration: https://github.com/leapmux/leapmux/issues/498.",
         "spec": "frontend/tests/e2e/codex/audio-attachments.spec.ts",
         "audit": "source-verified",
         "verified": true,

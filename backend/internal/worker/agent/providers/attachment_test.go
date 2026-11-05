@@ -22,6 +22,7 @@ func TestNormalizeAttachmentsForProvider_RequiresAnImplementedAudioPolicy(t *tes
 	registry := Registry()
 	audio := []*leapmuxv1.Attachment{{Filename: "voice.wav", MimeType: "audio/wav", Data: []byte{0, 1}}}
 	supported := map[leapmuxv1.AgentProvider]bool{
+		leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE:     true,
 		leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEX:      true,
 		leapmuxv1.AgentProvider_AGENT_PROVIDER_GEMINI_CLI: true,
 		leapmuxv1.AgentProvider_AGENT_PROVIDER_CODEBUDDY:  true,

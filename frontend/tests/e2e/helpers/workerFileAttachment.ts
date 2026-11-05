@@ -47,7 +47,7 @@ export function workerFileReadCommand(workerPath: string): string {
 /** Attach an arbitrary file, prove delivery, then read its bytes using the agent's real tool after a browser reload. */
 export async function exerciseWorkerFileAttachment(
   context: NativeScenarioContext,
-  options: { kind: 'binary' | 'pdf', fileName: string },
+  options: { kind: 'binary' | 'pdf' | 'audio', fileName: string },
 ): Promise<MockModelRequestRecord> {
   let workerPath = ''
   let sourcePath = ''

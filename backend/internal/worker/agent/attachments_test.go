@@ -24,11 +24,11 @@ func TestClassifyAttachmentsConformance(t *testing.T) {
 	var fixture struct {
 		Readme string `json:"_readme"`
 		Cases  []struct {
-			Name             string         `json:"name"`
-			Filename         string         `json:"filename"`
-			MIMEType         string         `json:"mimeType"`
-			DataBase64       string         `json:"dataBase64"`
-			ExpectedMIMEType string         `json:"expectedMimeType"`
+			Name             string                        `json:"name"`
+			Filename         string                        `json:"filename"`
+			MIMEType         string                        `json:"mimeType"`
+			DataBase64       string                        `json:"dataBase64"`
+			ExpectedMIMEType string                        `json:"expectedMimeType"`
 			ExpectedKind     contracts.AttachmentMediaKind `json:"expectedKind"`
 		} `json:"cases"`
 	}

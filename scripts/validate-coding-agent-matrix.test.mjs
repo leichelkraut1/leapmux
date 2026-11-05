@@ -620,7 +620,7 @@ describe('validateCodingAgentMatrix', () => {
     })
 
     it.each([
-      ['claude-code', 'agent-limit', 'Messages API'],
+      ['claude-code', 'supported', 'private Worker file'],
       ['codex', 'supported', 'input_audio.audio_url'],
       ['cursor', 'agent-limit', 'audit-8D7OZV'],
       ['github-copilot', 'agent-limit', 'copilot-audit-1.log'],
@@ -650,7 +650,7 @@ describe('validateCodingAgentMatrix', () => {
       ['deepseek-harness', 'agent-limit', 'gateway/input-invalid'],
       ['gemini-cli', 'supported', 'audit-zeZZxP'],
       ['muse-code', 'agent-limit', 'UUIDv7'],
-    ])('records native audio attachment evidence for %s', (provider, support, evidence) => {
+    ])('records audio attachment delivery evidence for %s', (provider, support, evidence) => {
       const { checklist } = readCodingAgentMatrix()
       const cell = checklist.cells['audio-attachments']?.[provider]
       expect(cell).toMatchObject({
@@ -677,14 +677,14 @@ describe('validateCodingAgentMatrix', () => {
         .toEqual(['text-attachments', 'image-attachments', 'pdf-attachments', 'audio-attachments', 'other-binary-attachments'])
     })
 
-    it('records the native Codex refusal of non-audio binary input', () => {
+    it('records Codex binary attachments as private files for tools', () => {
       const { checklist } = readCodingAgentMatrix()
       const cell = checklist.cells['other-binary-attachments'].codex
-      expect(cell).toMatchObject({ support: 'agent-limit', audit: 'unsupported', verified: true, testStatus: 'passed', spec: 'frontend/tests/e2e/codex/other-binary-attachments.spec.ts' })
-      expect(cell.detailNote).toContain('0.164.0')
-      expect(cell.detailNote).toContain('-32600')
-      expect(cell.detailNote).toContain('run-CtskPt')
-      expect(cell.userNote).not.toContain('LeapMux does not send it yet')
+      expect(cell).toMatchObject({ support: 'supported', audit: 'source-verified', verified: true, testStatus: 'passed', spec: 'frontend/tests/e2e/codex/other-binary-attachments.spec.ts' })
+      expect(cell.detailNote).toContain('durable per-chat Worker attachment storage')
+      expect(cell.detailNote).toContain('actual tool read')
+      expect(cell.userNote).toContain('private Worker files for agent tools')
+      expect(cell.userNote).toContain('native audio or general binary model input is not claimed')
     })
 
     it('records an independent native Gemini video attachment proof', () => {
@@ -1070,10 +1070,11 @@ describe('validateCodingAgentMatrix', () => {
           counts[cell.support] += 1
       }
       // A deliberate change of a verdict changes these numbers. Update them with the checklist.
-      // Preserve the three audited private-file routes alongside the native
+      // Preserve the four audited private-file routes alongside the native
       // provider and audio integration cells; keep the aggregate in sync.
-      expect(counts).toEqual({ 'supported': 1183, 'agent-limit': 437, 'leapmux-limit': 0 })
+      expect(counts).toEqual({ 'supported': 1184, 'agent-limit': 436, 'leapmux-limit': 0 })
       for (const [feature, provider] of [
+        ['audio-attachments', 'claude-code'],
         ['pdf-attachments', 'codex'],
         ['other-binary-attachments', 'claude-code'],
         ['other-binary-attachments', 'codex'],
