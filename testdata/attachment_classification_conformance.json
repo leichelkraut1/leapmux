@@ -624,6 +624,38 @@
       "dataBase64": "/9j/",
       "expectedMimeType": "image/jpeg",
       "expectedKind": "image"
+    },
+    {
+      "name": "audio-wav-missing-mime",
+      "filename": "recording.WAV",
+      "mimeType": "",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "audio/wav",
+      "expectedKind": "audio"
+    },
+    {
+      "name": "audio-flac-generic-mime",
+      "filename": "recording.FLAC",
+      "mimeType": "application/octet-stream",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "audio/flac",
+      "expectedKind": "audio"
+    },
+    {
+      "name": "audio-explicit-mime",
+      "filename": "recording.custom",
+      "mimeType": " AUDIO/MPEG ",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "audio/mpeg",
+      "expectedKind": "audio"
+    },
+    {
+      "name": "audio-explicit-text-overrides-extension",
+      "filename": "recording.mp3",
+      "mimeType": "text/plain",
+      "dataBase64": "b3JkaW5hcnkgdGV4dA==",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
     }
   ]
 }

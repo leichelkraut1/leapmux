@@ -54,6 +54,7 @@
               "text",
               "image",
               "pdf",
+              "audio",
               "binary"
             ]
           }

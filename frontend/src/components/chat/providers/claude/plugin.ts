@@ -46,8 +46,9 @@ const claudeCodePlugin: ProviderPlugin = {
       text: true,
       image: true,
       pdf: true,
+      audio: false,
       binary: true,
-      fileBackedKinds: ['binary'],
+      fileBackedKinds: ['audio', 'binary'],
     },
     planMode: buildPlanMode('permissionMode', CLAUDE_MODE.Plan, CLAUDE_DEFAULT_MODE),
     // The trigger's mode segment shows the permission mode (which is also Claude's

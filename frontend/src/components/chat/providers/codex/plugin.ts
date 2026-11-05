@@ -1,6 +1,6 @@
 import type { ProviderPlugin } from '../capabilities'
 import { buildPlanMode } from '~/components/chat/settingsGroups'
-import { CODEX_OPTION, CODEX_OPTION_DEFAULT } from '~/generated/contracts/codex-protocol'
+import { CODEX_AUDIO_MIME, CODEX_OPTION, CODEX_OPTION_DEFAULT } from '~/generated/contracts/codex-protocol'
 import { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import { registerProvider } from '../registry'
 import { classifyCodexMessage } from './classification'
@@ -44,8 +44,9 @@ const codexPlugin: ProviderPlugin = {
       text: true,
       image: true,
       pdf: true,
+      audio: [...CODEX_AUDIO_MIME],
       binary: true,
-      fileBackedKinds: ['pdf', 'binary'],
+      fileBackedKinds: ['pdf', 'audio', 'binary'],
     },
     planMode: buildPlanMode(CODEX_OPTION.CollaborationMode, 'plan', CODEX_OPTION_DEFAULT.CollaborationMode),
     // The trigger's mode segment shows the "Workflow" (collaboration_mode) group --

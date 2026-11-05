@@ -28,8 +28,14 @@ type claudeProvider struct {
 	agent.ProviderDefaults
 }
 
-// Native text, image, and PDF blocks retain their transport. Other files are
-// retained privately on the Worker and referenced as text for agent tools.
+// Native text, image, and PDF blocks retain their transport. Audio and other
+// binary files are retained privately on the Worker and referenced as text for tools.
+func (claudeProvider) ValidateAttachment(attachment agent.ClassifiedAttachment) error {
+	if attachment.Kind == contracts.AttachmentMediaKindAudio {
+		return nil
+	}
+	return (agent.ProviderDefaults{}).ValidateAttachment(attachment)
+}
 
 func (p claudeProvider) ResolveControlResponse(ctx agent.ControlResponseContext) agent.ControlResponseResolution {
 	res := agent.DefaultControlResponseResolution(ctx)

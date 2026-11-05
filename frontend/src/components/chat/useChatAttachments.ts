@@ -1,6 +1,6 @@
 import type { Accessor } from 'solid-js'
 import type { FileAttachment, PendingAttachmentFile } from './attachments'
-import type { AttachmentCapabilities } from './providers/registry'
+import type { AttachmentCapabilities } from './providers/capabilities'
 import type { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import { createEffect, createMemo, createSignal, on } from 'solid-js'
 import { showWarnToast } from '~/components/common/Toast'
@@ -82,8 +82,8 @@ export function useChatAttachments(opts: UseChatAttachmentsOptions): UseChatAtta
         : (item instanceof File ? undefined : item.filename)
       const attachment = await readFileAsAttachment(file, filename)
       const details = inferAttachmentDetails(attachment.filename, attachment.mimeType, attachment.data)
-      if (!isAttachmentSupported(details.kind, capabilities())) {
-        const reason = describeUnsupportedAttachment(details.kind, opts.providerLabel())
+      if (!isAttachmentSupported(details.kind, capabilities(), details.mimeType)) {
+        const reason = describeUnsupportedAttachment(details.kind, opts.providerLabel(), capabilities())
         rejectionReasons.set(reason, (rejectionReasons.get(reason) ?? 0) + 1)
         continue
       }

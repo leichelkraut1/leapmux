@@ -40,9 +40,10 @@ export interface AttachmentCapabilities {
   text: boolean
   image: boolean
   pdf: boolean
-  binary: boolean
-  /** Accepted kinds supplied as Worker files for tools, not native model blocks. */
-  fileBackedKinds?: readonly ('pdf' | 'binary')[]
+  audio: boolean | readonly string[]
+  binary: boolean | readonly string[]
+  /** Accepted kinds supplied as Worker files when no native media route applies. */
+  fileBackedKinds?: readonly ('pdf' | 'audio' | 'binary')[]
 }
 
 export interface StartupOption {

@@ -8,7 +8,7 @@ import { For, Show } from 'solid-js'
 import { ClippedText } from '~/components/common/ClippedText'
 import { Icon } from '~/components/common/Icon'
 import { Tooltip } from '~/components/common/Tooltip'
-import { attachmentUsesWorkerFile, isImageMimeType } from './attachments'
+import { attachmentWorkerFileDelivery, isImageMimeType } from './attachments'
 import * as styles from './AttachmentStrip.css'
 
 export interface AttachmentStripProps {
@@ -45,10 +45,15 @@ export const AttachmentStrip: Component<AttachmentStripProps> = (props) => {
                 />
               </span>
               <ClippedText text={attachment.filename} />
-              <Show when={attachmentUsesWorkerFile(attachment, props.capabilities)}>
-                <Tooltip text="Available as a file for agent tools. Reading this format depends on the tools available.">
-                  <span class={styles.fileKind}>For tools</span>
-                </Tooltip>
+              <Show when={attachmentWorkerFileDelivery(attachment, props.capabilities)}>
+                {delivery => (
+                  <Tooltip text={delivery() === 'native-audio-or-file'
+                    ? 'Delivered as native audio when the selected model supports it, or as a private file for available agent tools.'
+                    : 'Available as a file for agent tools. Reading this format depends on the tools available.'}
+                  >
+                    <span class={styles.fileKind}>{delivery() === 'native-audio-or-file' ? 'Audio or tools' : 'For tools'}</span>
+                  </Tooltip>
+                )}
               </Show>
               <Tooltip text="Remove attachment" ariaLabel>
                 <button

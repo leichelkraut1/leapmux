@@ -3,8 +3,10 @@
 package codebuddy
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/leapmux/leapmux/internal/util/testutil"
@@ -59,5 +61,22 @@ func TestCodebuddyStartupSettingsSurvivePowerShellLegacyArgumentPassing(t *testi
 			require.NoError(t, err)
 			assert.Equal(t, "Concise", started.(*Agent).SettingsSnapshot().SurfacedOptions[OptionOutputStyle])
 		})
+	}
+}
+
+func TestCodebuddySwarmLaunchArguments(t *testing.T) {
+	for _, tc := range []struct {
+		value, resume string
+		want          bool
+	}{
+		{}, {value: "false"}, {value: "true", want: true}, {value: "true", resume: "existing-session", want: true},
+	} {
+		runs := agenttest.RunLaunch(t, agenttest.LaunchProbe{Binary: "codebuddy", Start: func(ctx context.Context, opts agent.Options, sink agent.ProviderServices) (agent.Agent, error) {
+			opts.Options = map[string]string{"swarmMode": tc.value}
+			opts.ResumeSessionID = tc.resume
+			return Start(ctx, opts, sink)
+		}})
+		require.Len(t, runs, 1)
+		assert.Equal(t, tc.want, slices.Contains(runs[0].Args, "--swarm"))
 	}
 }

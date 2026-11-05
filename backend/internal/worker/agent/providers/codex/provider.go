@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/leapmux/leapmux/internal/util/optionmap"
@@ -19,9 +20,14 @@ type codexProvider struct {
 	agent.ProviderDefaults
 }
 
-// Native text and image inputs retain their transport. PDFs and other files
-// use private durable Worker files with text references for native tools.
-// This does not claim native audio or other multimodal input support.
+// Codex accepts native audio where its format and current model support it.
+// Other uploads use private durable Worker files for native file-reading tools.
+func (codexProvider) ValidateAttachment(attachment agent.ClassifiedAttachment) error {
+	if attachment.Kind == contracts.AttachmentMediaKindAudio && len(attachment.Data) == 0 {
+		return fmt.Errorf("audio attachment %q is empty", attachment.Filename)
+	}
+	return nil
+}
 
 func (p codexProvider) ResolveControlResponse(ctx agent.ControlResponseContext) agent.ControlResponseResolution {
 	if result, ok := providerkit.ResolveMCPElicitationResponse(ctx, contracts.MCPElicitationMethodCodex, codexMCPElicitationMeta); ok {

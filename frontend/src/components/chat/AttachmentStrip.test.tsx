@@ -72,6 +72,7 @@ describe('AttachmentStrip', () => {
           text: true,
           image: true,
           pdf: true,
+          audio: false,
           binary: true,
           fileBackedKinds: ['binary'],
         }}
@@ -86,6 +87,39 @@ describe('AttachmentStrip', () => {
     try {
       expect(hoverForTooltip(label)?.textContent).toBe('Available as a file for agent tools. Reading this format depends on the tools available.')
       expect(label).toHaveAccessibleDescription('Available as a file for agent tools. Reading this format depends on the tools available.')
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('labels model-dependent native audio conservatively and definite file audio for tools', () => {
+    const [attachments] = createSignal<FileAttachment[]>([
+      makeAttachment({ id: 'native-or-file', filename: 'sample.wav', mimeType: 'audio/wav', data: new Uint8Array([0, 255]) }),
+      makeAttachment({ id: 'file', filename: 'sample.flac', mimeType: 'audio/flac', data: new Uint8Array([0, 255]) }),
+    ])
+    const { container, getByText } = render(() => (
+      <AttachmentStrip
+        attachments={attachments}
+        capabilities={{
+          text: true,
+          image: true,
+          pdf: true,
+          audio: ['audio/wav'],
+          binary: true,
+          fileBackedKinds: ['audio', 'binary'],
+        }}
+        onRemove={() => {}}
+      />
+    ))
+    const pills = container.querySelectorAll('[data-testid="attachment-pill"]')
+    expect(pills[0]).toHaveTextContent('Audio or tools')
+    expect(pills[1]).toHaveTextContent('For tools')
+    const label = getByText('Audio or tools')
+    vi.useFakeTimers()
+    try {
+      expect(hoverForTooltip(label)?.textContent).toBe('Delivered as native audio when the selected model supports it, or as a private file for available agent tools.')
+      expect(label).toHaveAccessibleDescription('Delivered as native audio when the selected model supports it, or as a private file for available agent tools.')
     }
     finally {
       vi.useRealTimers()

@@ -1,4 +1,4 @@
-import type { AttachmentCapabilities } from '../registry'
+import type { AttachmentCapabilities } from '../capabilities'
 import type { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import { render } from '@solidjs/testing-library'
 import { expect, it } from 'vitest'

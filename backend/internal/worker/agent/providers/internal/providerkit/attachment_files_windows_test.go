@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leapmux/leapmux/generated/contracts"
 	"github.com/leapmux/leapmux/internal/worker/agent"
 	"github.com/leapmux/leapmux/util/useronly"
 	"github.com/stretchr/testify/assert"
@@ -126,7 +127,7 @@ func TestStageFileAttachmentWindowsLongPath(t *testing.T) {
 		Filename: "long-path.ACD",
 		MIMEType: "application/octet-stream",
 		Data:     []byte{0, 255, 1, 254},
-		Kind:     agent.AttachmentKindBinary,
+		Kind:     contracts.AttachmentMediaKindBinary,
 	}
 	first, err := StageFileAttachment(dir, attachment)
 	require.NoError(t, err)

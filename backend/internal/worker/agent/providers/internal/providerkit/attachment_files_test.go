@@ -26,7 +26,7 @@ func newAttachmentTestDir(t *testing.T) string {
 
 func TestStageFileAttachmentRetainsExactBytesAcrossRepeatedInstances(t *testing.T) {
 	dir := newAttachmentTestDir(t)
-	attachment := agent.ClassifiedAttachment{Filename: "report.xlsx", MIMEType: "application/octet-stream", Data: []byte{0, 255, 1, 0, 128}, Kind: agent.AttachmentKindBinary}
+	attachment := agent.ClassifiedAttachment{Filename: "report.xlsx", MIMEType: "application/octet-stream", Data: []byte{0, 255, 1, 0, 128}, Kind: contracts.AttachmentMediaKindBinary}
 	first, err := StageFileAttachment(dir, attachment)
 	require.NoError(t, err)
 	data, err := os.ReadFile(first.Path)

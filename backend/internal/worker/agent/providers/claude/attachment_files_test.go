@@ -7,7 +7,9 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/leapmux/leapmux/generated/contracts"
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
+	"github.com/leapmux/leapmux/internal/worker/agent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,4 +73,49 @@ func TestClaudeMissingAttachmentStorageDoesNotSendPartialInput(t *testing.T) {
 	attachments := []*leapmuxv1.Attachment{claudeOrderPNG(), {Filename: "file.bin", MimeType: "application/octet-stream", Data: []byte{255, 0}}}
 	require.ErrorContains(t, a.SendInput("Inspect both.", attachments), "not configured")
 	assert.Empty(t, stdin.String())
+}
+
+func TestClaudeAudioAttachmentsUseDurableFilesOnSendAndSteer(t *testing.T) {
+	for _, steer := range []bool{false, true} {
+		t.Run(strconv.FormatBool(steer), func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "attachments", "chat")
+			a, stdin := newClaudeContentAgent(t, steer)
+			a.attachmentDir = dir
+			attachment := &leapmuxv1.Attachment{Filename: "clip.wav", MimeType: "audio/wav", Data: []byte{'R', 'I', 'F', 'F', 0, 1, 2, 3}}
+			classified := agent.ClassifyAttachments([]*leapmuxv1.Attachment{attachment})
+			require.Len(t, classified, 1)
+			require.Equal(t, contracts.AttachmentMediaKindAudio, classified[0].Kind)
+			require.NoError(t, (claudeProvider{}).ValidateAttachment(classified[0]))
+			var err error
+			if steer {
+				err = a.SteerInput("Inspect the audio file with available tools.", []*leapmuxv1.Attachment{attachment})
+			} else {
+				err = a.SendInput("Inspect the audio file with available tools.", []*leapmuxv1.Attachment{attachment})
+			}
+			require.NoError(t, err)
+			var envelope struct {
+				Priority string `json:"priority"`
+				Message  struct {
+					Content []map[string]any `json:"content"`
+				} `json:"message"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stdin.String()), &envelope))
+			require.Len(t, envelope.Message.Content, 2)
+			assert.Equal(t, "text", envelope.Message.Content[0]["type"])
+			assert.NotContains(t, envelope.Message.Content[0], "source", "audio uses a file reference, never a native image/audio block")
+			if steer {
+				assert.Equal(t, "next", envelope.Priority)
+			}
+			entries, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			require.Len(t, entries, 1)
+			canonical, err := filepath.EvalSymlinks(dir)
+			require.NoError(t, err)
+			path := filepath.Join(canonical, entries[0].Name())
+			assert.Contains(t, envelope.Message.Content[0]["text"], strconv.Quote(path))
+			actual, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, attachment.Data, actual)
+		})
+	}
 }

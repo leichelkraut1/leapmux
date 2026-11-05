@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/leapmux/leapmux/generated/contracts"
+
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/worker/agent"
 	"github.com/leapmux/leapmux/internal/worker/agent/providers/internal/providerkit"
@@ -96,6 +98,9 @@ type Agent struct {
 	// built at many sites that do not go through Start, and a nil
 	// receiver would be reachable from every one of them.
 	tasks claudeTaskIndex
+	// workflows draws the agent rows of Workflow runs. A value, not a pointer,
+	// for the same reason as tasks.
+	workflows claudeWorkflowRuns
 }
 
 func (a *Agent) Stop() {
@@ -318,11 +323,11 @@ func (a *Agent) SupportsSteering() bool { return true }
 // therefore refuses a native PDF as unsupported, and the worker sends that
 // input as the next turn, where
 // the CLI reads every block. The refusal depends on the input alone, so it
-// comes before the turn check. Binary files use durable local-path text blocks
-// and can be steered without losing their bytes.
+// comes before the turn check. Audio and other binary files use durable
+// local-path text blocks and can be steered without losing their bytes.
 func (a *Agent) SteerInput(content string, attachments []*leapmuxv1.Attachment) error {
 	for _, attachment := range agent.ClassifyAttachments(attachments) {
-		if attachment.Kind == agent.AttachmentKindPDF {
+		if attachment.Kind == contracts.AttachmentMediaKindPdf {
 			return fmt.Errorf("%w: a steered turn of Claude Code keeps text and images only, so %q goes in the next turn",
 				agent.ErrSteeringUnsupported, attachment.Filename)
 		}
@@ -435,7 +440,7 @@ func (a *Agent) sendInputForSession(expected *string, content string, attachment
 func buildClaudeContentBlocks(content string, classified []agent.ClassifiedAttachment, attachmentDir string) ([]interface{}, error) {
 	blocks := make([]interface{}, 0, len(classified)+1)
 	for _, attachment := range classified {
-		if attachment.Kind == agent.AttachmentKindBinary {
+		if attachment.Kind == contracts.AttachmentMediaKindBinary || attachment.Kind == contracts.AttachmentMediaKindAudio {
 			file, err := providerkit.StageFileAttachment(attachmentDir, attachment)
 			if err != nil {
 				return nil, err
@@ -456,15 +461,15 @@ func buildClaudeContentBlocks(content string, classified []agent.ClassifiedAttac
 
 // claudeAttachmentBlock converts one attachment into its content block: a text
 // block for a text file, a document block for a PDF, and an image block for an
-// image. Binary files are staged separately before this native conversion.
+// image. Audio and other binary files are staged separately before this native conversion.
 func claudeAttachmentBlock(attachment agent.ClassifiedAttachment) map[string]interface{} {
 	switch attachment.Kind {
-	case agent.AttachmentKindText:
+	case contracts.AttachmentMediaKindText:
 		return map[string]interface{}{
 			"type": "text",
 			"text": providerkit.BuildInlineTextAttachmentBlock(attachment),
 		}
-	case agent.AttachmentKindPDF:
+	case contracts.AttachmentMediaKindPdf:
 		return claudeBase64Block("document", attachment)
 	default:
 		return claudeBase64Block("image", attachment)

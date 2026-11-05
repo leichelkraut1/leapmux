@@ -51,6 +51,7 @@ import {
   interruptButton,
   isMaybeVisible,
   offeredSettingsOptions,
+  openAgentInfoCard,
   openAppAs,
   openTerminalViaUI,
   openWorkspace,
@@ -1757,5 +1758,28 @@ describe('answerElevationPrompt', () => {
     const { root, log } = fakeTree((_expression, path) => path !== prompt)
     await expect(answerElevationPrompt(root, 'secret')).rejects.toThrow('the hub asks the session to prove a factor')
     expect(log).toEqual([`to.be.visible ${prompt}`])
+  })
+})
+
+describe('openAgentInfoCard', () => {
+  it.each([false, true])('keeps the card open across repeated calls when initially open=%s', async (initiallyOpen) => {
+    let open = initiallyOpen
+    let clicks = 0
+    const trigger = fakeLocator(() => true, { click: async () => {
+      open = !open
+      clicks++
+    } })
+    const popover = fakeLocator(check => check.expression === 'to.be.visible' ? open : true, { isVisible: async () => open })
+    const page = { locator: (selector: string) => {
+      if (selector === '[data-testid="agent-info-trigger"]')
+        return trigger
+      if (selector === '[data-testid="agent-info-popover"]')
+        return popover
+      throw new Error(`Unexpected agent info selector: ${selector}`)
+    } } as unknown as Page
+    expect(await openAgentInfoCard(page)).toBe(popover)
+    expect(await openAgentInfoCard(page)).toBe(popover)
+    expect(open).toBe(true)
+    expect(clicks).toBe(initiallyOpen ? 0 : 1)
   })
 })
