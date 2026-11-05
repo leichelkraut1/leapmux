@@ -106,6 +106,54 @@ function harness() {
 }
 
 describe('chatScrollViewportRestore handleResize', () => {
+  it('reveals the saved message before resolving its viewport anchor', () => {
+    const el = { scrollTop: 0, scrollHeight: 5000, clientHeight: 500 } as HTMLDivElement
+    const context = makeScrollContext({ getEl: () => el })
+    let revealed = false
+    context.virt.scrollTopForAnchor = () => revealed ? 600 : null
+    const write = vi.mocked(context.writeScrollTop)
+    const restore = createViewportRestore(context, {
+      revealMessage: (seq) => {
+        expect(seq).toBe(3n)
+        revealed = true
+      },
+      checkAtBottom: vi.fn(),
+      repinToAnchor: vi.fn(),
+      stickToBottom: vi.fn(() => false),
+      forceScrollToBottom: vi.fn(),
+      clearSavedViewportScroll: vi.fn(),
+      savedViewportScroll: () => ({ anchor: { id: 'm3', seq: 3n, offsetWithinRow: 0 }, atBottom: false, hasMoreNewer: false }),
+      setSuppressOlder: vi.fn(),
+      setLastScrollTopForDir: vi.fn(),
+      onGeometrySettled: vi.fn(),
+    })
+    restore.restoreOnMount()
+    expect(revealed).toBe(true)
+    expect(write).toHaveBeenCalledWith(600, 'viewport-restore-anchor')
+  })
+
+  it('preserves a collapsed group when its saved header anchor is already visible', () => {
+    const el = { scrollTop: 0, scrollHeight: 5000, clientHeight: 500 } as HTMLDivElement
+    const context = makeScrollContext({ getEl: () => el })
+    context.virt.scrollTopForAnchor = () => 600
+    const revealMessage = vi.fn()
+    const restore = createViewportRestore(context, {
+      revealMessage,
+      checkAtBottom: vi.fn(),
+      repinToAnchor: vi.fn(),
+      stickToBottom: vi.fn(() => false),
+      forceScrollToBottom: vi.fn(),
+      clearSavedViewportScroll: vi.fn(),
+      savedViewportScroll: () => ({ anchor: { id: 'group-head', seq: 3n, offsetWithinRow: 0 }, atBottom: false, hasMoreNewer: false }),
+      setSuppressOlder: vi.fn(),
+      setLastScrollTopForDir: vi.fn(),
+      onGeometrySettled: vi.fn(),
+    })
+    restore.restoreOnMount()
+    expect(revealMessage).not.toHaveBeenCalled()
+    expect(context.writeScrollTop).toHaveBeenCalledWith(600, 'viewport-restore-anchor')
+  })
+
   it('defers a hidden->visible restore while an animation runs, then restores once it ends', () => {
     const raf = installRaf()
     try {

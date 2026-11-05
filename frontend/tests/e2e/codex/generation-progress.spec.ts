@@ -1,7 +1,7 @@
 import { expect } from '@playwright/test'
 import { codexTest } from '../codex-fixtures'
 import { exerciseOutputByteProgress } from '../helpers/generationProgress'
-import { toolRows } from '../helpers/ui'
+import { revealActivityTarget, toolRows } from '../helpers/ui'
 import { waitForCodexCommandStart } from './commandStart'
 
 const OUTPUT_MARKER = 'LEAPMUX OUTPUT two'
@@ -17,12 +17,15 @@ codexTest.describe('generation progress', () => {
       waitForToolStart: () => waitForCodexCommandStart(native),
       afterOutputBoundary: async ({ firstMarker, secondMarker, count }) => {
         expect(count).toBeGreaterThan(0)
+        await revealActivityTarget(page, toolRows(page).first())
         await expect(toolRows(page).filter({ hasText: firstMarker })).toHaveCount(0)
         await expect(toolRows(page).filter({ hasText: secondMarker })).toHaveCount(0)
       },
     })
+    await revealActivityTarget(page, toolRows(page).filter({ hasText: OUTPUT_MARKER }).first())
     await expect(toolRows(page).filter({ hasText: OUTPUT_MARKER }).first()).toBeVisible()
     await page.reload()
+    await revealActivityTarget(page, toolRows(page).filter({ hasText: OUTPUT_MARKER }).first())
     await expect(toolRows(page).filter({ hasText: OUTPUT_MARKER }).first()).toBeVisible()
   })
 })

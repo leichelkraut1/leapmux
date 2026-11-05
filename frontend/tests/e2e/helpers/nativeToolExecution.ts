@@ -15,7 +15,7 @@ import { createOutputGate, runWithGatedOutput } from './outputGate'
 import { bashToolCall, editToolCall, readToolCall, writeToolCall } from './providerToolCalls'
 import { isFileNameComponent } from './runDirectory'
 import { printfMarkerCommand, quotePosixShellArgument, uniqueMarker } from './shellArguments'
-import { assistantBubbles, chatText, controlButton, expectNoControlBanner, messageBubbles, railedRows, sendMessage, toolRows, waitForAgentIdle } from './ui'
+import { assistantBubbles, chatText, controlButton, expandActivityGroups, expectNoControlBanner, messageBubbles, railedRows, revealActivityTarget, sendMessage, toolRows, waitForAgentIdle } from './ui'
 
 interface ToolPreparation {
   prepare?: () => Promise<void>
@@ -353,10 +353,12 @@ export async function expectShellToolRows(
   options: ShellRowOptions = {},
 ): Promise<void> {
   const { page } = context
+  await expandActivityGroups(page)
   const exceptions = SHELL_ROW_EXCEPTIONS[context.provider] ?? {}
   for (const command of commands) {
     if (command.exactOutput !== undefined) {
       const selected = toolResultBubbles(page).filter({ hasText: command.printedPrefix })
+      await revealActivityTarget(page, selected.first())
       await expect(selected, 'the native record identifies one result row').toHaveCount(1)
       await expandCollapsedRows(selected)
       const preview = selected.locator('[data-tool-output-preview]')
@@ -365,6 +367,7 @@ export async function expectShellToolRows(
     }
     const outputRows = toolRows(page).filter({ hasText: command.output })
     const resultRows = toolResultBubbles(page).filter({ hasText: command.output })
+    await revealActivityTarget(page, outputRows.first())
     await expect(outputRows.first(), 'a tool row draws the output of the command').toBeVisible()
     await expect(toolRows(page).filter({ hasText: 'printf' }).filter({ hasText: command.printedPrefix }).first(), 'a tool row shows the command').toBeVisible()
     await expect(railedRows(page).filter({ hasText: command.output }).first(), 'the output row draws the rail of its span').toBeVisible()
@@ -556,6 +559,7 @@ export async function expectFileDiff(page: Page, change: { before: string, after
       + 'matches every diff, and a line that holds the other matches a diff that shows only the longer line.')
   }
   const diff = messageBubbles(page).locator('[data-file-diff]:visible').filter({ hasText: change.after }).filter({ hasText: change.before })
+  await revealActivityTarget(page, diff.first())
   await expect(diff.first(), 'one visible file diff shows the old and the new line').toBeVisible()
 }
 
@@ -626,6 +630,7 @@ export async function exerciseNativeFileRead(
     prompt: 'Read the notes back.',
     answer: 'I read the notes.',
   })
+  await revealActivityTarget(context.page, toolRows(context.page).filter({ hasText: lines[2]! }).first())
   await expect.poll(() => chatText(context.page), 'the read row draws the last line of the file').toContain(lines[2])
   expect(await chatText(context.page), 'the read row draws the lines of the file, not their numbered form').not.toContain(options.numberedLine(3, lines[2]!))
 }
@@ -673,6 +678,7 @@ export async function exerciseNativeFileWrite(
     expect(bytes, 'the write stores exactly the stated bytes').toBe(stored)
   else
     expect(bytes, 'the write stores the stated bytes').toMatch(stored)
+  await revealActivityTarget(context.page, toolRows(context.page).filter({ hasText: NATIVE_FILE_NAMES.write }).first())
   await expect.poll(() => chatText(context.page), 'the transcript names the written file').toContain(NATIVE_FILE_NAMES.write)
 }
 

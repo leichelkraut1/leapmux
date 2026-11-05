@@ -163,7 +163,9 @@ export function createTabBusyProbe(deps: TabBusyProbeDeps) {
     const [terminals, agents] = await Promise.all([terminalReasons(tabs), agentReasons(tabs)])
     const out: BusyTab[] = []
     for (const tab of tabs) {
-      const reason = tab.type === TabType.TERMINAL ? terminals.get(tab.id) ?? null : agents.get(tab.id) ?? null
+      const reason = tab.type === TabType.TERMINAL
+        ? terminals.get(tab.id) ?? null
+        : tab.type === TabType.AGENT ? agents.get(tab.id) ?? null : null
       if (reason)
         out.push({ tab, title: tabDisplayLabel(tab), reason })
     }

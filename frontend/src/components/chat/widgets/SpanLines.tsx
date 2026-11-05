@@ -12,6 +12,7 @@ import {
   spanLinesContainer,
   spanPassthroughColors,
 } from './SpanLines.css'
+import { spanLinesGeometryStyle } from './SpanLines.geometry'
 
 /** Map a 1-based server color index to the corresponding CSS class key. */
 export function spanColorKey(colorIndex: number): string {
@@ -114,7 +115,7 @@ export function shouldConnectSpanLineTop(line: SpanLine | null, previousLine: Sp
 export const SpanLines: Component<SpanLinesProps> = (props) => {
   return (
     <Show when={props.lines && props.lines.length > 0}>
-      <div class={spanLinesContainer}>
+      <div class={spanLinesContainer} style={spanLinesGeometryStyle(props.lines.length)}>
         {/*
           <Index> keys columns by position (the array is positional plain data),
           so re-parsing span_lines updates each column's class in place instead

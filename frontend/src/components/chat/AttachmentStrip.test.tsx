@@ -55,6 +55,43 @@ describe('AttachmentStrip', () => {
     expect(pills[1]).toHaveTextContent('document.pdf')
   })
 
+  it('labels only tool-backed files without claiming native document support', () => {
+    const [attachments] = createSignal<FileAttachment[]>([
+      makeAttachment({ id: 'native', filename: 'document.pdf', mimeType: 'application/pdf' }),
+      makeAttachment({
+        id: 'tools',
+        filename: 'project.ACD',
+        mimeType: 'application/octet-stream',
+        data: new Uint8Array([0, 255, 1]),
+      }),
+    ])
+    const { container, getByText } = render(() => (
+      <AttachmentStrip
+        attachments={attachments}
+        capabilities={{
+          text: true,
+          image: true,
+          pdf: true,
+          binary: true,
+          fileBackedKinds: ['binary'],
+        }}
+        onRemove={() => {}}
+      />
+    ))
+    const pills = container.querySelectorAll('[data-testid="attachment-pill"]')
+    expect(pills[0]).not.toHaveTextContent('For tools')
+    expect(pills[1]).toHaveTextContent('For tools')
+    const label = getByText('For tools')
+    vi.useFakeTimers()
+    try {
+      expect(hoverForTooltip(label)?.textContent).toBe('Available as a file for agent tools. Reading this format depends on the tools available.')
+      expect(label).toHaveAccessibleDescription('Available as a file for agent tools. Reading this format depends on the tools available.')
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('provides the full filename to the tooltip trigger', () => {
     const items = [
       makeAttachment({ id: 'a1', filename: 'very/long/nested/path/to/screenshot.png' }),

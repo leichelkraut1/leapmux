@@ -19,7 +19,9 @@ import (
 func TestBuildClaudeContentBlocks_textOnly(t *testing.T) {
 	t.Parallel()
 
-	blocks := buildClaudeContentBlocks("hello", nil)
+	blocks, err := buildClaudeContentBlocks("hello", nil, "")
+
+	require.NoError(t, err)
 	require.Len(t, blocks, 1)
 	m := blocks[0].(map[string]interface{})
 	assert.Equal(t, "text", m["type"])
@@ -33,7 +35,8 @@ func TestBuildClaudeContentBlocks_imageAttachment(t *testing.T) {
 	attachments := []*leapmuxv1.Attachment{
 		{Filename: "test.png", MimeType: "image/png", Data: data},
 	}
-	blocks := buildClaudeContentBlocks("look at this", agent.ClassifyAttachments(attachments))
+	blocks, err := buildClaudeContentBlocks("look at this", agent.ClassifyAttachments(attachments), "")
+	require.NoError(t, err)
 	require.Len(t, blocks, 2)
 
 	// First block: the image. Claude Code reads the prompt from the last block.
@@ -58,7 +61,8 @@ func TestBuildClaudeContentBlocks_pdfAttachment(t *testing.T) {
 	attachments := []*leapmuxv1.Attachment{
 		{Filename: "report.pdf", MimeType: "application/pdf", Data: data},
 	}
-	blocks := buildClaudeContentBlocks("", agent.ClassifyAttachments(attachments))
+	blocks, err := buildClaudeContentBlocks("", agent.ClassifyAttachments(attachments), "")
+	require.NoError(t, err)
 	require.Len(t, blocks, 1) // no text block when content is empty
 
 	docBlock := blocks[0].(map[string]interface{})
@@ -74,7 +78,8 @@ func TestBuildClaudeContentBlocks_textAttachment(t *testing.T) {
 	attachments := []*leapmuxv1.Attachment{
 		{Filename: "styles.css", MimeType: "", Data: []byte("body {}\n")},
 	}
-	blocks := buildClaudeContentBlocks("review", agent.ClassifyAttachments(attachments))
+	blocks, err := buildClaudeContentBlocks("review", agent.ClassifyAttachments(attachments), "")
+	require.NoError(t, err)
 	require.Len(t, blocks, 2)
 
 	fileBlock := blocks[0].(map[string]interface{})
@@ -90,7 +95,9 @@ func TestBuildClaudeContentBlocks_textAttachment(t *testing.T) {
 func TestBuildClaudeContentBlocks_noAttachments(t *testing.T) {
 	t.Parallel()
 
-	blocks := buildClaudeContentBlocks("plain text", nil)
+	blocks, err := buildClaudeContentBlocks("plain text", nil, "")
+
+	require.NoError(t, err)
 	require.Len(t, blocks, 1)
 	m := blocks[0].(map[string]interface{})
 	assert.Equal(t, "text", m["type"])
@@ -196,15 +203,14 @@ func TestNormalizeAttachmentsForProvider_InfersTextMime(t *testing.T) {
 	assert.Equal(t, "text/plain", normalized[0].GetMimeType())
 }
 
-func TestNormalizeAttachmentsForProvider_ClaudeRejectsBinaryAcceptsRest(t *testing.T) {
+func TestNormalizeAttachmentsForProvider_ClaudeAcceptsDurableBinaryAndNativeKinds(t *testing.T) {
 	t.Parallel()
 
-	// Claude Code has no binary content block but accepts text, image, and PDF.
+	// Binary files use durable local paths; native text, images, and PDFs remain unchanged.
 	_, err := agenttest.MustNewRegistry(Registration()).NormalizeAttachments(leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE, []*leapmuxv1.Attachment{
 		{Filename: "archive.bin", MimeType: "application/octet-stream", Data: []byte{0xff, 0x00}},
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "claude code does not support binary attachments")
+	require.NoError(t, err)
 
 	normalized, err := agenttest.MustNewRegistry(Registration()).NormalizeAttachments(leapmuxv1.AgentProvider_AGENT_PROVIDER_CLAUDE_CODE, []*leapmuxv1.Attachment{
 		{Filename: "notes.txt", MimeType: "text/plain", Data: []byte("hello")},

@@ -1,6 +1,7 @@
 import { codexTest } from '../codex-fixtures'
 import { codexViewImageToolCall } from '../helpers/providerToolCalls'
-import { expectPngInRequest, expectToolRowImage, runToolImageTurn } from '../helpers/toolImages'
+import { expectDecodedImageInBubble, expectPngInRequest, expectToolRowImage, runToolImageTurn } from '../helpers/toolImages'
+import { messageBubbles } from '../helpers/ui'
 
 codexTest.describe('Codex images in tool results', () => {
   // The mock scripts the Read call. The picture in the tool row is produced by
@@ -13,6 +14,9 @@ codexTest.describe('Codex images in tool results', () => {
     })
     // `view_image` exists to put the image into the model input, so the next model request holds the PNG.
     expectPngInRequest(resultRequest)
+    // The picture is visible before helpers can open any folded activity.
+    await expectDecodedImageInBubble(messageBubbles(native.page)
+      .filter({ has: native.page.locator('button[aria-label="Open image"] img') }).last())
     await expectToolRowImage(native.page, 'tool-image-codex-77')
   })
 })

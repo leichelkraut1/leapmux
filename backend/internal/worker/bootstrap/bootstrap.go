@@ -219,12 +219,20 @@ func Wire(p Params) *Wiring {
 	agents.SetStartupConcurrency(p.AgentStartupConcurrency)
 
 	dispatcher := channel.NewDispatcher()
-	svc.ControlIPC = newControlIPCFactory(p, svc, dispatcher)
+	controlFactory := newControlIPCFactory(p, svc, dispatcher)
+	svc.ControlIPC = controlFactory
 
 	// Binds svc.Cleanup as the tracked-dispatch drain as well as
 	// registering the handlers -- see service.RegisterAll.
 	service.RegisterAll(dispatcher, svc)
 	channelMgr.SetDispatcher(dispatcher)
+
+	// The workflow engine reaches agents and computers through the same
+	// router `leapmux control` uses, unconfined and scoped to the registrant.
+	// Its loop recovers every unfinished run at start, so a restart resumes
+	// where the database says the run stood.
+	svc.Workflows.SetPlatform(&controlipc.WorkflowPlatform{Factory: controlFactory, Owner: svc.RegisteredBy})
+	go svc.Workflows.Run(p.Ctx)
 
 	// Only now is the manager reachable from the connect loop.
 	p.Client.SetChannelMgr(channelMgr)
@@ -534,6 +542,7 @@ func BuildTabSync(queries *db.Queries, owner userid.UserID) (*leapmuxv1.WorkerTa
 		leapmuxv1.TabType_TAB_TYPE_TERMINAL,
 		leapmuxv1.TabType_TAB_TYPE_FILE,
 		leapmuxv1.TabType_TAB_TYPE_IMAGE,
+		leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION,
 		leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED,
 	} {
 		var ids []string
@@ -545,7 +554,7 @@ func BuildTabSync(queries *db.Queries, owner userid.UserID) (*leapmuxv1.WorkerTa
 			ids, err = queries.ListAllAgentIDs(ctx)
 		case leapmuxv1.TabType_TAB_TYPE_TERMINAL:
 			ids, err = queries.ListAllTerminalIDs(ctx)
-		case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE:
+		case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
 			// A payload-backed tab's CRDT row carries a worker_id (the frontend
 			// stamps ctx.workerId and the validator rejects a live tab without
 			// one), so it lands in workspace_tab_owned and comes back from

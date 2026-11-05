@@ -15,12 +15,13 @@ import (
 type Agent struct {
 	providerkit.Process // shared process lifecycle (Stop, Wait, Stderr, etc.)
 
-	model      string
-	sessionID  string
-	effort     string
-	workingDir string
-	homeDir    string
-	sink       agent.ProviderServices
+	model         string
+	sessionID     string
+	effort        string
+	workingDir    string
+	attachmentDir string
+	homeDir       string
+	sink          agent.ProviderServices
 
 	// Claude Code-specific state.
 	contextUsage    *contextUsageSnapshot
@@ -314,13 +315,14 @@ func (a *Agent) SupportsSteering() bool { return true }
 // folds such a message into the running turn as a queued command, and that fold
 // keeps only the text blocks and the image blocks (the queued_command
 // attachment of 2.1.289). A PDF would lose its document block there. SteerInput
-// therefore refuses an input that carries a file other than a text file or an
-// image as unsupported, and the worker sends that input as the next turn, where
+// therefore refuses a native PDF as unsupported, and the worker sends that
+// input as the next turn, where
 // the CLI reads every block. The refusal depends on the input alone, so it
-// comes before the turn check.
+// comes before the turn check. Binary files use durable local-path text blocks
+// and can be steered without losing their bytes.
 func (a *Agent) SteerInput(content string, attachments []*leapmuxv1.Attachment) error {
 	for _, attachment := range agent.ClassifyAttachments(attachments) {
-		if attachment.Kind != agent.AttachmentKindText && attachment.Kind != agent.AttachmentKindImage {
+		if attachment.Kind == agent.AttachmentKindPDF {
 			return fmt.Errorf("%w: a steered turn of Claude Code keeps text and images only, so %q goes in the next turn",
 				agent.ErrSteeringUnsupported, attachment.Filename)
 		}
@@ -356,7 +358,11 @@ func (a *Agent) sendInputForSession(expected *string, content string, attachment
 		// nil entries carries no attachment, so it is plain text too.
 		msg.Message.Content = content
 	} else {
-		msg.Message.Content = buildClaudeContentBlocks(content, classified)
+		blocks, err := buildClaudeContentBlocks(content, classified, a.attachmentDir)
+		if err != nil {
+			return err
+		}
+		msg.Message.Content = blocks
 	}
 
 	data, err := json.Marshal(msg)
@@ -426,10 +432,18 @@ func (a *Agent) sendInputForSession(expected *string, content string, attachment
 //
 // An empty prompt adds no text block. The CLI sends the blocks to the Messages
 // API, and that API refuses an empty text block.
-func buildClaudeContentBlocks(content string, classified []agent.ClassifiedAttachment) []interface{} {
+func buildClaudeContentBlocks(content string, classified []agent.ClassifiedAttachment, attachmentDir string) ([]interface{}, error) {
 	blocks := make([]interface{}, 0, len(classified)+1)
 	for _, attachment := range classified {
-		blocks = append(blocks, claudeAttachmentBlock(attachment))
+		if attachment.Kind == agent.AttachmentKindBinary {
+			file, err := providerkit.StageFileAttachment(attachmentDir, attachment)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, map[string]interface{}{"type": "text", "text": file.ReferenceText()})
+		} else {
+			blocks = append(blocks, claudeAttachmentBlock(attachment))
+		}
 	}
 	if content != "" {
 		blocks = append(blocks, map[string]interface{}{
@@ -437,12 +451,12 @@ func buildClaudeContentBlocks(content string, classified []agent.ClassifiedAttac
 			"text": content,
 		})
 	}
-	return blocks
+	return blocks, nil
 }
 
 // claudeAttachmentBlock converts one attachment into its content block: a text
 // block for a text file, a document block for a PDF, and an image block for an
-// image. ValidateAttachment refuses a binary file before it reaches here.
+// image. Binary files are staged separately before this native conversion.
 func claudeAttachmentBlock(attachment agent.ClassifiedAttachment) map[string]interface{} {
 	switch attachment.Kind {
 	case agent.AttachmentKindText:

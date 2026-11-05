@@ -8,7 +8,7 @@ import { readNativeMessageSnapshot } from '../helpers/nativeMessages'
 import { currentNativeAgent } from '../helpers/nativeScenario'
 import { exerciseFileToolExecution, runNativeToolTurn } from '../helpers/nativeToolExecution'
 import { bashToolCall, editToolCall, writeToolCall } from '../helpers/providerToolCalls'
-import { assistantBubbles, fileChangeRow, messageBubbles, toolRows } from '../helpers/ui'
+import { assistantBubbles, fileChangeRow, messageBubbles, revealActivityTarget, toolRows } from '../helpers/ui'
 import { codexAppliedFileChange, requireCodexPatchResult } from './appliedFileChange'
 import { codexExecContext } from './scenarios'
 
@@ -30,6 +30,7 @@ codexTest.describe('codex tool execution', () => {
     // The prompt and scripted answer cannot satisfy these tool and diff locators.
     const title = toolRows(page).filter({ hasText: 'codex-test-file.txt (1 line)' })
     const tool = messageBubbles(page).filter({ has: title }).first()
+    await revealActivityTarget(page, tool)
     await expect(tool).toBeVisible()
     await expect(tool.getByText('codex-test-file.txt', { exact: true })).toBeVisible()
     await expect(tool.getByText('(1 line)', { exact: true })).toBeVisible()
@@ -98,6 +99,8 @@ codexTest('file-change statistics keep one presentation for one file and multipl
     answer: 'I changed first.ts and second.ts.',
   })
 
+  await revealActivityTarget(page, fileChangeRow(page, 'single.ts'))
+  await revealActivityTarget(page, fileChangeRow(page, 'first.ts'))
   const single = await badgePresentation(fileChangeRow(page, 'single.ts').getByTestId('git-diff-stats').first())
   const multiple = await badgePresentation(fileChangeRow(page, 'first.ts').getByTestId('git-diff-stats').first())
 

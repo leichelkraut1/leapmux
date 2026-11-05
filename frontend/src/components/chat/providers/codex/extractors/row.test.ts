@@ -4,6 +4,7 @@ import type { ToolSpanContext } from '~/components/chat/rowExtractionTypes'
 import { describe, expect, it } from 'vitest'
 import { CODEX_ITEM } from '~/generated/contracts/codex-protocol'
 import { AgentProvider, MessageCompletion } from '~/generated/proto/leapmux/v1/agent_pb'
+import { isCollapsibleActivity } from '../../../chatActivityGroups'
 import { fileEditHasDiff } from '../../../model/fileEditDiff'
 import { TOOL_KINDS } from '../../../model/toolKind'
 import { DEFAULT_TOOL_REQUESTS } from '../../defaultToolRequests'
@@ -94,6 +95,104 @@ describe('codex retained outcome', () => {
   it('leaves a completed command alone', () => {
     const row = toolRow({ type: CODEX_ITEM.CommandExecution, status: 'completed', command: 'ls' })
     expect(row?.call.status).toBe('completed')
+  })
+})
+
+describe('paired Codex command outcomes', () => {
+  function commandPair(options: {
+    request?: Record<string, unknown>
+    result?: Record<string, unknown>
+    resultOwner?: Record<string, unknown>
+    resultSession?: string
+    resultWrapped?: boolean
+    role?: 'request' | 'result'
+    completion?: MessageCompletion
+  } = {}) {
+    const start = {
+      threadId: 'native-thread',
+      turnId: 'native-turn',
+      startedAtMs: 1,
+      item: { type: CODEX_ITEM.CommandExecution, id: 'native-command', status: 'inProgress', command: 'node fixture.js', cwd: '/fixture', ...options.request },
+    }
+    const end = {
+      threadId: 'native-thread',
+      turnId: 'native-turn',
+      completedAtMs: 2,
+      item: { type: CODEX_ITEM.CommandExecution, id: 'native-command', status: 'completed', command: 'node fixture.js', cwd: '/fixture', aggregatedOutput: 'GENERATED_RESULT\n', exitCode: 0, durationMs: 0, ...options.result },
+      ...options.resultOwner,
+    }
+    const resultPayload = options.resultWrapped ? { method: 'item/completed', params: end } : end
+    const request = { ...parsedItem(start.item, options.completion), agentSessionId: 'native-thread', topLevel: start, parentObject: start }
+    const result = { ...parsedItem(end.item), agentSessionId: options.resultSession ?? 'native-thread', topLevel: resultPayload, parentObject: resultPayload }
+    const role = options.role ?? 'request'
+    const row = codexExtractRow({
+      resolved: role === 'request' ? request : result,
+      category: { kind: 'tool_use' },
+      span: { request, result, role, visibleRows: { request: true, result: true } },
+      completion: options.completion,
+    } as never)
+    return { row: row?.kind === 'tool' ? row : null, request, result }
+  }
+
+  it.each(['request', 'result'] as const)('projects the completed native command on its %s row', (role) => {
+    // Native start/end frames carry timestamps and no retained completion flag.
+    const { row, request } = commandPair({ role })
+    expect(row?.role).toBe(role)
+    expect(row?.call).toMatchObject({
+      id: 'native-command',
+      kind: 'execute',
+      status: 'completed',
+      request: { command: 'node fixture.js', cwd: '/fixture' },
+      result: { commands: [{ output: 'GENERATED_RESULT\n', exitCode: 0, durationMs: 0 }], unresolvedTerminals: [] },
+    })
+    expect(row?.call.degradation).toBeUndefined()
+    expect(isCollapsibleActivity({ kind: 'row', row } as never)).toBe(true)
+    expect(request.parentObject.item.status).toBe('inProgress')
+  })
+
+  it('retains requested command fields omitted by the closing frame', () => {
+    const { row } = commandPair({ result: { command: undefined, cwd: null } })
+    expect(row?.call).toMatchObject({ status: 'completed', request: { command: 'node fixture.js', cwd: '/fixture' } })
+  })
+
+  it('joins a result carried inside the JSON-RPC envelope', () => {
+    const { row } = commandPair({ resultWrapped: true })
+    expect(row?.call).toMatchObject({ kind: 'execute', status: 'completed', result: { commands: [{ exitCode: 0 }] } })
+  })
+
+  it.each([
+    ['another item ID', { result: { id: 'another-command' } }],
+    ['another item type', { result: { type: CODEX_ITEM.FileChange } }],
+    ['missing item IDs', { request: { id: '' }, result: { id: '' } }],
+    ['another thread', { resultOwner: { threadId: 'another-thread' } }],
+    ['another turn', { resultOwner: { turnId: 'another-turn' } }],
+    ['another stored session', { resultSession: 'another-session' }],
+    ['another wrapped owner', { resultOwner: { threadId: 'another-thread' }, resultWrapped: true }],
+  ])('does not borrow a result from %s', (_name, options) => {
+    const { row } = commandPair(options)
+    expect(row?.call.status).toBe('in_progress')
+    expect(row?.call.result).toBeUndefined()
+    expect(row?.call.degradation).toBeUndefined()
+  })
+
+  it.each([
+    ['failed', 'failed'],
+    ['declined', 'declined'],
+    ['interrupted', 'cancelled'],
+    ['cancelled', 'cancelled'],
+  ])('keeps a matching %s result visible', (nativeStatus, expected) => {
+    const { row } = commandPair({ result: { status: nativeStatus, aggregatedOutput: 'Generated outcome explanation', exitCode: nativeStatus === 'failed' ? 7 : null } })
+    expect(row?.call.status).toBe(expected)
+    expect(row?.call.degradation).toBeUndefined()
+    expect(isCollapsibleActivity({ kind: 'row', row } as never)).toBe(false)
+    if (nativeStatus === 'declined')
+      expect(row?.call.result).toEqual({ failure: true, text: 'Generated outcome explanation' })
+  })
+
+  it('preserves retained interruption over a completed sibling', () => {
+    const { row } = commandPair({ completion: MessageCompletion.INTERRUPTED })
+    expect(row?.call.status).toBe('cancelled')
+    expect(isCollapsibleActivity({ kind: 'row', row, completion: 'interrupted' } as never)).toBe(false)
   })
 })
 

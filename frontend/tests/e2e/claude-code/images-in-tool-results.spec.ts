@@ -1,6 +1,7 @@
 import { claudeTest } from '../claude-fixtures'
 import { readToolCall } from '../helpers/providerToolCalls'
-import { expectPngInRequest, expectToolRowImage, runToolImageTurn } from '../helpers/toolImages'
+import { expectDecodedImageInBubble, expectPngInRequest, expectToolRowImage, runToolImageTurn } from '../helpers/toolImages'
+import { messageBubbles } from '../helpers/ui'
 
 claudeTest.describe('Claude Code images in tool results', () => {
   // The mock scripts the Read call. The picture in the tool row is produced by
@@ -14,6 +15,9 @@ claudeTest.describe('Claude Code images in tool results', () => {
     })
     // An Anthropic tool result carries the image block of the Read, so the next model request holds the PNG.
     expectPngInRequest(resultRequest)
+    // The picture is visible before helpers can open any folded activity.
+    await expectDecodedImageInBubble(messageBubbles(native.page)
+      .filter({ has: native.page.locator('button[aria-label="Open image"] img') }).last())
     await expectToolRowImage(native.page, 'tool-image-claude-42')
   })
 })

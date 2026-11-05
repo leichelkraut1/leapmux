@@ -24,14 +24,16 @@ import type { CompactionDetails, NotificationEntry } from '../model/notification
 import type { ControlQuestion } from '../model/question'
 import type { ChatRow } from '../model/row'
 import type { ToolCall } from '../model/toolCall'
+import type { NativeConversationRecord } from '../nativeConversation'
 import type { ControlResponseDeriver } from '../persistedControlResponse'
 import type { ProviderPermissionPresets } from '../providerSettings'
 import type { ResolvedMessageContent, RowExtractionInput } from '../rowExtractionTypes'
 import type { ElicitationRequest } from '~/components/chat/model/controlPrompt'
-import type { AgentProvider, AssembledMessageKind, MessageCompletion, MessageSource } from '~/generated/proto/leapmux/v1/agent_pb'
+import type { AgentChatMessage, AgentProvider, AssembledMessageKind, MessageCompletion, MessageSource } from '~/generated/proto/leapmux/v1/agent_pb'
 import type { ParsedMessageContent } from '~/lib/messageParser'
 import type { ToolSpanRole, ToolSpanSide } from '~/lib/messageSpan'
 import type { ContextUsageInfo, RateLimitUpdate } from '~/models/agentSession'
+import type { PromptCacheSnapshot } from '~/models/promptCache'
 import type { ControlRequest } from '~/stores/control.store'
 
 export interface AttachmentCapabilities {
@@ -39,6 +41,8 @@ export interface AttachmentCapabilities {
   image: boolean
   pdf: boolean
   binary: boolean
+  /** Accepted kinds supplied as Worker files for tools, not native model blocks. */
+  fileBackedKinds?: readonly ('pdf' | 'binary')[]
 }
 
 export interface StartupOption {
@@ -143,6 +147,11 @@ export interface ControlExtractionInput {
  * linked messages and native notifications only some protocols carry.
  */
 export interface ProviderTranscriptCapability {
+  /** Pure projection of read-only native history; never starts or owns a session. */
+  projectNativeConversation?: (records: readonly NativeConversationRecord[], format: string, sessionId: string) => AgentChatMessage[]
+  /** Opt in to collapsed consecutive tool/reasoning activity in the transcript. */
+  foldActivity?: boolean
+
   /**
    * Combine separate supplemental data with the provider payload for display only.
    *
@@ -404,6 +413,9 @@ export interface ProviderSessionCapability {
    *     (`handleUsageUpdated` in `providers/cline/output.go`).
    */
   contextUsageFromMessage?: (parsed: ParsedMessageContent) => ContextUsageInfo | null
+
+  /** Estimate request-cache state from native usage; missing evidence stays unknown. */
+  promptCacheFromMessages?: (messages: readonly AgentChatMessage[], options?: { savedHistory?: boolean }) => PromptCacheSnapshot | undefined
 
   /**
    * Read a native compaction boundary, or null for another frame.

@@ -3,7 +3,6 @@ package claude
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/leapmux/leapmux/internal/util/optionmap"
@@ -29,13 +28,8 @@ type claudeProvider struct {
 	agent.ProviderDefaults
 }
 
-// Claude Code accepts text, image, and PDF blocks but has no binary content block.
-func (claudeProvider) ValidateAttachment(attachment agent.ClassifiedAttachment) error {
-	if attachment.Kind == agent.AttachmentKindBinary {
-		return fmt.Errorf("claude code does not support binary attachments: %s", attachment.Filename)
-	}
-	return nil
-}
+// Native text, image, and PDF blocks retain their transport. Other files are
+// retained privately on the Worker and referenced as text for agent tools.
 
 func (p claudeProvider) ResolveControlResponse(ctx agent.ControlResponseContext) agent.ControlResponseResolution {
 	res := agent.DefaultControlResponseResolution(ctx)

@@ -3,7 +3,6 @@ import type { TileActions } from './TileActionsMenu'
 import type { TabPopAction } from '~/components/common/TabContextMenu'
 import type { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import type { TerminalStatus } from '~/generated/proto/leapmux/v1/terminal_pb'
-import type { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import type { DragAxis, GuardedDragRow } from '~/lib/dragRow'
 import type { Tab } from '~/stores/tab.types'
 import { createDroppable, SortableProvider } from '@thisbeyond/solid-dnd'
@@ -20,6 +19,7 @@ import { AgentProviderIcon, agentProviderLabel } from '~/components/common/Agent
 import { DragHandle } from '~/components/common/DragHandle'
 import { createContextMenuAnchor, DropdownMenu, DropdownMenuCheckableItem } from '~/components/common/DropdownMenu'
 import { IconButton, IconButtonState } from '~/components/common/IconButton'
+import { LinkedChatBadge } from '~/components/common/LinkedChatBadge'
 import { NewTabMenuItems } from '~/components/common/NewTabMenuItems'
 import { providerButton } from '~/components/common/NewTabMenuItems.css'
 import { NotificationDot } from '~/components/common/NotificationDot'
@@ -28,6 +28,7 @@ import { TabTypeIcon } from '~/components/common/TabTypeIcon'
 import { Tooltip } from '~/components/common/Tooltip'
 import { usePreferences } from '~/context/PreferencesContext'
 import { TAB_TYPE_WIRE_TOKEN } from '~/generated/contracts/tab-types'
+import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
 import { useMruProviders } from '~/hooks/useMruProviders'
 import { attachDragActivators } from '~/lib/dragActivators'
 import { createGuardedSortableRow } from '~/lib/dragRow'
@@ -486,6 +487,7 @@ export const TabBar: Component<TabBarProps> = (props) => {
         >
           <TabRenameInput tab={tab} />
         </Show>
+        <LinkedChatBadge tab={tab()} />
         <Show when={tab().hasNotification}>
           <NotificationDot testId="tab-notification" />
         </Show>
@@ -502,6 +504,7 @@ export const TabBar: Component<TabBarProps> = (props) => {
             class={styles.tabClose}
             state={isClosing() ? IconButtonState.Loading : IconButtonState.Enabled}
             data-testid="tab-close"
+            title={tab().type === TabType.NATIVE_CONVERSATION ? 'Remove from LeapMux' : 'Close'}
             onPointerDown={e => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
@@ -521,6 +524,7 @@ export const TabBar: Component<TabBarProps> = (props) => {
           {...(canRename() ? { onRename: () => startEditing(tab()) } : {})}
           {...(canCloseTab(props.archived) ? { onClose: () => props.onClose(tab()) } : {})}
           isClosing={isClosing()}
+          {...(tab().type === TabType.NATIVE_CONVERSATION ? { closeLabel: 'Remove from LeapMux' } : {})}
           {...(() => {
             // Hoisted per evaluation so the spread narrows and stays reactive.
             const pop = props.tabPop?.(tab())

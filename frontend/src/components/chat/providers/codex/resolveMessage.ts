@@ -1,6 +1,7 @@
 import type { ParsedMessageContent } from '~/lib/messageParser'
 import { CODEX_ITEM_FIELD, CODEX_RAW_FIELD, CODEX_RAW_ITEM, CODEX_SUPPLEMENT } from '~/generated/contracts/codex-protocol'
 import { isObject, pickObject } from '~/lib/jsonPick'
+import { codexExternalHistoryProjection } from './nativeConversation'
 
 /** The key of the JSON-RPC params in a stored raw frame. */
 const JSON_RPC_PARAMS = 'params'
@@ -106,6 +107,9 @@ function workerString(value: unknown, absent: '' | null): string | null {
  * the Raw JSON view still shows the agent's own bytes.
  */
 export function resolveCodexMessage(parsed: ParsedMessageContent): Record<string, unknown> | undefined {
+  const external = codexExternalHistoryProjection(parsed)
+  if (external)
+    return external
   const original = parsed.parentObject
   if (!original)
     return original

@@ -249,6 +249,27 @@ describe('WorkspaceContextMenu', () => {
 
       expect(onMoveTo).toHaveBeenCalledWith('sec-custom')
     })
+
+    it('moves to the chosen section from the workspace row right-click menu', () => {
+      const row = document.createElement('div')
+      document.body.append(row)
+      const onMoveTo = vi.fn()
+      renderMenu({ contextMenuFor: () => row, onMoveTo })
+
+      vi.useFakeTimers()
+      try {
+        row.dispatchEvent(new MouseEvent('contextmenu', { clientX: 10, clientY: 10, bubbles: true, cancelable: true }))
+        vi.runAllTimers()
+        fireEvent.click(screen.getByTestId('workspace-move-to'))
+        fireEvent.click(within(screen.getByTestId('workspace-move-to-popover')).getByText('My Section'))
+
+        expect(onMoveTo).toHaveBeenCalledExactlyOnceWith('sec-custom')
+      }
+      finally {
+        vi.useRealTimers()
+        row.remove()
+      }
+    })
   })
 
   describe('tab creation, by repository count', () => {

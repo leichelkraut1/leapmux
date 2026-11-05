@@ -1,4 +1,4 @@
-import type { AgentTab, FileTab, ImageTab, Tab, TerminalTab } from './tab.types'
+import type { AgentTab, FileTab, ImageTab, NativeConversationTab, Tab, TerminalTab } from './tab.types'
 import type { TabMetadataStore } from './tabMetadata.store'
 import type { TabRecord, UserCrdtState } from '~/generated/proto/leapmux/v1/user_crdt_pb'
 import type { Projection, RenderedTab } from '~/lib/crdt'
@@ -420,6 +420,15 @@ export function createTabView(opts: CreateTabViewOpts) {
           imageSeq: m.imageSeq,
           imageIndex: m.imageIndex,
         } satisfies Complete<ImageTab>
+      case TabType.NATIVE_CONVERSATION:
+        return {
+          ...base,
+          type: TabType.NATIVE_CONVERSATION,
+          sourceWorkerId: m.sourceWorkerId,
+          agentProvider: m.agentProvider,
+          sessionId: m.sessionId,
+          displayName: m.displayName,
+        } satisfies Complete<NativeConversationTab>
       default:
         return {
           ...base,
@@ -631,6 +640,10 @@ export function createTabView(opts: CreateTabViewOpts) {
     getImageTab(id: string): ImageTab | undefined {
       const t = byKey().get(tabKey({ type: TabType.IMAGE, id }))
       return t && t.type === TabType.IMAGE ? t : undefined
+    },
+    getNativeConversationTab(id: string): NativeConversationTab | undefined {
+      const t = byKey().get(tabKey({ type: TabType.NATIVE_CONVERSATION, id }))
+      return t && t.type === TabType.NATIVE_CONVERSATION ? t : undefined
     },
     /** Every tab across every workspace — for worker-scoped sweeps. */
     all(): Tab[] {

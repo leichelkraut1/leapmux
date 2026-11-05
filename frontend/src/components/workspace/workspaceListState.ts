@@ -2,7 +2,6 @@ import type { WorkspaceSortOrder } from '~/lib/workspaceSort'
 import { createAccountScopedSignal } from '~/lib/accountScopedSignal'
 import { KEY_WORKSPACE_SORT, localStorageGet, localStorageSet } from '~/lib/browserStorage'
 import {
-  canReorderWithin as canReorderForOrder,
   DEFAULT_WORKSPACE_SORT_ORDER,
   parseWorkspaceSortOrder,
 } from '~/lib/workspaceSort'
@@ -19,8 +18,7 @@ import {
  * The two halves differ deliberately:
  *
  *  - The SORT is one global order, persisted per account. One list is one
- *    order, and a per-section sort would be a second answer to "what order is
- *    this in" that the reorder rule below would then have to ask twice.
+ *    order, shared by each section and its header menu.
  *  - The FILTER is per section and NOT persisted. A filter that survived a
  *    reload would hide workspaces the user has forgotten they filtered, which
  *    reads as data loss rather than as a view. It is still account-scoped, so
@@ -81,16 +79,6 @@ export function setSectionFilterQuery(sectionId: string, query: string): void {
     next.set(sectionId, query)
     return next
   })
-}
-
-/**
- * Whether `sectionId`'s rows may be dragged to a new position within it.
- *
- * The bound form of `~/lib/workspaceSort`'s predicate: the sort is global and
- * the filter is this section's.
- */
-export function canReorderWithinSection(sectionId: string): boolean {
-  return canReorderForOrder(workspaceSortOrder(), sectionFilterQuery(sectionId) ?? '')
 }
 
 /** Drop the order and every filter. FOR TESTS ONLY. */

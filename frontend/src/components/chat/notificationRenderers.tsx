@@ -5,20 +5,27 @@ import type { RowRenderContext } from './renderContext'
 import ArrowDownToLine from 'lucide-solid/icons/arrow-down-to-line'
 import Ban from 'lucide-solid/icons/ban'
 import Bot from 'lucide-solid/icons/bot'
+import Check from 'lucide-solid/icons/check'
+import ChevronDown from 'lucide-solid/icons/chevron-down'
+import ChevronRight from 'lucide-solid/icons/chevron-right'
 import Clock from 'lucide-solid/icons/clock'
+import Copy from 'lucide-solid/icons/copy'
 import LoaderCircle from 'lucide-solid/icons/loader-circle'
 import Shield from 'lucide-solid/icons/shield'
 import ShieldCheck from 'lucide-solid/icons/shield-check'
 import ShieldX from 'lucide-solid/icons/shield-x'
 import TriangleAlert from 'lucide-solid/icons/triangle-alert'
-import { createSignal, Show } from 'solid-js'
+import { createSignal, createUniqueId, Show } from 'solid-js'
 import { compactControl } from '~/components/common/CompactControl.css'
 import { Icon } from '~/components/common/Icon'
+import { IconButton } from '~/components/common/IconButton'
 import { Tooltip } from '~/components/common/Tooltip'
+import { useCopyButton } from '~/hooks/useCopyButton'
 import { spinner } from '~/styles/animations.css'
 import { MarkdownText } from './messageRenderers'
 import { autoReview, autoReviewActions, autoReviewHeader, autoReviewHeaderDenied, controlResponseMessage, resultDivider, subagentReport, subagentReportHeader } from './messageStyles.css'
 import { AUTO_REVIEW_APPROVE_LABEL, AUTO_REVIEW_APPROVE_TOOLTIP, AUTO_REVIEW_APPROVED_LABEL } from './notificationEntries'
+import { reviewDetails, reviewFullTitle, reviewHeaderActions, reviewHeadline } from './notificationRenderers.css'
 
 // The markup half of the notification pipeline. Every decision about WHAT a row says
 // lives in `notificationEntries.ts`; this file decides only how the blocks look.
@@ -67,7 +74,10 @@ function AutoReviewBlock(props: {
   context: RowRenderContext | undefined
 }): JSXElement {
   const [approval, setApproval] = createSignal<'idle' | 'pending' | 'approved'>('idle')
+  const [expanded, setExpanded] = createSignal(false)
+  const detailsId = createUniqueId()
   const approved = () => props.block.approved || approval() === 'approved'
+  const { copied, copy } = useCopyButton(() => [props.block.title, props.block.rationale].filter(Boolean).join('\n\n'))
   const approve = async () => {
     const reviews = props.context?.reviews
     if (reviews === undefined || approved() || approval() !== 'idle')
@@ -85,9 +95,28 @@ function AutoReviewBlock(props: {
     <div class={autoReview} data-testid="auto-review" data-outcome={props.block.outcome}>
       <div class={props.block.outcome === 'denied' ? `${autoReviewHeader} ${autoReviewHeaderDenied}` : autoReviewHeader}>
         <Icon icon={AUTO_REVIEW_ICONS[props.block.outcome]} size="sm" />
-        {props.block.title}
+        <span class={reviewHeadline}>{props.block.title}</span>
+        <div class={reviewHeaderActions}>
+          <IconButton
+            icon={expanded() ? ChevronDown : ChevronRight}
+            size="sm"
+            title={expanded() ? 'Hide review details' : 'Show review details'}
+            aria-expanded={expanded()}
+            aria-controls={detailsId}
+            onClick={() => setExpanded(value => !value)}
+          />
+          <IconButton icon={copied() ? Check : Copy} size="sm" title={copied() ? 'Copied!' : 'Copy review'} onClick={() => void copy()} />
+        </div>
       </div>
-      <Show when={props.block.rationale}>
+      <Show when={expanded()}>
+        <div id={detailsId} class={reviewDetails} data-testid="auto-review-details">
+          <div class={reviewFullTitle}>{props.block.title}</div>
+          <Show when={props.block.rationale}>{rationale => <MarkdownText text={rationale()} />}</Show>
+        </div>
+      </Show>
+      {/* A denied or uncertain review keeps its reason visible even while its
+          potentially lengthy command is folded. Approval controls stay outside. */}
+      <Show when={!expanded() && props.block.outcome !== 'approved' && !approved() && props.block.rationale}>
         {rationale => <MarkdownText text={rationale()} />}
       </Show>
       <Show when={approved() || (props.block.approvable && props.context?.reviews !== undefined)}>

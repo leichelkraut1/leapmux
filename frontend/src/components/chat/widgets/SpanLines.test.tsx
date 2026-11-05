@@ -1,12 +1,53 @@
 import type { SpanBridgeEntry } from '~/components/chat/widgets/SpanLineGapBridges'
 import type { SpanLine } from '~/components/chat/widgets/SpanLines'
 import { render } from '@solidjs/testing-library'
+import { createSignal } from 'solid-js'
 import { describe, expect, it } from 'vitest'
 import { SpanLineGapBridges } from '~/components/chat/widgets/SpanLineGapBridges'
-import { bodySpanKey, shouldConnectSpanLineTop, SpanLines } from '~/components/chat/widgets/SpanLines'
-import { COL_SPACING, LINE_THICKNESS, NO_SPAN_MARGIN, ROW_BLEED_LEFT_VAR, rowBleedLeftStyle, spanColumnCenterX, spanLinesReservedWidth } from '~/components/chat/widgets/SpanLines.geometry'
+import { bodySpanKey, shouldConnectSpanLineTop, spanColorClassFor, SpanLines } from '~/components/chat/widgets/SpanLines'
+import { COL_SPACING, LINE_THICKNESS, NO_SPAN_MARGIN, ROW_BLEED_LEFT_VAR, rowBleedLeftStyle, SPAN_COLUMN_SCALE_VAR, spanColumnCenterX, spanLinesReservedWidth } from '~/components/chat/widgets/SpanLines.geometry'
 
 describe('SpanLines', () => {
+  it.each([4, 5, 18, 64])('keeps all %i columns inside a gutter capped at four normal columns', (lineCount) => {
+    const lines: SpanLine[] = Array.from({ length: lineCount }, (_, index) => ({
+      span_id: `deep-${index}`,
+      color: index + 1,
+      type: 'active',
+    }))
+    const { container } = render(() => <SpanLines lines={lines} />)
+    const wrapper = container.firstElementChild as HTMLElement
+    expect(wrapper.style.width).toBe('77px')
+    expect(spanLinesReservedWidth(lineCount)).toBe(77)
+    expect(wrapper.children).toHaveLength(lineCount)
+    const scale = Number(wrapper.style.getPropertyValue(SPAN_COLUMN_SCALE_VAR))
+    expect(scale).toBe(Math.min(1, 4 / lineCount))
+    for (let index = 0; index < lineCount; index++) {
+      expect(wrapper.children[index]?.className).toContain(spanColorClassFor(index + 1))
+      expect(spanColumnCenterX(index, lineCount)).toBeCloseTo((7 + index * 19) * scale)
+      expect(spanColumnCenterX(index, lineCount)).toBeLessThan(77)
+    }
+  })
+
+  it('updates the width and column scale together when a trace grows or shrinks', () => {
+    const makeLines = (count: number): SpanLine[] => Array.from({ length: count }, (_, index) => ({
+      span_id: `s${index}`,
+      color: index + 1,
+      type: 'active',
+    }))
+    const [lines, setLines] = createSignal(makeLines(3))
+    const { container } = render(() => <SpanLines lines={lines()} />)
+    const wrapper = container.firstElementChild as HTMLElement
+    const firstColumn = wrapper.firstElementChild
+    expect(wrapper.style.width).toBe('58px')
+    setLines(makeLines(18))
+    expect(wrapper.style.width).toBe('77px')
+    expect(wrapper.style.getPropertyValue(SPAN_COLUMN_SCALE_VAR)).toBe(String(4 / 18))
+    expect(wrapper.children).toHaveLength(18)
+    expect(wrapper.firstElementChild).toBe(firstColumn)
+    setLines(makeLines(3))
+    expect(wrapper.style.width).toBe('58px')
+    expect(wrapper.style.getPropertyValue(SPAN_COLUMN_SCALE_VAR)).toBe('1')
+  })
   it('renders nothing when lines array is empty', () => {
     const { container } = render(() => (
       <SpanLines lines={[]} />
@@ -115,7 +156,7 @@ describe('SpanLines', () => {
     expect(anchor.style.transform).toBe('translateY(240px)')
     const bridges = [...anchor.children] as HTMLElement[]
     expect(bridges).toHaveLength(1)
-    expect(bridges[0]?.style.left).toBe(`${spanColumnCenterX(1) - LINE_THICKNESS / 2}px`)
+    expect(bridges[0]?.style.left).toBe(`${spanColumnCenterX(1, 2) - LINE_THICKNESS / 2}px`)
     expect(bridges[0]).toHaveAttribute('data-span-gap-bridge-segment', '1')
   })
 
@@ -137,8 +178,8 @@ describe('SpanLines', () => {
     const anchor = container.querySelector('[data-span-gap-bridges-for="m6"]') as HTMLElement
     const bridges = [...anchor.children] as HTMLElement[]
     expect(bridges).toHaveLength(2)
-    expect(bridges[0]?.style.left).toBe(`${spanColumnCenterX(0) - LINE_THICKNESS / 2}px`)
-    expect(bridges[1]?.style.left).toBe(`${spanColumnCenterX(1) - LINE_THICKNESS / 2}px`)
+    expect(bridges[0]?.style.left).toBe(`${spanColumnCenterX(0, 2) - LINE_THICKNESS / 2}px`)
+    expect(bridges[1]?.style.left).toBe(`${spanColumnCenterX(1, 2) - LINE_THICKNESS / 2}px`)
   })
 
   it('hides a bridge while its row is hidden-until-measured', () => {
@@ -185,7 +226,7 @@ describe('SpanLines', () => {
     ))
     const anchor = container.querySelector('[data-span-gap-bridges-for="m4"]') as HTMLElement
     expect(anchor.children).toHaveLength(1)
-    expect((anchor.children[0] as HTMLElement).style.left).toBe(`${spanColumnCenterX(0) - LINE_THICKNESS / 2}px`)
+    expect((anchor.children[0] as HTMLElement).style.left).toBe(`${spanColumnCenterX(0, 1) - LINE_THICKNESS / 2}px`)
   })
 
   it('treats connector_end as a top connector but not a bottom continuation', () => {

@@ -36,6 +36,11 @@ export const pillIcon = style({
   color: 'var(--muted-foreground)',
 })
 
+export const fileKind = style({
+  flexShrink: 0,
+  color: 'var(--muted-foreground)',
+})
+
 export const removeButton = style({
   'all': 'unset',
   'boxSizing': 'border-box',

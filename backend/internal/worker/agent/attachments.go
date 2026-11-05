@@ -128,7 +128,7 @@ func classifyAttachment(attachment *leapmuxv1.Attachment) ClassifiedAttachment {
 		return ClassifiedAttachment{Filename: filename, MIMEType: mimeType, Data: data, Kind: AttachmentKindImage}
 	case mimeType == "application/pdf":
 		return ClassifiedAttachment{Filename: filename, MIMEType: mimeType, Data: data, Kind: AttachmentKindPDF}
-	case isTextAttachmentMimeType(mimeType) && utf8.Valid(data):
+	case isTextAttachmentMimeType(mimeType) && isTextAttachmentData(data):
 		return ClassifiedAttachment{Filename: filename, MIMEType: mimeType, Data: data, Kind: AttachmentKindText}
 	default:
 		return ClassifiedAttachment{Filename: filename, MIMEType: mimeType, Data: data, Kind: AttachmentKindBinary}
@@ -145,7 +145,7 @@ func inferAttachmentMimeType(filename, mimeType string, data []byte) string {
 		return inferred
 	}
 
-	if utf8.Valid(data) {
+	if isTextAttachmentData(data) {
 		return "text/plain"
 	}
 
@@ -185,3 +185,16 @@ func isTextAttachmentMimeType(mimeType string) bool {
 // ValidateAttachment accepts every classified attachment by default. A provider
 // overrides this method when its native transport cannot send an attachment kind.
 func (ProviderDefaults) ValidateAttachment(ClassifiedAttachment) error { return nil }
+
+// Match browser attachment classification, including ANSI terminal logs.
+func isTextAttachmentData(data []byte) bool {
+	if !utf8.Valid(data) {
+		return false
+	}
+	for _, b := range data {
+		if b == 0x7f || (b < 0x20 && b != 0x09 && b != 0x0a && b != 0x0c && b != 0x0d && b != 0x1b) {
+			return false
+		}
+	}
+	return true
+}

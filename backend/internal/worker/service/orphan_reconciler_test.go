@@ -262,7 +262,7 @@ func (r *recordingTeardown) closeTab(tabType leapmuxv1.TabType, userID, tabID st
 	case leapmuxv1.TabType_TAB_TYPE_TERMINAL:
 		r.terminals = append(r.terminals, tabID)
 		_, _ = r.q.CloseTerminal(ctx, tabID)
-	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE:
+	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
 		r.fileTabs = append(r.fileTabs, tabID)
 		_ = r.files.RevokeRow(ctx, userID, tabID)
 	case leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED:

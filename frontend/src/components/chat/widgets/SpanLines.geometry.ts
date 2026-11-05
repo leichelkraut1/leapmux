@@ -6,6 +6,12 @@ export const LINE_THICKNESS = 2
 /** Center-to-center spacing between adjacent span columns. */
 export const COL_SPACING = 19
 
+/** Deep traces share the gutter normally occupied by four columns. */
+export const MAX_SPAN_COLUMNS = 4
+
+/** Horizontal scale shared by column boxes, connectors, and bridge arcs. */
+export const SPAN_COLUMN_SCALE_VAR = '--span-column-scale'
+
 /** Rendered element width of each column (line centered at COL_WIDTH / 2). */
 export const COL_WIDTH = 24
 
@@ -55,11 +61,23 @@ export const TOOL_BODY_INDENT = COL_OVERLAP // 5
 /** Left margin for messages without span lines. */
 export const NO_SPAN_MARGIN = CONTAINER_PAD_RIGHT // 1
 
+function spanColumnScale(lineCount: number): number {
+  return lineCount > MAX_SPAN_COLUMNS ? MAX_SPAN_COLUMNS / lineCount : 1
+}
+
 /** Width reserved by the rendered span-line column stack, without drawing it. */
 export function spanLinesReservedWidth(lineCount: number): number {
   if (lineCount <= 0)
     return NO_SPAN_MARGIN
-  return lineCount * COL_SPACING + CONTAINER_PAD_RIGHT
+  return Math.min(lineCount, MAX_SPAN_COLUMNS) * COL_SPACING + CONTAINER_PAD_RIGHT
+}
+
+/** Keep every column while bounding the flex sibling's occupied width. */
+export function spanLinesGeometryStyle(lineCount: number): Record<string, string> {
+  return {
+    width: `${spanLinesReservedWidth(lineCount)}px`,
+    [SPAN_COLUMN_SCALE_VAR]: String(spanColumnScale(lineCount)),
+  }
 }
 
 /**
@@ -100,8 +118,9 @@ export function reservedRowContentColumnStyle(lineCount: number): Record<string,
  * negative overlap margin, including the first), so center i sits at
  * COL_WIDTH/2 - COL_OVERLAP + i * COL_SPACING. Used by the gap-bridge overlay
  * (SpanLineGapBridges) to draw the inter-row rail segments at exactly the
- * in-row line positions.
+ * in-row line positions. Deep rows scale this position with their column boxes;
+ * a gap bridge connects the previous and current row's centers independently.
  */
-export function spanColumnCenterX(index: number): number {
-  return COL_WIDTH / 2 - COL_OVERLAP + index * COL_SPACING
+export function spanColumnCenterX(index: number, lineCount: number): number {
+  return (COL_WIDTH / 2 - COL_OVERLAP + index * COL_SPACING) * spanColumnScale(lineCount)
 }

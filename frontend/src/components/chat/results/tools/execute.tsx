@@ -212,7 +212,7 @@ export const executeRenderer: ToolKindRenderer<'execute'> = {
     // is the only place the command is ever stated, so it keeps the summary. An
     // UPDATE row keeps it too: it may be the only row the call has.
     // Expanding un-clips the SAME summary the collapsed row shows, the way a
-    // result's expand un-clips its output: one area, clipped to three rows or
+    // result's expand un-clips its output: one area, clipped to one row or
     // full height, never a second component swapped in beside it.
     return (
       <Show when={!(view.role === 'result' && view.hasRequestRow)}>

@@ -22,10 +22,10 @@ export type FileOpenSource = 'all' | 'changed' | 'staged' | 'unstaged'
  */
 
 /**
- * Fields every tab carries regardless of kind. The AGENT/TERMINAL/FILE/IMAGE
+ * Fields every tab carries regardless of kind. The process and viewer
  * variants extend BaseTab with their own kind-specific fields and
  * narrow `type` to a literal so consumers can `switch (tab.type)` or
- * use the `isAgentTab` / `isTerminalTab` / `isFileTab` / `isImageTab`
+ * use the per-kind
  * guards below.
  */
 export interface BaseTab {
@@ -167,11 +167,21 @@ export interface ImageTab extends BaseTab {
   imageIndex?: number | undefined
 }
 
+/** An outside conversation reference; its original app keeps owning the chat. */
+export interface NativeConversationTab extends BaseTab {
+  type: TabType.NATIVE_CONVERSATION
+  /** Worker that owns the original provider session, independent of placement. */
+  sourceWorkerId?: string | undefined
+  agentProvider?: AgentProvider | undefined
+  sessionId?: string | undefined
+  displayName?: string | undefined
+}
+
 /**
  * Discriminated union of every tab kind. Narrow with `switch (tab.type)`
  * or the per-kind guards below.
  */
-export type Tab = AgentTab | TerminalTab | FileTab | ImageTab
+export type Tab = AgentTab | TerminalTab | FileTab | ImageTab | NativeConversationTab
 
 export function isAgentTab(t: Tab): t is AgentTab {
   return t.type === TabType.AGENT
@@ -189,15 +199,19 @@ export function isImageTab(t: Tab): t is ImageTab {
   return t.type === TabType.IMAGE
 }
 
+export function isNativeConversationTab(t: Tab): t is NativeConversationTab {
+  return t.type === TabType.NATIVE_CONVERSATION
+}
+
 /**
  * True for the tab kinds whose contents live in a worker-side `TabPayload`
  * rather than in the CRDT.
  *
  * AGENT and TERMINAL tabs are resolved by their own worker RPCs (ListAgents /
- * ListTerminals) against ids the server minted. FILE and IMAGE tabs carry
+ * ListTerminals) against ids the server minted. Viewer tabs carry
  * client-minted ids and a payload the hub must never see, so they share one
  * register / replay / re-read / revoke path -- and every consumer of that path
- * asks this question rather than listing the two types again.
+ * asks this question rather than listing the payload-backed types again.
  *
  * Two user-facing rules follow from the same property. Such a tab has no
  * server-side name to rename, because its title comes from the payload. And it
@@ -209,7 +223,7 @@ export function isImageTab(t: Tab): t is ImageTab {
  * blocks the close of every tab type, this one included.
  */
 export function isPayloadBackedTabType(type: TabType): boolean {
-  return type === TabType.FILE || type === TabType.IMAGE
+  return type === TabType.FILE || type === TabType.IMAGE || type === TabType.NATIVE_CONVERSATION
 }
 
 /** The tab field that links a tab to its repo-keyed git store entry. */
@@ -218,5 +232,7 @@ export type GitTabFields = Pick<BaseTab, 'gitToplevel'>
 export interface TabItemOps {
   onClose?: (tab: Tab) => void
   onRename?: (tab: Tab, title: string) => void
+  moveTargets?: (tab: Tab) => readonly { id: string, label: string }[]
+  onMove?: (tab: Tab, targetWorkspaceId: string) => void
   closingKeys?: Set<string>
 }

@@ -1,0 +1,629 @@
+{
+  "_readme": "Shared browser/Worker attachment classification contract. Both frontend/src/components/chat/attachments.test.ts and backend/internal/worker/agent/attachments_test.go replay these bytes. Data is base64 so malformed UTF-8 and NUL survive JSON unchanged. Text permits valid UTF-8, TAB/LF/FF/CR and ANSI ESC, but rejects every other C0 byte and DEL. Supplied specific MIME wins; missing or generic MIME uses known filename extensions, then conservative UTF-8 text inference. Native image/PDF kind selection is not a claim that these sample bytes are a valid media document.",
+  "cases": [
+    {
+      "name": "c0-0x00",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQBi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x01",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQFi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x02",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQJi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x03",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQNi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x04",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQRi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x05",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQVi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x06",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQZi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x07",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQdi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x08",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQhi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x09",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQli",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "c0-0x0a",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQpi",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "c0-0x0b",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQti",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x0c",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQxi",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "c0-0x0d",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQ1i",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "c0-0x0e",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQ5i",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x0f",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YQ9i",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x10",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRBi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x11",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRFi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x12",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRJi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x13",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRNi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x14",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRRi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x15",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRVi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x16",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRZi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x17",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRdi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x18",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRhi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x19",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRli",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x1a",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRpi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x1b",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRti",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "c0-0x1c",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YRxi",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x1d",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YR1i",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x1e",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YR5i",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "c0-0x1f",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YR9i",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "delete-control",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "YX9i",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "nul-explicit-text",
+      "filename": "notes.txt",
+      "mimeType": "text/plain",
+      "dataBase64": "QQBC",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "control-explicit-json",
+      "filename": "data.json",
+      "mimeType": "application/json",
+      "dataBase64": "ewF9",
+      "expectedMimeType": "application/json",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "del-explicit-xml",
+      "filename": "data.xml",
+      "mimeType": "application/xml",
+      "dataBase64": "PH8+",
+      "expectedMimeType": "application/xml",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "ansi-log",
+      "filename": "tool.log",
+      "mimeType": "",
+      "dataBase64": "G1szMW1lcnJvchtbMG0NCg==",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "ordinary-whitespace",
+      "filename": "report.custom",
+      "mimeType": "",
+      "dataBase64": "b25lCWNvbHVtbg0KcGFnZQxlbmQ=",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "unicode-text",
+      "filename": "README",
+      "mimeType": "",
+      "dataBase64": "SGVsbG8g5LiW55WMIPCfm6A=",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "utf8-bom",
+      "filename": "notes.custom",
+      "mimeType": "",
+      "dataBase64": "77u/aGk=",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "empty-unknown",
+      "filename": "empty.custom",
+      "mimeType": "",
+      "dataBase64": "",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "invalid-leading-byte",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "/w==",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "invalid-continuation",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "wyg=",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "overlong-utf8",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "wK8=",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "utf8-surrogate",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "7aCA",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "utf8-out-of-range",
+      "filename": "unknown.custom",
+      "mimeType": "",
+      "dataBase64": "9JCAgA==",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "invalid-explicit-text",
+      "filename": "notes.txt",
+      "mimeType": "text/plain",
+      "dataBase64": "//4=",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "plc-xml-export",
+      "filename": "Controller.L5X",
+      "mimeType": "",
+      "dataBase64": "PFJTTG9naXg1MDAwQ29udGVudC8+",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "plc-structured-text",
+      "filename": "routine.st",
+      "mimeType": "",
+      "dataBase64": "SUYgU3RhcnQgVEhFTiBNb3RvciA6PSBUUlVFOyBFTkRfSUY7",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "plc-binary-project",
+      "filename": "Controller.ACD",
+      "mimeType": "",
+      "dataBase64": "AP8BgA==",
+      "expectedMimeType": "application/octet-stream",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "source-python",
+      "filename": "script.py",
+      "mimeType": "",
+      "dataBase64": "cHJpbnQoInJlYWR5IikK",
+      "expectedMimeType": "text/x-python",
+      "expectedKind": "text"
+    },
+    {
+      "name": "source-typescript",
+      "filename": "Panel.TSX",
+      "mimeType": "",
+      "dataBase64": "ZXhwb3J0IGNvbnN0IHggPSAxCg==",
+      "expectedMimeType": "text/typescript",
+      "expectedKind": "text"
+    },
+    {
+      "name": "source-powershell",
+      "filename": "script.ps1",
+      "mimeType": "",
+      "dataBase64": "V3JpdGUtT3V0cHV0IHJlYWR5",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "json-by-extension",
+      "filename": "settings.JSON",
+      "mimeType": "",
+      "dataBase64": "eyJlbmFibGVkIjp0cnVlfQ==",
+      "expectedMimeType": "application/json",
+      "expectedKind": "text"
+    },
+    {
+      "name": "vendor-json",
+      "filename": "settings.any",
+      "mimeType": "application/vnd.example+json",
+      "dataBase64": "eyJlbmFibGVkIjp0cnVlfQ==",
+      "expectedMimeType": "application/vnd.example+json",
+      "expectedKind": "text"
+    },
+    {
+      "name": "svg-is-text",
+      "filename": "diagram.SVG",
+      "mimeType": "",
+      "dataBase64": "PHN2Zy8+",
+      "expectedMimeType": "image/svg+xml",
+      "expectedKind": "text"
+    },
+    {
+      "name": "dot-env",
+      "filename": ".env",
+      "mimeType": "",
+      "dataBase64": "S0VZPXZhbHVlCg==",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "dockerfile",
+      "filename": "Dockerfile",
+      "mimeType": "",
+      "dataBase64": "RlJPTSBzY3JhdGNoCg==",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "mime-normalization",
+      "filename": "notes.any",
+      "mimeType": " TEXT/PLAIN ",
+      "dataBase64": "b3JkaW5hcnkgdGV4dA==",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "explicit-mime-overrides-extension",
+      "filename": "fake.pdf",
+      "mimeType": "text/plain",
+      "dataBase64": "b3JkaW5hcnkgdGV4dA==",
+      "expectedMimeType": "text/plain",
+      "expectedKind": "text"
+    },
+    {
+      "name": "unknown-explicit-mime",
+      "filename": "unknown.file",
+      "mimeType": "application/x-custom",
+      "dataBase64": "b3JkaW5hcnkgdGV4dA==",
+      "expectedMimeType": "application/x-custom",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "office-document",
+      "filename": "report.docx",
+      "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "dataBase64": "UEsA/w==",
+      "expectedMimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "spreadsheet",
+      "filename": "table.xlsx",
+      "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "dataBase64": "UEsA/w==",
+      "expectedMimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "zip-archive",
+      "filename": "archive.zip",
+      "mimeType": "application/zip",
+      "dataBase64": "UEsA/w==",
+      "expectedMimeType": "application/zip",
+      "expectedKind": "binary"
+    },
+    {
+      "name": "report.PDF-missing-mime",
+      "filename": "report.PDF",
+      "mimeType": "",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "application/pdf",
+      "expectedKind": "pdf"
+    },
+    {
+      "name": "report.PDF-generic-mime",
+      "filename": "report.PDF",
+      "mimeType": "application/octet-stream",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "application/pdf",
+      "expectedKind": "pdf"
+    },
+    {
+      "name": "shot.PNG-missing-mime",
+      "filename": "shot.PNG",
+      "mimeType": "",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/png",
+      "expectedKind": "image"
+    },
+    {
+      "name": "shot.PNG-generic-mime",
+      "filename": "shot.PNG",
+      "mimeType": "application/octet-stream",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/png",
+      "expectedKind": "image"
+    },
+    {
+      "name": "photo.JPG-missing-mime",
+      "filename": "photo.JPG",
+      "mimeType": "",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/jpeg",
+      "expectedKind": "image"
+    },
+    {
+      "name": "photo.JPG-generic-mime",
+      "filename": "photo.JPG",
+      "mimeType": "application/octet-stream",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/jpeg",
+      "expectedKind": "image"
+    },
+    {
+      "name": "photo.JPEG-missing-mime",
+      "filename": "photo.JPEG",
+      "mimeType": "",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/jpeg",
+      "expectedKind": "image"
+    },
+    {
+      "name": "photo.JPEG-generic-mime",
+      "filename": "photo.JPEG",
+      "mimeType": "application/octet-stream",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/jpeg",
+      "expectedKind": "image"
+    },
+    {
+      "name": "animation.GIF-missing-mime",
+      "filename": "animation.GIF",
+      "mimeType": "",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/gif",
+      "expectedKind": "image"
+    },
+    {
+      "name": "animation.GIF-generic-mime",
+      "filename": "animation.GIF",
+      "mimeType": "application/octet-stream",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/gif",
+      "expectedKind": "image"
+    },
+    {
+      "name": "image.WEBP-missing-mime",
+      "filename": "image.WEBP",
+      "mimeType": "",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/webp",
+      "expectedKind": "image"
+    },
+    {
+      "name": "image.WEBP-generic-mime",
+      "filename": "image.WEBP",
+      "mimeType": "application/octet-stream",
+      "dataBase64": "AP8B",
+      "expectedMimeType": "image/webp",
+      "expectedKind": "image"
+    },
+    {
+      "name": "native-pdf-mime",
+      "filename": "report.any",
+      "mimeType": " APPLICATION/PDF ",
+      "dataBase64": "JVBERi0xLjc=",
+      "expectedMimeType": "application/pdf",
+      "expectedKind": "pdf"
+    },
+    {
+      "name": "native-image-mime",
+      "filename": "photo.any",
+      "mimeType": "IMAGE/JPEG",
+      "dataBase64": "/9j/",
+      "expectedMimeType": "image/jpeg",
+      "expectedKind": "image"
+    }
+  ]
+}

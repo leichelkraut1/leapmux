@@ -54,6 +54,22 @@ describe('createTabBusyProbe', () => {
     mockListAgents.mockResolvedValue({ agents: [], verdicts: [] })
   })
 
+  it('closes an outside chat view without probing or touching the original app process', async () => {
+    const { probe, seeded } = makeProbe()
+    const native: Tab = { type: TabType.NATIVE_CONVERSATION, id: 'native-1', workspaceId: 'ws-1', workerId: 'destination-pc', sourceWorkerId: 'source-pc' }
+    expect(await probe.probe(native)).toBeNull()
+    expect(mockListAgents).not.toHaveBeenCalled()
+    expect(mockInspect).not.toHaveBeenCalled()
+    expect(seeded).not.toHaveBeenCalled()
+  })
+
+  it('never attributes a managed process busy reason to an outside chat view sharing its raw id', async () => {
+    const { probe } = makeProbe()
+    agentIs('shared-id', AgentActivityState.WORKING)
+    const native: Tab = { type: TabType.NATIVE_CONVERSATION, id: 'shared-id', workspaceId: 'ws-1', workerId: 'w-1', sourceWorkerId: 'source-pc' }
+    expect((await probe.probeMany([agentTab('shared-id'), native])).map(entry => entry.tab.type)).toEqual([TabType.AGENT])
+  })
+
   describe('agent tabs', () => {
     it('reports a working agent, with its active tasks', async () => {
       const { probe } = makeProbe([task(), task({ rowKey: 'r2', status: 'succeeded' })])

@@ -45,6 +45,11 @@ type Options struct {
 	// directories that PrepareAgentDirs prepared. nil when the worker prepared
 	// none; a provider that needs a directory then refuses to start.
 	AgentDirs *agentdir.Dirs
+	// AttachmentDir is the private durable directory for this chat's uploaded
+	// files. The Manager anchors it under the Worker's data directory. Files
+	// remain across process exits and resumes, unlike temporary AgentDirs.
+	// A provider that needs file references refuses them when it is empty.
+	AttachmentDir string
 }
 
 // Get returns the resolved value of an option-group id, or "" if absent. The

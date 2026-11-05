@@ -5,11 +5,13 @@ import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createProcessStub } from '~/test-support/childProcess'
 import { spawnCommandProcess } from './e2eCommandProcess'
+import { ownedLinuxGroupHasOnlyDeadMembers } from './linuxProcessGroup'
 import { spawnWindowsCommandJob } from './windowsCommandJob'
 
 const kernel = vi.hoisted(() => ({
   alive: new Set<number>(),
   failure: undefined as Error | undefined,
+  onlyDead: false,
 }))
 
 vi.mock('node:process', async (importOriginal) => {
@@ -40,6 +42,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 })
 
 vi.mock('./windowsCommandJob', () => ({ spawnWindowsCommandJob: vi.fn() }))
+vi.mock('./linuxProcessGroup', () => ({ ownedLinuxGroupHasOnlyDeadMembers: vi.fn(() => kernel.onlyDead) }))
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'performance'] })
@@ -47,6 +50,7 @@ beforeEach(() => {
   Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
   kernel.alive.clear()
   kernel.failure = undefined
+  kernel.onlyDead = false
 })
 
 afterEach(() => {
@@ -99,6 +103,33 @@ function treeProcessWithProbeFailure(code = 'EPERM', afterSignal: NodeJS.Signals
 }
 
 describe('spawnCommandProcess', () => {
+  it('finishes an exited root whose exact Linux group has only confirmed dead members', async () => {
+    const { emitter, resource } = treeProcess()
+    emitter.exitCode = 0
+    kernel.onlyDead = true
+    const stopped = resource.stop()
+    await vi.advanceTimersByTimeAsync(0)
+    await stopped
+    expect(ownedLinuxGroupHasOnlyDeadMembers).toHaveBeenCalledWith(123)
+    expect(process.kill).not.toHaveBeenCalledWith(-123, 'SIGKILL')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('never lets dead-member evidence replace the exact root exit event', async () => {
+    const { emitter, resource } = treeProcess()
+    kernel.onlyDead = true
+    let finished = false
+    const stopped = resource.stop().then(() => {
+      finished = true
+    })
+    await vi.advanceTimersByTimeAsync(25)
+    expect(finished).toBe(false)
+    expect(ownedLinuxGroupHasOnlyDeadMembers).not.toHaveBeenCalled()
+    emitter.exitCode = 0
+    emitter.emit('exit', 0, null)
+    await stopped
+    expect(finished).toBe(true)
+  })
   it('preserves every ordinary spawn option and returns the exact child handle', async () => {
     const { emitter, proc } = createProcessStub({ exitCode: 0 })
     vi.mocked(spawn).mockReturnValue(proc)

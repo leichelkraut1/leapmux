@@ -69,6 +69,23 @@ describe('workerInfoStore', () => {
     })
   })
 
+  it('keeps the workflow capabilities the worker reports, and treats a missing list as empty', async () => {
+    await createRoot(async (dispose) => {
+      const withCaps = uniqueWorkerId()
+      const without = uniqueWorkerId()
+      mockGetWorkerSystemInfo.mockResolvedValueOnce({ ...makeRespFor(withCaps), capabilities: ['git', 'os:darwin', 'xcode'] })
+      mockGetWorkerSystemInfo.mockResolvedValueOnce(makeRespFor(without))
+
+      const store = createWorkerInfoStore()
+      await store.fetchWorkerInfo(withCaps)
+      await store.fetchWorkerInfo(without)
+
+      expect(store.workerInfo(withCaps)?.capabilities).toEqual(['git', 'os:darwin', 'xcode'])
+      expect(store.workerInfo(without)?.capabilities).toEqual([])
+      dispose()
+    })
+  })
+
   it('skips the RPC when the stored row is within the freshness TTL', async () => {
     await createRoot(async (dispose) => {
       const id = uniqueWorkerId()

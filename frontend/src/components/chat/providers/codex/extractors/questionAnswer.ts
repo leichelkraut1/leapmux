@@ -3,10 +3,13 @@ import { CODEX_ASYNC_QUESTION_INPUT, CODEX_CONTROL_TOOL } from '~/generated/cont
 import { isObject, pickString } from '~/lib/jsonPick'
 import { getToolInput, getToolName } from '~/utils/controlResponse'
 import { leapmuxUserRow } from '../../../leapmuxRows'
+import { codexExternalUserAttachments } from '../nativeConversation'
 
 /** Format a question answer from its original text and stored question source. */
 export function codexQuestionAnswerRow(payload: unknown, source: unknown): ChatRow | null {
-  const row = leapmuxUserRow(payload)
+  const initial = leapmuxUserRow(payload)
+  const attachments = codexExternalUserAttachments(isObject(payload) ? payload : undefined)
+  const row = initial?.kind === 'user' && attachments ? { ...initial, attachments } : initial
   if (row?.kind !== 'user' || !isObject(source) || getToolName(source) !== CODEX_CONTROL_TOOL.AsyncQuestion)
     return row
   const title = pickString(getToolInput(source), CODEX_ASYNC_QUESTION_INPUT.Title, '')

@@ -156,6 +156,7 @@ function useGoCommandRecipes(dir, platform) {
   const production = platformTemplates(Bun.YAML.parse(readFileSync(join(root, 'Taskfile.yaml'), 'utf8')), platform)
   for (const [target, compilerPath] of [
     ['build-backend', '../compiler.mjs'],
+    ['build-backend-docker', '../compiler.mjs'],
     ['build-desktop-sidecar', '../../compiler.mjs'],
   ]) {
     config.tasks[target].cmds = production.tasks[target].cmds.map(command =>
@@ -402,6 +403,47 @@ describe('task build cache', () => {
     expect(run(dir, 'build-backend')).toEqual([])
     write(dir, 'backend/internal/hub/store/sqlite/db/migrations/001.sql', 'changed SQL')
     expect(run(dir, 'build-backend')).toEqual(['generate-sqlc-hub', 'build-backend'])
+  })
+
+  it.each(['build-backend', 'build-backend-docker', 'build-desktop-sidecar'])('invalidates %s for embedded plugin bytes without rebuilding frontend', (target) => {
+    const dir = fixture()
+    useGoCommandRecipes(dir, hostPlatform)
+    const plugin = 'backend/internal/worker/agent/providers/claude/native-control-plugin'
+    write(dir, `${plugin}/hooks/register.js`, 'initial embedded script')
+    write(dir, `${plugin}/.claude-plugin/plugin.json`, '{"name":"fixture"}')
+    expect(run(dir, target)).toContain(target)
+    expect(run(dir, target)).toEqual([])
+    for (const [path, contents] of [
+      [`${plugin}/hooks/register.js`, 'changed embedded script'],
+      [`${plugin}/hooks/new.js`, 'added embedded script'],
+      [`${plugin}/.claude-plugin/plugin.json`, '{"name":"changed"}'],
+      [`${plugin}/.claude-plugin/marketplace.json`, '{"name":"new-hidden-input"}'],
+      [`${plugin}/README.md`, 'embedded plugin instructions'],
+    ]) {
+      write(dir, path, contents)
+      expect(run(dir, target), path).toEqual([target])
+      expect(run(dir, target), path).toEqual([])
+    }
+  })
+
+  it.each(platforms)('invalidates the complete $os/$arch bundle for embedded plugin-only changes', (platform) => {
+    const dir = fixture(platform)
+    useGoCommandRecipes(dir, platform)
+    const plugin = 'backend/internal/worker/agent/providers/claude/native-control-plugin'
+    write(dir, `${plugin}/hooks/register.js`, 'initial embedded script')
+    run(dir, 'build')
+    expect(run(dir, 'build')).toEqual([])
+    for (const [path, contents] of [
+      [`${plugin}/hooks/register.js`, 'changed embedded script'],
+      [`${plugin}/.claude-plugin/plugin.json`, '{"name":"new-hidden-input"}'],
+    ]) {
+      write(dir, path, contents)
+      // Fake Go outputs retain identical bytes. The outer bundle must also
+      // declare the embedded source rather than relying on output timestamps.
+      const rebuilt = run(dir, 'build')
+      expect(rebuilt.toSorted(), path).toEqual(['build-backend', 'build-desktop-sidecar', `build-desktop-${platform.os}`].toSorted())
+      expect(run(dir, 'build'), path).toEqual([])
+    }
   })
 
   it('rechecks the host binary after a Docker build', () => {

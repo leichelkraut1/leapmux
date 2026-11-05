@@ -3,7 +3,7 @@ import type { WatchEventsHandle } from '~/api/workerRpc'
 import type { WatchAgentEntry, WatchEventsResponse, WatchRejection } from '~/generated/proto/leapmux/v1/workspace_pb'
 import type { TabView } from '~/stores/tabView'
 import { create } from '@bufbuild/protobuf'
-import { createEffect, onCleanup } from 'solid-js'
+import { createEffect, createSignal, onCleanup } from 'solid-js'
 import { isDisconnectError } from '~/api/workerErrors'
 import { channelManager, watchEventsViaChannel } from '~/api/workerRpc'
 import { showWarnToastWithLoggedCause } from '~/components/common/Toast'
@@ -55,6 +55,7 @@ interface WorkerStream {
   closed: boolean
   drainScheduled: boolean
   opening: boolean
+  hasOpened: boolean
   abort: AbortController
 }
 
@@ -63,6 +64,8 @@ export interface UseWatchEventsStreamsOpts {
   plans: () => Map<string, WatchPlan>
   onEvent: (workerId: string, resp: WatchEventsResponse) => void
   onWorkerOnline: (workerId: string, online: boolean) => void
+  /** Re-snapshot NOTIFY agents after the replacement stream acknowledges interest. */
+  onWorkerStreamReopened?: (workerId: string) => void
   /** Report accepted FULL promotions to the caller that loads initial messages. */
   onPromoted: (workerId: string, agentIds: string[]) => void
   onReplayRequested?: (workerId: string, replayId: bigint, entries: readonly WatchAgentEntry[]) => void
@@ -78,8 +81,22 @@ export interface UseWatchEventsStreamsOpts {
  */
 export function useWatchEventsStreams(opts: UseWatchEventsStreamsOpts): {
   abortSignalFor: (workerId: string) => AbortSignal | undefined
+  workerStreamReady: (workerId: string) => boolean
 } {
   const streams = new Map<string, WorkerStream>()
+  const [readyWorkers, setReadyWorkers] = createSignal<ReadonlySet<string>>(new Set())
+  const setReady = (workerId: string, ready: boolean) => {
+    setReadyWorkers((prev) => {
+      if (prev.has(workerId) === ready)
+        return prev
+      const next = new Set(prev)
+      if (ready)
+        next.add(workerId)
+      else
+        next.delete(workerId)
+      return next
+    })
+  }
   let updateId = 0n
   /** Record one toast for the current outage across all workers. */
   let outageAnnounced = false
@@ -111,6 +128,7 @@ export function useWatchEventsStreams(opts: UseWatchEventsStreamsOpts): {
         closed: false,
         drainScheduled: false,
         opening: false,
+        hasOpened: false,
         abort: new AbortController(),
       }
       streams.set(workerId, s)
@@ -189,6 +207,7 @@ export function useWatchEventsStreams(opts: UseWatchEventsStreamsOpts): {
 
   /** Clear stream authority and retire its exact replay receipts. */
   function resetForReconnect(workerId: string, s: WorkerStream): void {
+    setReady(workerId, false)
     retireReplays(workerId, s, [...s.replayRequests.keys()], 'closed')
     s.handle = null
     s.inflightPlan = null
@@ -354,6 +373,8 @@ export function useWatchEventsStreams(opts: UseWatchEventsStreamsOpts): {
       }
       s.handle?.close()
       s.handle = handle
+      let needsReconnectSnapshot = s.hasOpened
+      s.hasOpened = true
       // 161-watch-stream-continuity.spec.ts counts successful stream opens.
       // An interest update must not emit this event.
       emitDevEvent('leapmux:watch-events-open', () => ({ workerId, updateId: nextId }))
@@ -367,8 +388,16 @@ export function useWatchEventsStreams(opts: UseWatchEventsStreamsOpts): {
         if (resp.event.case === 'updateAck') {
           // A settled acknowledgment resets the rejection count.
           // An ignored acknowledgment must preserve a pending retry and its count.
-          if (handleUpdateAck(workerId, resp) === false)
+          const ackResult = handleUpdateAck(workerId, resp)
+          if (ackResult === false)
             rejectionBackoff.reset(workerId)
+          if (ackResult === false) {
+            if (needsReconnectSnapshot) {
+              needsReconnectSnapshot = false
+              opts.onWorkerStreamReopened?.(workerId)
+            }
+            setReady(workerId, true)
+          }
         }
         else {
           if (resp.event.case === 'agentEvent') {
@@ -395,9 +424,8 @@ export function useWatchEventsStreams(opts: UseWatchEventsStreamsOpts): {
       handle.onError((err) => {
         if (!isCurrentHandle())
           return
-        if (isTransportError(err) || isDisconnectError(err))
-          markWorkerOffline(workerId)
-        else
+        markWorkerOffline(workerId)
+        if (!isTransportError(err) && !isDisconnectError(err))
           log.warn('The watch stream failed.', err)
         // Application errors retain the reconnect delay and retry count.
         resetForReconnect(workerId, s)
@@ -414,8 +442,7 @@ export function useWatchEventsStreams(opts: UseWatchEventsStreamsOpts): {
       if (s.closed || streams.get(workerId) !== s)
         return
       log.debug('The watch stream did not open.', { workerId, err })
-      if (isTransportError(err) || isDisconnectError(err))
-        markWorkerOffline(workerId)
+      markWorkerOffline(workerId)
       resetForReconnect(workerId, s)
       scheduleReconnect(workerId, err)
     }
@@ -537,6 +564,7 @@ export function useWatchEventsStreams(opts: UseWatchEventsStreamsOpts): {
     const s = streams.get(workerId)
     if (!s)
       return
+    setReady(workerId, false)
     s.closed = true
     s.pendingPlan = null
     retireReplays(workerId, s, [...s.replayRequests.keys()], reason)
@@ -581,5 +609,6 @@ export function useWatchEventsStreams(opts: UseWatchEventsStreamsOpts): {
 
   return {
     abortSignalFor: (workerId: string) => streams.get(workerId)?.abort.signal,
+    workerStreamReady: (workerId: string) => readyWorkers().has(workerId),
   }
 }

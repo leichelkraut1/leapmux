@@ -4,9 +4,80 @@ import { createSignal } from 'solid-js'
 import { describe, expect, it } from 'vitest'
 import { BAND_BORDER_PX } from '../chatRowGeometry'
 import { SpanLineGapBridges } from './SpanLineGapBridges'
-import { SPAN_BRIDGE_GAP_VAR } from './SpanLines.geometry'
+import { spanColorClassFor } from './SpanLines'
+import { BRIDGE_SEAM, LINE_THICKNESS, SPAN_BRIDGE_GAP_VAR, spanColumnCenterX } from './SpanLines.geometry'
+
+function deepEntry(id: string, lineCount: number): SpanBridgeEntry {
+  return {
+    message: { id },
+    category: { kind: 'assistant_text' },
+    parsedSpanLines: Array.from({ length: lineCount }, (_, column) => ({
+      span_id: `s${column}`,
+      color: column + 1,
+      type: 'active',
+    })),
+  }
+}
+
+/** Read the actual CSS segment as a vector, excluding its seam overlap. */
+function expectBridgeEndpoints(segment: HTMLElement, gap: number, fromX: number, toX: number): void {
+  const startX = Number.parseFloat(segment.style.left) + LINE_THICKNESS / 2
+  expect(startX).toBeCloseTo(fromX)
+  const length = Number.parseFloat(segment.style.height) - BRIDGE_SEAM
+  const angle = Number.parseFloat(segment.style.transform.slice('rotate('.length))
+  expect(segment.style.transformOrigin).toBe('top center')
+  expect(startX - Math.sin(angle) * length).toBeCloseTo(toX)
+  expect(-gap + Math.cos(angle) * length).toBeCloseTo(0)
+}
 
 describe('SpanLineGapBridges', () => {
+  it.each([
+    [18, 20, 8],
+    [3, 18, 8],
+    [18, 20, 0],
+    [18, 20, -BAND_BORDER_PX],
+  ])('connects both rail endpoints when depth changes from %i to %i across a %i pixel gap', (previousCount, currentCount, gap) => {
+    const previous = deepEntry('previous', previousCount)
+    const current = deepEntry('current', currentCount)
+    const { container } = render(() => (
+      <SpanLineGapBridges
+        entries={[current]}
+        precedingEntry={previous}
+        topOf={() => 100}
+        hiddenOf={() => false}
+        gapAboveOf={() => gap}
+      />
+    ))
+    const segments = [...container.querySelectorAll<HTMLElement>('[data-span-gap-bridge-segment]')]
+    expect(segments).toHaveLength(Math.min(previousCount, currentCount))
+    for (const [column, segment] of segments.entries()) {
+      expectBridgeEndpoints(segment, gap, spanColumnCenterX(column, previousCount), spanColumnCenterX(column, currentCount))
+      expect(segment.className).toContain(spanColorClassFor(column + 1))
+    }
+  })
+
+  it('connects a deep closing rail to the preceding tool body border', () => {
+    const previous = deepEntry('previous-tool', 18)
+    previous.category = { kind: 'tool_use' }
+    previous.message.spanId = 'tool-body'
+    previous.message.spanColor = 3
+    const current = deepEntry('closing', 19)
+    current.parsedSpanLines[18] = { span_id: 'tool-body', color: 3, type: 'connector_end' }
+    const { container } = render(() => (
+      <SpanLineGapBridges
+        entries={[current]}
+        precedingEntry={previous}
+        topOf={() => 100}
+        hiddenOf={() => false}
+        gapAboveOf={() => 8}
+      />
+    ))
+    const segment = container.querySelector<HTMLElement>('[data-span-gap-bridge-segment="18"]')
+    expect(segment).not.toBeNull()
+    expectBridgeEndpoints(segment!, 8, 83, spanColumnCenterX(18, 19))
+    expect(segment!.className).toContain(spanColorClassFor(3))
+  })
+
   // Two rows sharing one active span column: the SECOND row's column continues from the
   // first (an 'active' line has both a vertical top and bottom with the same key), so its
   // gap bridge connects. The first row has nothing above it, so it never draws a bridge.

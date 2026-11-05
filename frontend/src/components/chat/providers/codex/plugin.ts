@@ -7,6 +7,7 @@ import { classifyCodexMessage } from './classification'
 import { codexCompactionBoundary, codexCompactionStart, codexNotificationEntry } from './extractors/notification'
 import { codexResultDivider } from './extractors/resultDivider'
 import { codexExtractRow } from './extractors/row'
+import { projectCodexNativeConversation } from './nativeConversation'
 import { codexControls } from './pluginControls'
 import { resolveCodexMessage } from './resolveMessage'
 import { codexContextUsageFromNotification } from './sessionMetadata'
@@ -14,6 +15,8 @@ import { codexRelatedMessages, codexSpanRole } from './spanRole'
 
 const codexPlugin: ProviderPlugin = {
   transcript: {
+    projectNativeConversation: projectCodexNativeConversation,
+    foldActivity: true,
     compactionStart: codexCompactionStart,
     resolveMessage: resolveCodexMessage,
     spanRole: codexSpanRole,
@@ -40,8 +43,9 @@ const codexPlugin: ProviderPlugin = {
     attachments: {
       text: true,
       image: true,
-      pdf: false,
-      binary: false,
+      pdf: true,
+      binary: true,
+      fileBackedKinds: ['pdf', 'binary'],
     },
     planMode: buildPlanMode(CODEX_OPTION.CollaborationMode, 'plan', CODEX_OPTION_DEFAULT.CollaborationMode),
     // The trigger's mode segment shows the "Workflow" (collaboration_mode) group --

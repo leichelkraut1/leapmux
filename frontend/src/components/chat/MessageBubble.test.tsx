@@ -419,6 +419,14 @@ describe('raw message bytes', () => {
 // ---------------------------------------------------------------------------
 
 describe('thinking message toolbar buttons', () => {
+  it('keeps copy actions but omits Quote when no reply capability exists', () => {
+    const msg = makeMsg({ source: MessageSource.AGENT, content: rawContent({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Generated read-only thought.' }] } }) })
+    render(() => <PreferencesProvider><MessageBubble message={msg} /></PreferencesProvider>)
+    expect(screen.queryByTestId('message-quote')).not.toBeInTheDocument()
+    expect(screen.getByTestId('message-copy-markdown')).toBeInTheDocument()
+    expect(screen.getByTestId('message-copy-json')).toBeInTheDocument()
+  })
+
   it('shows Quote and Copy Markdown buttons for thinking messages', () => {
     const innerMsg = {
       type: 'assistant',
