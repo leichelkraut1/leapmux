@@ -40,6 +40,8 @@ type ExecutorRequest struct {
 	Step   *leapmuxv1.WorkflowStep
 	Inputs []*leapmuxv1.WorkflowTaskInput
 	Frozen []*leapmuxv1.WorkflowFrozenOutput
+	// Labels says which submission each anonymized input label was.
+	Labels []*leapmuxv1.WorkflowInputLabel
 }
 
 // ExecutorResult is an executor's report. StructuredOutput is validated and

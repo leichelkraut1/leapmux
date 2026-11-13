@@ -176,7 +176,7 @@ func TestLibraryImportExportAndExample(t *testing.T) {
 	e := newEngine(t, db, newFakePlatform())
 	ctx := t.Context()
 
-	example, err := e.InstallExample(ctx, userID)
+	example, err := e.InstallExample(ctx, userID, "")
 	require.NoError(t, err)
 	assert.Len(t, example.GetProfiles(), 4)
 	assert.Len(t, example.GetTemplate().GetSteps(), 4)

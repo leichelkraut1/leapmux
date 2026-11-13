@@ -69,6 +69,12 @@ func integerEnumColumns() []integerEnumColumn {
 		{"workflow_approvals.kind", "UPDATE workflow_approvals SET kind = ?", "SELECT typeof(kind), kind FROM workflow_approvals", 1, int64(leapmuxv1.WorkflowApprovalKind_WORKFLOW_APPROVAL_KIND_OPERATION), nil},
 		{"workflow_approvals.status", "UPDATE workflow_approvals SET status = ?", "SELECT typeof(status), status FROM workflow_approvals", 1, int64(leapmuxv1.WorkflowApprovalStatus_WORKFLOW_APPROVAL_STATUS_CANCELLED), nil},
 		{"workflow_events.kind", "UPDATE workflow_events SET kind = ?", "SELECT typeof(kind), kind FROM workflow_events", 1, int64(leapmuxv1.WorkflowEventKind_WORKFLOW_EVENT_KIND_USER), nil},
+		{"trading_candidates.source", "UPDATE trading_candidates SET source = ?", "SELECT typeof(source), source FROM trading_candidates", 1, int64(leapmuxv1.TradingBook_TRADING_BOOK_CONTRARIAN), nil},
+		{"trading_candidates.status", "UPDATE trading_candidates SET status = ?", "SELECT typeof(status), status FROM trading_candidates", 1, int64(leapmuxv1.TradingCandidateStatus_TRADING_CANDIDATE_STATUS_ORDERED), nil},
+		{"trading_positions.book", "UPDATE trading_positions SET book = ?", "SELECT typeof(book), book FROM trading_positions", 1, int64(leapmuxv1.TradingBook_TRADING_BOOK_LIVE), nil},
+		{"trading_positions.state", "UPDATE trading_positions SET state = ?", "SELECT typeof(state), state FROM trading_positions", 1, int64(leapmuxv1.TradingPositionState_TRADING_POSITION_STATE_NOT_FILLED), nil},
+		{"trading_orders.state", "UPDATE trading_orders SET state = ?", "SELECT typeof(state), state FROM trading_orders", 1, int64(leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_FAILED), nil},
+		{"trading_orders.side", "UPDATE trading_orders SET side = ?", "SELECT typeof(side), side FROM trading_orders", 1, int64(leapmuxv1.TradingOrderSide_TRADING_ORDER_SIDE_SELL_TO_CLOSE), nil},
 	}
 }
 
@@ -94,6 +100,9 @@ func integerEnumStore(t *testing.T) *sql.DB {
 		"INSERT INTO workflow_tasks (id, run_id, seq, role_key, title, status, approval, max_attempts, created_at_ms, updated_at_ms) VALUES ('enum-wf-task', 'enum-run', 1, 'builder', 't', 1, 1, 1, 1, 1)",
 		"INSERT INTO workflow_approvals (id, run_id, kind, status, title, created_at_ms) VALUES ('enum-approval', 'enum-run', 1, 1, 't', 1)",
 		"INSERT INTO workflow_events (run_id, kind, message, at_ms) VALUES ('enum-run', 1, 'm', 1)",
+		"INSERT INTO trading_candidates (id, user_id, run_id, source, recommendation_id, status, spec, created_at_ms, updated_at_ms) VALUES ('enum-cand', 'u', 'enum-run', 1, 'r1', 1, X'', 1, 1)",
+		"INSERT INTO trading_positions (id, user_id, book, state, spec, opened_at_ms, updated_at_ms) VALUES ('enum-pos', 'u', 1, 1, X'', 1, 1)",
+		"INSERT INTO trading_orders (id, user_id, state, side, client_order_id, spec, created_at_ms, updated_at_ms) VALUES ('enum-order', 'u', 1, 1, 'enum-ref', X'', 1, 1)",
 	} {
 		_, err := store.ExecContext(t.Context(), statement)
 		require.NoError(t, err)
@@ -159,7 +168,9 @@ func TestEnumColumnIntegerChecksMatchTheirStorage(t *testing.T) {
 	for _, column := range integerEnumColumns() {
 		labels = append(labels, column.label)
 	}
-	labels = append(labels, "messages.source", "messages.mark_type", "messages.assembled_kind", "messages.completion", "agent_input_queue_state.pause_reason", "agent_input_queue_state.pause_owner")
+	// trading_snapshots refuses every UPDATE (it is immutable), so its enum is
+	// checked here but cannot be probed by an update.
+	labels = append(labels, "messages.source", "messages.mark_type", "messages.assembled_kind", "messages.completion", "agent_input_queue_state.pause_reason", "agent_input_queue_state.pause_owner", "trading_snapshots.source")
 	for _, label := range labels {
 		t.Run(label, func(t *testing.T) {
 			table, column, found := strings.Cut(label, ".")
@@ -446,9 +457,48 @@ func TestEnumColumnChecksMatchTheirProtoRanges(t *testing.T) {
 				"the CHECK is what makes that unrepresentable rather than merely unwritten",
 		},
 		{
-			column: "control_deliveries.state", check: "CHECK (state BETWEEN 1 AND 4)",
+			// Shares its CHECK text with trading_positions.state.
+			column: "control_deliveries.state", check: "CHECK (state BETWEEN 1 AND 4)", columns: 2,
 			lastAccepted: int32(leapmuxv1.ControlDeliveryState_CONTROL_DELIVERY_STATE_COMPLETED),
 			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.ControlDeliveryState_name),
+		},
+		{
+			column: "trading_positions.state", check: "CHECK (state BETWEEN 1 AND 4)", columns: 2,
+			lastAccepted: int32(leapmuxv1.TradingPositionState_TRADING_POSITION_STATE_NOT_FILLED),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TradingPositionState_name),
+		},
+		{
+			// Shares its CHECK text with trading_candidates.source.
+			column: "trading_snapshots.source", check: "CHECK (source BETWEEN 1 AND 2)", columns: 2,
+			lastAccepted: int32(leapmuxv1.TradingMarketDataSource_TRADING_MARKET_DATA_SOURCE_ROBINHOOD),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TradingMarketDataSource_name),
+		},
+		{
+			column: "trading_candidates.source", check: "CHECK (source BETWEEN 1 AND 2)", columns: 2,
+			lastAccepted: int32(leapmuxv1.TradingBook_TRADING_BOOK_CONTRARIAN),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TradingBook_name),
+			narrower: "a candidate is an analyst's recommendation, BLIND or CONTRARIAN; " +
+				"the inverse and live books hold positions, never candidates",
+		},
+		{
+			column: "trading_candidates.status", check: "CHECK (status BETWEEN 1 AND 6)",
+			lastAccepted: int32(leapmuxv1.TradingCandidateStatus_TRADING_CANDIDATE_STATUS_ORDERED),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TradingCandidateStatus_name),
+		},
+		{
+			column: "trading_positions.book", check: "CHECK (book BETWEEN 1 AND 4)",
+			lastAccepted: int32(leapmuxv1.TradingBook_TRADING_BOOK_LIVE),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TradingBook_name),
+		},
+		{
+			column: "trading_orders.state", check: "CHECK (state BETWEEN 1 AND 10)",
+			lastAccepted: int32(leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_FAILED),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TradingOrderState_name),
+		},
+		{
+			column: "trading_orders.side", check: "CHECK (side BETWEEN 1 AND 2)",
+			lastAccepted: int32(leapmuxv1.TradingOrderSide_TRADING_ORDER_SIDE_SELL_TO_CLOSE),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TradingOrderSide_name),
 		},
 		{
 			column: "control_deliveries.kind", check: "CHECK (kind BETWEEN 1 AND 2)",

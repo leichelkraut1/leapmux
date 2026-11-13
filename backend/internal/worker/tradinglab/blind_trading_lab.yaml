@@ -1,0 +1,183 @@
+# LeapMux workflow template: blind options research with frozen predictions.
+#
+# Installed by "Add example" -> "Blind trading research" in the Workflows
+# dialog. The engine coordinates it (there is no Lead agent), so no
+# participant ever sees every result. Each research step's output_schema is
+# filled from the lab's schemas at install time; an exported copy carries
+# them in full.
+#
+# Nothing here can trade. The record step books shadow portfolios and puts
+# eligible ideas in front of a person; a live order needs that person to
+# confirm the exact order in the Trading Research view.
+format_version: 2
+profiles:
+  - id: analyst
+    name: Options analyst (Claude, high effort)
+    description: Researches short-dated options ideas from a frozen market snapshot.
+    agent_provider: AGENT_PROVIDER_CLAUDE_CODE
+    options:
+      effort: high
+    placement:
+      strategy: WORKER_PLACEMENT_STRATEGY_ANY_WORKER
+  - id: reviewer
+    name: Options reviewer (Claude, high effort)
+    description: Scores and audits frozen, anonymized recommendations.
+    agent_provider: AGENT_PROVIDER_CLAUDE_CODE
+    options:
+      effort: high
+    placement:
+      strategy: WORKER_PLACEMENT_STRATEGY_ANY_WORKER
+template:
+  name: Blind trading research
+  description: Two isolated analysts research the same frozen market snapshot at once; an evaluator scores their anonymized picks by one rubric; a risk auditor checks them; the lab books three shadow portfolios and queues eligible ideas for human review.
+  coordination: WORKFLOW_COORDINATION_ENGINE
+  confine_agents: true
+  max_parallel_tasks: 2
+  max_agents: 4
+  default_max_attempts: 2
+  sensitive_operations:
+    - placing, changing or cancelling any brokerage order
+    - contacting a broker or any account
+  instructions: |
+    Engine-coordinated. The snapshot step freezes the market; the two
+    research steps run concurrently in fresh, private, confined sessions;
+    evaluate and risk-audit read only frozen, anonymized submissions; record
+    books the shadow portfolios.
+  completion_criteria: |
+    Both predictions, the evaluation and the audit are frozen with their
+    hashes, and the record step booked every candidate.
+  roles:
+    - key: blind-analyst
+      name: Analyst
+      profile_id: analyst
+      isolation: {fresh_agent_per_task: true, private_working_dir: true, blind: true}
+      agent:
+        instructions: |
+          You are an independent options researcher. From the market snapshot
+          you are given, find at most five short-dated, high-risk, high-reward
+          long call or long put ideas, or recommend no trade.
+
+          - Use only the snapshot: its quotes, greeks, open interest, volume
+            and catalysts. Cite each claim's source as a snapshot path such
+            as `options[12]` or `catalysts[0]`, or a URL you actually read.
+          - Choose contracts that exist in the snapshot, by their exact
+            `occ_symbol`. Enter at a limit at or above the ask: a limit below
+            the ask is treated as not executable.
+          - State the maximum loss per contract as limit x 100 plus fees.
+          - Give scenarios whose probabilities sum to 1, honest probabilities
+            of profit and of the bid reaching 3x and 5x the entry, exits, and
+            what would prove you wrong.
+          - Copy the snapshot's sha256 into `snapshot_sha256`.
+          - Recommending no trade is a valid, recorded outcome.
+    - key: contrarian-analyst
+      name: Analyst
+      profile_id: analyst
+      isolation: {fresh_agent_per_task: true, private_working_dir: true, blind: true}
+      agent:
+        instructions: |
+          You are an independent options researcher who looks for where the
+          market's expectations are wrong: mispriced implied volatility,
+          crowded positioning visible in volume and open interest, reactions
+          that overshoot their catalyst, and second-order effects of an event
+          on related names. From the market snapshot you are given, find at
+          most five short-dated, high-risk, high-reward long call or long put
+          ideas built on such a mispricing, or recommend no trade.
+
+          - Use only the snapshot: its quotes, greeks, open interest, volume
+            and catalysts. Cite each claim's source as a snapshot path such
+            as `options[12]` or `catalysts[0]`, or a URL you actually read.
+          - Choose contracts that exist in the snapshot, by their exact
+            `occ_symbol`. Enter at a limit at or above the ask: a limit below
+            the ask is treated as not executable.
+          - State the maximum loss per contract as limit x 100 plus fees.
+          - Give scenarios whose probabilities sum to 1, honest probabilities
+            of profit and of the bid reaching 3x and 5x the entry, exits, and
+            what would prove you wrong.
+          - Copy the snapshot's sha256 into `snapshot_sha256`.
+          - Recommending no trade is a valid, recorded outcome.
+    - key: evaluator
+      name: Evaluator
+      profile_id: reviewer
+      isolation: {fresh_agent_per_task: true, private_working_dir: true, blind: true}
+      agent:
+        instructions: |
+          You score anonymized options recommendations by one rubric. You do
+          not know who wrote each submission and must not guess. Score every
+          recommendation of every submission, 0 to 5 on each criterion:
+
+          - evidence: are its claims supported by the snapshot it cites?
+          - pricing: is the entry consistent with the quote and implied
+            volatility, and is the premium worth the move it needs?
+          - catalyst: is there a dated, plausible reason for the move inside
+            the horizon?
+          - risk_reward: do the scenarios and exits justify the maximum loss?
+          - calibration: are its probabilities plausible given the market's
+            own implied distribution?
+          - executability: spread, open interest and volume for its size.
+
+          Apply the same standard to every submission. The lab computes the
+          totals from your scores; do not state totals.
+    - key: risk-auditor
+      name: Risk auditor
+      profile_id: reviewer
+      isolation: {fresh_agent_per_task: true, private_working_dir: true, blind: true}
+      agent:
+        instructions: |
+          You audit anonymized options recommendations against the market
+          snapshot. For every recommendation of every submission, check that
+          its evidence is supported by the snapshot, that its contract exists
+          and matches the snapshot, that its entry is consistent with the
+          quote, that liquidity (spread, open interest, volume) is adequate,
+          that its stated maximum loss equals limit x 100 plus fees, and that
+          its catalyst falls inside its horizon. Report every issue. Fail a
+          recommendation that a person must not act on.
+  steps:
+    - key: snapshot
+      title: Freeze market snapshot
+      executor: tradinglab.snapshot
+      freeze_output: true
+      params:
+        max_days_to_expiry: "14"
+        strikes_per_side: "6"
+        max_quote_age_seconds: "900"
+    - key: blind-research
+      title: Blind research
+      role_key: blind-analyst
+      depends_on: [snapshot]
+      inputs:
+        - {step_key: snapshot, label: Market snapshot}
+      freeze_output: true
+      instructions: Research the market snapshot below and submit your recommendations.
+    - key: contrarian-research
+      title: Contrarian research
+      role_key: contrarian-analyst
+      depends_on: [snapshot]
+      inputs:
+        - {step_key: snapshot, label: Market snapshot}
+      freeze_output: true
+      instructions: Research the market snapshot below and submit your recommendations.
+    - key: evaluate
+      title: Anonymous evaluation
+      role_key: evaluator
+      depends_on: [snapshot, blind-research, contrarian-research]
+      inputs:
+        - {step_key: snapshot, label: Market snapshot}
+        - {step_key: blind-research, anonymize: true}
+        - {step_key: contrarian-research, anonymize: true}
+      freeze_output: true
+      instructions: Score every recommendation of every submission below.
+    - key: risk-audit
+      title: Risk audit
+      role_key: risk-auditor
+      depends_on: [snapshot, blind-research, contrarian-research]
+      inputs:
+        - {step_key: snapshot, label: Market snapshot}
+        - {step_key: blind-research, anonymize: true}
+        - {step_key: contrarian-research, anonymize: true}
+      freeze_output: true
+      instructions: Audit every recommendation of every submission below.
+    - key: record
+      title: Record candidates and shadow books
+      executor: tradinglab.record
+      depends_on: [evaluate, risk-audit]
+      freeze_output: true

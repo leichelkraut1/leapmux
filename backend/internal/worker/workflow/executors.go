@@ -45,8 +45,12 @@ func (e *Engine) runExecutor(ctx context.Context, ref runRef, taskID string) {
 		if err != nil {
 			return err
 		}
+		labels, err := listInputLabels(ctx, q, rs.run.GetId())
+		if err != nil {
+			return err
+		}
 		attempt = t.GetAttempt()
-		req = ExecutorRequest{UserID: ref.userID, Run: rs.run, Task: t, Step: stepOf(rs.run, t.GetStepKey()), Inputs: inputs, Frozen: frozen}
+		req = ExecutorRequest{UserID: ref.userID, Run: rs.run, Task: t, Step: stepOf(rs.run, t.GetStepKey()), Inputs: inputs, Frozen: frozen, Labels: labels}
 		return nil
 	}); err != nil {
 		if !errors.Is(err, ErrNotFound) {

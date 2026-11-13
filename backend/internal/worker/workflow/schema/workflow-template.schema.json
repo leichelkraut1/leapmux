@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:leapmux:workflow-template",
+  "title": "LeapMux workflow template bundle",
+  "description": "A workflow template and the agent profiles its roles reference, as YAML or JSON with proto field names. format_version 1 is a Lead-coordinated template; format_version 2 adds engine coordination, role isolation, step inputs, output schemas, frozen outputs and executor steps.",
+  "type": "object",
+  "required": ["template"],
+  "additionalProperties": false,
+  "properties": {
+    "format_version": {"enum": [1, 2]},
+    "template": {"$ref": "#/$defs/template"},
+    "profiles": {"type": "array", "items": {"$ref": "#/$defs/profile"}}
+  },
+  "if": {"properties": {"format_version": {"const": 1}}},
+  "then": {
+    "properties": {
+      "template": {
+        "properties": {
+          "coordination": false,
+          "roles": {"items": {"properties": {"isolation": false}}},
+          "steps": {"items": {"properties": {"inputs": false, "output_schema": false, "freeze_output": false, "executor": false, "params": false}}}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "key": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,39}$"},
+    "stringMap": {"type": "object", "additionalProperties": {"type": "string"}},
+    "provider": {"type": "string", "pattern": "^AGENT_PROVIDER_[A-Z0-9_]+$"},
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {"enum": ["WORKER_PLACEMENT_STRATEGY_SPECIFIC_WORKER", "WORKER_PLACEMENT_STRATEGY_CAPABILITY", "WORKER_PLACEMENT_STRATEGY_ANY_WORKER"]},
+        "worker_id": {"type": "string"},
+        "required_capabilities": {"type": "array", "items": {"type": "string"}},
+        "allowed_worker_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "agent_provider": {"$ref": "#/$defs/provider"},
+        "options": {"$ref": "#/$defs/stringMap"},
+        "placement": {"$ref": "#/$defs/placement"},
+        "working_dir": {"type": "string"},
+        "instructions": {"type": "string"},
+        "max_instances": {"type": "integer", "minimum": 0},
+        "updated_at_ms": {"type": ["integer", "string"]}
+      }
+    },
+    "role": {
+      "type": "object",
+      "required": ["key"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string"},
+        "profile_id": {"type": "string"},
+        "agent": {"$ref": "#/$defs/profile"},
+        "is_lead": {"type": "boolean"},
+        "git_isolation": {"enum": ["WORKFLOW_GIT_ISOLATION_SHARED", "WORKFLOW_GIT_ISOLATION_WORKTREE"]},
+        "required_outputs": {"type": "array", "items": {"enum": ["summary", "commit", "tests", "artifacts"]}},
+        "review_required": {"type": "boolean"},
+        "isolation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fresh_agent_per_task": {"type": "boolean"},
+            "private_working_dir": {"type": "boolean"},
+            "confine": {"type": "boolean"},
+            "blind": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["key", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "title": {"type": "string", "minLength": 1},
+        "role_key": {"type": "string"},
+        "instructions": {"type": "string"},
+        "depends_on": {"type": "array", "items": {"$ref": "#/$defs/key"}},
+        "approval": {"enum": ["WORKFLOW_APPROVAL_GATE_NONE", "WORKFLOW_APPROVAL_GATE_BEFORE_START", "WORKFLOW_APPROVAL_GATE_BEFORE_COMPLETE"]},
+        "max_attempts": {"type": "integer", "minimum": 0},
+        "auto_start": {"type": "boolean"},
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["step_key"],
+            "additionalProperties": false,
+            "properties": {
+              "step_key": {"$ref": "#/$defs/key"},
+              "label": {"type": "string"},
+              "anonymize": {"type": "boolean"},
+              "redact_fields": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        },
+        "output_schema": {"type": "string"},
+        "freeze_output": {"type": "boolean"},
+        "executor": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$"},
+        "params": {"$ref": "#/$defs/stringMap"}
+      },
+      "oneOf": [
+        {"required": ["role_key"], "properties": {"executor": {"const": ""}}},
+        {"required": ["executor"], "properties": {"role_key": {"const": ""}}}
+      ]
+    },
+    "template": {
+      "type": "object",
+      "required": ["name", "roles"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "instructions": {"type": "string"},
+        "roles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/role"}},
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+        "completion_criteria": {"type": "string"},
+        "default_max_attempts": {"type": "integer", "minimum": 0},
+        "require_final_approval": {"type": "boolean"},
+        "max_parallel_tasks": {"type": "integer", "minimum": 0},
+        "max_agents": {"type": "integer", "minimum": 0},
+        "sensitive_operations": {"type": "array", "items": {"type": "string"}},
+        "version": {"type": "integer", "minimum": 0},
+        "updated_at_ms": {"type": ["integer", "string"]},
+        "confine_agents": {"type": "boolean"},
+        "coordination": {"enum": ["WORKFLOW_COORDINATION_LEAD", "WORKFLOW_COORDINATION_ENGINE"]}
+      }
+    }
+  }
+}

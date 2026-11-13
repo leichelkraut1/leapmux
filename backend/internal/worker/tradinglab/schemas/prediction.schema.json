@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Options research prediction",
+  "description": "One analyst's frozen recommendations for one market snapshot. Every price is per share, in dollars, as option quotes are.",
+  "type": "object",
+  "required": ["schema_version", "snapshot_sha256", "no_trade", "recommendations"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1},
+    "snapshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "The sha256 of the market snapshot input."},
+    "no_trade": {"type": "boolean", "description": "True when nothing in the snapshot is worth the risk."},
+    "no_trade_reason": {"type": "string", "maxLength": 2000},
+    "market_view": {"type": "string", "maxLength": 4000},
+    "recommendations": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/recommendation"}
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"no_trade": {"const": true}}}, "then": {"required": ["no_trade_reason"], "properties": {"recommendations": {"maxItems": 0}}}},
+    {"if": {"properties": {"no_trade": {"const": false}}}, "then": {"properties": {"recommendations": {"minItems": 1}}}}
+  ],
+  "$defs": {
+    "money": {"type": "number", "minimum": 0, "maximum": 1000000},
+    "probability": {"type": "number", "minimum": 0, "maximum": 1},
+    "recommendation": {
+      "type": "object",
+      "required": ["id", "underlying", "direction", "strategy", "contract", "entry", "thesis", "catalyst", "scenarios", "probabilities", "risk", "exits", "invalidation", "horizon_days", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9-]{1,20}$"},
+        "underlying": {"type": "string", "pattern": "^[A-Z][A-Z0-9.]{0,9}$"},
+        "direction": {"enum": ["bullish", "bearish"]},
+        "strategy": {"enum": ["long_call", "long_put"]},
+        "contract": {
+          "type": "object",
+          "required": ["occ_symbol", "expiration", "strike", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "occ_symbol": {"type": "string", "minLength": 15, "maxLength": 21},
+            "expiration": {"type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+            "strike": {"type": "number", "exclusiveMinimum": 0},
+            "right": {"enum": ["call", "put"]}
+          }
+        },
+        "entry": {
+          "type": "object",
+          "required": ["limit_price"],
+          "additionalProperties": false,
+          "properties": {
+            "limit_price": {"$ref": "#/$defs/money", "description": "The most to pay per share."},
+            "rationale": {"type": "string", "maxLength": 1000}
+          }
+        },
+        "thesis": {"type": "string", "minLength": 20, "maxLength": 4000},
+        "catalyst": {
+          "type": "object",
+          "required": ["type", "description"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {"enum": ["earnings", "economic_data", "corporate_event", "regulatory", "product", "technical", "flows", "other"]},
+            "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+            "description": {"type": "string", "minLength": 5, "maxLength": 2000}
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "required": ["claim", "source"],
+            "additionalProperties": false,
+            "properties": {
+              "claim": {"type": "string", "minLength": 5, "maxLength": 1000},
+              "source": {"type": "string", "description": "A snapshot path such as quotes.XYZ or catalysts[2], or a URL.", "maxLength": 500}
+            }
+          }
+        },
+        "scenarios": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "required": ["name", "probability", "underlying_price", "option_value"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "maxLength": 80},
+              "probability": {"$ref": "#/$defs/probability"},
+              "underlying_price": {"$ref": "#/$defs/money"},
+              "option_value": {"$ref": "#/$defs/money", "description": "Expected option price per share in this scenario at the horizon."}
+            }
+          }
+        },
+        "probabilities": {
+          "type": "object",
+          "required": ["profit", "reach_3x", "reach_5x"],
+          "additionalProperties": false,
+          "properties": {
+            "profit": {"$ref": "#/$defs/probability", "description": "That the position closes with a net profit."},
+            "reach_3x": {"$ref": "#/$defs/probability", "description": "That its bid reaches 3x the entry at any time before expiry."},
+            "reach_5x": {"$ref": "#/$defs/probability"}
+          }
+        },
+        "risk": {
+          "type": "object",
+          "required": ["max_loss_per_contract"],
+          "additionalProperties": false,
+          "properties": {
+            "max_loss_per_contract": {"$ref": "#/$defs/money", "description": "Dollars per contract: limit price x 100 plus fees."},
+            "notes": {"type": "string", "maxLength": 1000}
+          }
+        },
+        "exits": {
+          "type": "object",
+          "required": ["take_profit", "stop_loss", "time_stop"],
+          "additionalProperties": false,
+          "properties": {
+            "take_profit": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "required": ["price", "fraction"],
+                "additionalProperties": false,
+                "properties": {
+                  "price": {"$ref": "#/$defs/money"},
+                  "fraction": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+                }
+              }
+            },
+            "stop_loss": {"$ref": "#/$defs/money"},
+            "time_stop": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+          }
+        },
+        "invalidation": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"type": "string", "minLength": 5, "maxLength": 500}},
+        "horizon_days": {"type": "integer", "minimum": 1, "maximum": 45},
+        "confidence": {"$ref": "#/$defs/probability"}
+      }
+    }
+  }
+}

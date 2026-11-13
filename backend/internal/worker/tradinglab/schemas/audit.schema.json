@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Risk audit",
+  "description": "The risk auditor's verdict on every recommendation of every submission, checked against the snapshot.",
+  "type": "object",
+  "required": ["schema_version", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "recommendation_id", "verdict", "checks", "issues", "computed_max_loss_per_contract"],
+        "additionalProperties": false,
+        "properties": {
+          "label": {"type": "string", "pattern": "^Submission [A-Z]+$"},
+          "recommendation_id": {"type": "string"},
+          "verdict": {"enum": ["pass", "warn", "fail"]},
+          "checks": {
+            "type": "object",
+            "required": ["evidence_supported", "price_consistent_with_quote", "contract_exists", "liquidity_adequate", "max_loss_correct", "catalyst_within_horizon"],
+            "additionalProperties": false,
+            "properties": {
+              "evidence_supported": {"type": "boolean"},
+              "price_consistent_with_quote": {"type": "boolean"},
+              "contract_exists": {"type": "boolean"},
+              "liquidity_adequate": {"type": "boolean"},
+              "max_loss_correct": {"type": "boolean"},
+              "catalyst_within_horizon": {"type": "boolean"}
+            }
+          },
+          "issues": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 1000}},
+          "computed_max_loss_per_contract": {"type": "number", "minimum": 0}
+        }
+      }
+    }
+  }
+}

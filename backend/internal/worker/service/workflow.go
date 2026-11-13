@@ -70,8 +70,8 @@ func registerWorkflowHandlers(r registrar, svc *Service) {
 			replyWorkflow(sender, resp, err)
 		})
 	registerOwnerGuarded(r, "InstallExampleWorkflow", write, dispatchPlain,
-		func(ctx context.Context, caller channel.Caller, _ *leapmuxv1.InstallExampleWorkflowRequest, sender channel.ResponseWriter) {
-			resp, err := engine.InstallExample(ctx, caller.UserID.String())
+		func(ctx context.Context, caller channel.Caller, req *leapmuxv1.InstallExampleWorkflowRequest, sender channel.ResponseWriter) {
+			resp, err := engine.InstallExample(ctx, caller.UserID.String(), req.GetExample())
 			var out *leapmuxv1.InstallExampleWorkflowResponse
 			if resp != nil {
 				out = &leapmuxv1.InstallExampleWorkflowResponse{Template: resp.GetTemplate(), Profiles: resp.GetProfiles()}

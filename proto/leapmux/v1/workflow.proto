@@ -491,6 +491,14 @@ message ListWorkflowLibraryRequest {}
 message ListWorkflowLibraryResponse {
   repeated AgentProfile profiles = 1;
   repeated WorkflowTemplate templates = 2;
+  // The bundled templates InstallExampleWorkflow can add.
+  repeated WorkflowExample examples = 3;
+}
+
+message WorkflowExample {
+  string name = 1;
+  string title = 2;
+  string description = 3;
 }
 
 message SaveAgentProfileRequest { AgentProfile profile = 1; }
@@ -522,9 +530,9 @@ message ImportWorkflowTemplateResponse {
   repeated AgentProfile profiles = 2;
 }
 
-// InstallExampleWorkflow saves the bundled "Develop, audit and test on iOS"
-// template and its profiles into this worker's library.
-message InstallExampleWorkflowRequest {}
+// InstallExampleWorkflow saves a bundled template and its profiles into this
+// worker's library: the one named, or "Develop, audit and test on iOS".
+message InstallExampleWorkflowRequest { string example = 1; }
 message InstallExampleWorkflowResponse {
   WorkflowTemplate template = 1;
   repeated AgentProfile profiles = 2;

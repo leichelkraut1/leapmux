@@ -1,0 +1,474 @@
+syntax = "proto3";
+package leapmux.v1;
+
+// The blind trading research lab: the privileged half of the
+// "blind-trading-lab" workflow template (internal/worker/tradinglab).
+//
+// The workflow engine runs the research. These methods serve the user's
+// Trading Research view on the run's coordinator: settings, the broker
+// verification, what each run produced, the shadow books, the approved trade
+// queue and the execution gateway. Like every workflow method they are inner
+// RPCs over the E2EE channel, owner-only.
+//
+// Nothing here is reachable by a research agent: research roles are confined
+// to the workflow participant methods. ConfirmTradingOrder additionally
+// refuses a call through an agent's control socket and requires the user's
+// confirmation passphrase.
+
+enum TradingLabMode {
+  TRADING_LAB_MODE_UNSPECIFIED = 0;
+  // Simulated books only. The gateway refuses every live order. Needs no
+  // credentials.
+  TRADING_LAB_MODE_PAPER = 1;
+  // The gateway may submit orders a person confirmed, through Robinhood MCP.
+  TRADING_LAB_MODE_LIVE = 2;
+}
+
+enum TradingMarketDataSource {
+  TRADING_MARKET_DATA_SOURCE_UNSPECIFIED = 0;
+  // Recorded market files in replay_dir. Needs no credentials.
+  TRADING_MARKET_DATA_SOURCE_REPLAY = 1;
+  // The read-only tools of the configured Robinhood MCP server.
+  TRADING_MARKET_DATA_SOURCE_ROBINHOOD = 2;
+}
+
+enum TradingMcpTransport {
+  TRADING_MCP_TRANSPORT_UNSPECIFIED = 0;
+  // A local process speaking MCP over stdin/stdout.
+  TRADING_MCP_TRANSPORT_STDIO = 1;
+  // Streamable HTTP.
+  TRADING_MCP_TRANSPORT_HTTP = 2;
+}
+
+// The shadow and live books. Stored as ordinals.
+enum TradingBook {
+  TRADING_BOOK_UNSPECIFIED = 0;
+  // Every executable recommendation of the blind analyst.
+  TRADING_BOOK_BLIND = 1;
+  // Every executable recommendation of the contrarian analyst.
+  TRADING_BOOK_CONTRARIAN = 2;
+  // The blind analyst's ideas implemented in the opposite direction, each
+  // contract chosen and priced separately from the snapshot.
+  TRADING_BOOK_BLIND_INVERSE = 3;
+  // Real fills, reconciled from the broker. Never mixed with simulated ones.
+  TRADING_BOOK_LIVE = 4;
+}
+
+enum TradingCandidateStatus {
+  TRADING_CANDIDATE_STATUS_UNSPECIFIED = 0;
+  // Passed the lab's checks and the audit; a person may approve it.
+  TRADING_CANDIDATE_STATUS_ELIGIBLE = 1;
+  // Failed a check or the audit; see the reasons.
+  TRADING_CANDIDATE_STATUS_REJECTED = 2;
+  // The analyst recommended no trade.
+  TRADING_CANDIDATE_STATUS_NO_TRADE = 3;
+  // In the approved trade queue: a person approved it as a candidate for a
+  // real order. Approval places nothing.
+  TRADING_CANDIDATE_STATUS_APPROVED = 4;
+  // A person dismissed it.
+  TRADING_CANDIDATE_STATUS_DISMISSED = 5;
+  // A live order was submitted for it.
+  TRADING_CANDIDATE_STATUS_ORDERED = 6;
+}
+
+enum TradingOrderState {
+  TRADING_ORDER_STATE_UNSPECIFIED = 0;
+  // Checked and previewed; waits for a person to confirm this exact order.
+  TRADING_ORDER_STATE_PREPARED = 1;
+  // Confirmed; the gateway is about to submit it.
+  TRADING_ORDER_STATE_CONFIRMED = 2;
+  // The submission was sent and its outcome is not yet known. Reconcile asks
+  // the broker before anything is sent again.
+  TRADING_ORDER_STATE_SUBMITTING = 3;
+  TRADING_ORDER_STATE_SUBMITTED = 4;
+  TRADING_ORDER_STATE_PARTIALLY_FILLED = 5;
+  TRADING_ORDER_STATE_FILLED = 6;
+  TRADING_ORDER_STATE_CANCELLED = 7;
+  TRADING_ORDER_STATE_REJECTED = 8;
+  // Not confirmed in time; it can never be submitted.
+  TRADING_ORDER_STATE_EXPIRED = 9;
+  TRADING_ORDER_STATE_FAILED = 10;
+}
+
+enum TradingOrderSide {
+  TRADING_ORDER_SIDE_UNSPECIFIED = 0;
+  TRADING_ORDER_SIDE_BUY_TO_OPEN = 1;
+  TRADING_ORDER_SIDE_SELL_TO_CLOSE = 2;
+}
+
+enum TradingPositionState {
+  TRADING_POSITION_STATE_UNSPECIFIED = 0;
+  TRADING_POSITION_STATE_OPEN = 1;
+  TRADING_POSITION_STATE_CLOSED = 2;
+  TRADING_POSITION_STATE_EXPIRED = 3;
+  // The simulator could not fill it from the recorded quotes.
+  TRADING_POSITION_STATE_NOT_FILLED = 4;
+}
+
+// --- Settings ---
+
+message TradingMcpConfig {
+  TradingMcpTransport transport = 1;
+  // STDIO: the server's command and arguments.
+  string command = 2;
+  repeated string args = 3;
+  // HTTP: the endpoint.
+  string url = 4;
+  // Where the bearer token lives: an environment variable of the worker, or
+  // a file on it. The token itself is never stored or sent here.
+  string token_env = 5;
+  string token_file = 6;
+  // A logical operation (see TradingBrokerStatus) mapped to the server's
+  // tool name, where discovery would guess wrong.
+  map<string, string> tool_names = 7;
+  // The brokerage account orders go to. Empty uses the only one.
+  string account_id = 8;
+}
+
+message TradingRiskBudget {
+  // The most a single order may lose (premium plus fees), in dollars.
+  double max_loss_per_order = 1;
+  // Live losses realized plus risk opened today may not exceed this.
+  double max_daily_risk = 2;
+  // Total premium at risk across open live positions.
+  double max_open_risk = 3;
+  uint32 max_contracts_per_order = 4;
+  uint32 max_open_positions = 5;
+  // Buying power that must remain after the order.
+  double min_buying_power_reserve = 6;
+  // How long a prepared order may wait for its confirmation.
+  uint32 confirmation_ttl_seconds = 7;
+  // Refuse a live order whose quote is older than this.
+  uint32 max_quote_age_seconds = 8;
+}
+
+// The rules every shadow book is simulated by, identical across books.
+message TradingSimulationRules {
+  double starting_capital = 1;
+  // Dollars at risk per idea; contracts = floor(allocation / (ask*100 + fees)).
+  double allocation_per_idea = 2;
+  double fee_per_contract = 3;
+  // Dollars per contract added to a buy and taken from a sale, beyond the
+  // recorded ask or bid.
+  double slippage_per_contract = 4;
+  // An idea whose spread exceeds this fraction of the ask is not executable.
+  double max_spread_fraction = 5;
+  uint32 min_open_interest = 6;
+  uint32 min_volume = 7;
+  // Calendar days after entry at which every position is marked.
+  repeated uint32 horizon_days = 8;
+}
+
+message TradingLabSettings {
+  TradingLabMode mode = 1;
+  TradingMarketDataSource market_data = 2;
+  // REPLAY: the directory of recorded market files on the coordinator.
+  string replay_dir = 3;
+  TradingMcpConfig robinhood = 4;
+  TradingRiskBudget risk = 5;
+  TradingSimulationRules simulation = 6;
+  // Underlyings the snapshot covers when a run names none.
+  repeated string watchlist = 7;
+  // A snapshot older than this is refused for research.
+  uint32 max_snapshot_age_seconds = 8;
+  // Set when a confirmation passphrase exists. Write-only otherwise.
+  bool has_confirmation_passphrase = 9;
+  int64 updated_at_ms = 10;
+}
+
+message GetTradingLabSettingsRequest {}
+message GetTradingLabSettingsResponse { TradingLabSettings settings = 1; }
+
+message SaveTradingLabSettingsRequest {
+  TradingLabSettings settings = 1;
+  // Set to change the confirmation passphrase; the current one must be
+  // given when one exists. Stored only as an argon2id hash.
+  string new_confirmation_passphrase = 2;
+  string current_confirmation_passphrase = 3;
+}
+message SaveTradingLabSettingsResponse { TradingLabSettings settings = 1; }
+
+// --- Broker verification ---
+
+message TradingBrokerStatus {
+  bool configured = 1;
+  // The server answered and an account read succeeded with the credential.
+  bool authenticated = 2;
+  // Logical operations the server provides: quote, option_chain,
+  // option_quotes, news, events, account, positions, orders, preview_order,
+  // place_order, cancel_order, order_status.
+  repeated string supported_operations = 3;
+  repeated string missing_operations = 4;
+  // Tools only research may use, and tools only the gateway may use.
+  repeated string read_only_tools = 5;
+  repeated string trading_tools = 6;
+  // Tools the server offers that the lab classified as neither; never used.
+  repeated string unclassified_tools = 7;
+  string account_label = 8;
+  string options_level = 9;
+  double buying_power = 10;
+  // Live trading needs authenticated, the order operations and options
+  // permissions; this says what is missing.
+  bool live_ready = 11;
+  string detail = 12;
+  int64 checked_at_ms = 13;
+}
+
+message VerifyTradingBrokerRequest {}
+message VerifyTradingBrokerResponse { TradingBrokerStatus status = 1; }
+
+// --- Runs ---
+
+message TradingSnapshotSummary {
+  string id = 1;
+  string run_id = 2;
+  string sha256 = 3;
+  int64 as_of_ms = 4;
+  TradingMarketDataSource source = 5;
+  repeated string symbols = 6;
+  uint32 contracts = 7;
+  uint32 catalysts = 8;
+  repeated string warnings = 9;
+  int64 captured_at_ms = 10;
+}
+
+message TradingCandidate {
+  string id = 1;
+  string run_id = 2;
+  // BLIND or CONTRARIAN: whose recommendation it is.
+  TradingBook source = 3;
+  // The label the evaluator and the auditor saw it under.
+  string anonymous_label = 4;
+  string recommendation_id = 5;
+  TradingCandidateStatus status = 6;
+  string underlying = 7;
+  string strategy = 8;
+  string occ_symbol = 9;
+  string expiration = 10;
+  double strike = 11;
+  string right = 12;
+  double entry_limit = 13;
+  // Premium plus fees for one contract.
+  double max_loss_per_contract = 14;
+  string thesis = 15;
+  string catalyst = 16;
+  double probability_profit = 17;
+  double probability_3x = 18;
+  double probability_5x = 19;
+  repeated string rejection_reasons = 20;
+  // The lab's score from the evaluator's component scores, by one rubric.
+  double evaluation_score = 21;
+  string evaluation_verdict = 22;
+  string audit_verdict = 23;
+  repeated string audit_issues = 24;
+  // SHA-256 of the frozen prediction it came from.
+  string prediction_sha256 = 25;
+  // The recommendation as frozen (canonical JSON).
+  string recommendation_json = 26;
+  string decision_note = 27;
+  int64 decided_at_ms = 28;
+  int64 created_at_ms = 29;
+}
+
+message TradingLabRunView {
+  string run_id = 1;
+  TradingSnapshotSummary snapshot = 2;
+  repeated TradingCandidate candidates = 3;
+  // The frozen evaluation and audit, as their agents submitted them.
+  string evaluation_json = 4;
+  string audit_json = 5;
+  // Anonymous label -> BLIND / CONTRARIAN, revealed once the evaluation and
+  // the audit are frozen.
+  map<string, string> label_sources = 6;
+  string blind_prediction_sha256 = 7;
+  string contrarian_prediction_sha256 = 8;
+  bool recorded = 9;
+}
+
+message GetTradingLabRunRequest { string run_id = 1; }
+message GetTradingLabRunResponse { TradingLabRunView view = 1; }
+
+message DecideTradingCandidateRequest {
+  string candidate_id = 1;
+  bool approve = 2;
+  string note = 3;
+}
+message DecideTradingCandidateResponse { TradingCandidate candidate = 1; }
+
+// --- Books ---
+
+message TradingHorizonMark {
+  uint32 days = 1;
+  int64 at_ms = 2;
+  // Liquidation value at the recorded bid, after fees and slippage.
+  double value = 3;
+  double pnl = 4;
+  bool missing_data = 5;
+}
+
+message TradingPosition {
+  string id = 1;
+  TradingBook book = 2;
+  string candidate_id = 3;
+  string run_id = 4;
+  string occ_symbol = 5;
+  string underlying = 6;
+  string right = 7;
+  double strike = 8;
+  string expiration = 9;
+  uint32 quantity = 10;
+  // Per-contract fill price (ask plus slippage for a buy).
+  double entry_price = 11;
+  // Premium plus fees: the most the position can lose.
+  double cost = 12;
+  double fees = 13;
+  TradingPositionState state = 14;
+  double last_mark = 15;
+  int64 last_mark_at_ms = 16;
+  double exit_price = 17;
+  double realized_pnl = 18;
+  // Best bid-based value seen, as a multiple of the cost.
+  double peak_multiple = 19;
+  repeated TradingHorizonMark horizons = 20;
+  // Why it did not fill, or how it closed.
+  string note = 21;
+  int64 opened_at_ms = 22;
+  int64 closed_at_ms = 23;
+  // The probability of profit the analyst stated, for calibration.
+  double forecast_probability = 24;
+}
+
+message TradingBookMetrics {
+  TradingBook book = 1;
+  uint32 ideas = 2;
+  uint32 filled = 3;
+  uint32 not_executable = 4;
+  uint32 open = 5;
+  double capital = 6;
+  double risk_deployed = 7;
+  double net_pnl = 8;
+  // Net P/L divided by the premium put at risk.
+  double return_on_risk = 9;
+  // Mean per-position return on risk divided by its standard deviation.
+  double risk_adjusted_return = 10;
+  double win_rate = 11;
+  // Largest peak-to-trough fall of the book's equity, in dollars.
+  double max_drawdown = 12;
+  // Mean squared error of the stated probability of profit (lower is better).
+  double brier_score = 13;
+  double hit_3x_rate = 14;
+  double hit_5x_rate = 15;
+  // Net P/L at each horizon, over the positions that reached it.
+  map<uint32, double> pnl_at_horizon = 16;
+}
+
+message TradingOrder {
+  string id = 1;
+  string candidate_id = 2;
+  string position_id = 3;
+  TradingOrderState state = 4;
+  TradingOrderSide side = 5;
+  string occ_symbol = 6;
+  uint32 quantity = 7;
+  double limit_price = 8;
+  string time_in_force = 9;
+  string account_id = 10;
+  double estimated_fees = 11;
+  // Premium plus fees for a buy; 0 for a closing sale.
+  double max_loss = 12;
+  double bid = 13;
+  double ask = 14;
+  int64 quote_at_ms = 15;
+  repeated string broker_alerts = 16;
+  // The checks the gateway ran before the preview, each stated.
+  repeated string checks = 17;
+  // SHA-256 of the exact order parameters the person confirms.
+  string fingerprint = 18;
+  int64 confirm_by_ms = 19;
+  string client_order_id = 20;
+  string broker_order_id = 21;
+  uint32 filled_quantity = 22;
+  double average_fill_price = 23;
+  string detail = 24;
+  // The execution policy that authorized it, if no person confirmed it.
+  string policy_id = 25;
+  string confirmed_by = 26;
+  int64 confirmed_at_ms = 27;
+  int64 created_at_ms = 28;
+  int64 updated_at_ms = 29;
+}
+
+// A precisely scoped standing authorization: the only way an order is
+// submitted without a confirmation of that exact order. A person approves it,
+// with its passphrase, for one position, one side, a quantity and price limit
+// and an expiry.
+message TradingExecutionPolicy {
+  string id = 1;
+  string position_id = 2;
+  TradingOrderSide side = 3;
+  string occ_symbol = 4;
+  uint32 max_quantity = 5;
+  // A sale's limit may not be below this; a buy's may not be above it.
+  double limit_price_bound = 6;
+  int64 expires_at_ms = 7;
+  string note = 8;
+  bool active = 9;
+  int64 approved_at_ms = 10;
+  int64 used_at_ms = 11;
+}
+
+message GetTradingDashboardRequest {}
+message GetTradingDashboardResponse {
+  TradingLabSettings settings = 1;
+  repeated TradingBookMetrics metrics = 2;
+  repeated TradingPosition positions = 3;
+  // ELIGIBLE and APPROVED candidates across runs.
+  repeated TradingCandidate queue = 4;
+  repeated TradingOrder orders = 5;
+  repeated TradingExecutionPolicy policies = 6;
+  TradingBrokerStatus broker = 7;
+}
+
+message MarkTradingBooksRequest {}
+message MarkTradingBooksResponse {
+  uint32 marked = 1;
+  uint32 missing = 2;
+  repeated string warnings = 3;
+}
+
+// --- Execution gateway ---
+
+// PrepareTradingOrder runs every check and the broker's preview, and records
+// a PREPARED order with the fingerprint a person must confirm. It places
+// nothing.
+message PrepareTradingOrderRequest {
+  // Open: an APPROVED candidate. Close: an open LIVE position.
+  string candidate_id = 1;
+  string position_id = 2;
+  uint32 quantity = 3;
+  double limit_price = 4;
+}
+message PrepareTradingOrderResponse { TradingOrder order = 1; }
+
+message ConfirmTradingOrderRequest {
+  string order_id = 1;
+  // Must equal the prepared order's fingerprint.
+  string fingerprint = 2;
+  string passphrase = 3;
+}
+message ConfirmTradingOrderResponse { TradingOrder order = 1; }
+
+message CancelTradingOrderRequest { string order_id = 1; }
+message CancelTradingOrderResponse { TradingOrder order = 1; }
+
+message ReconcileTradingOrdersRequest {}
+message ReconcileTradingOrdersResponse { repeated TradingOrder orders = 1; }
+
+message SaveTradingExecutionPolicyRequest {
+  TradingExecutionPolicy policy = 1;
+  string passphrase = 2;
+}
+message SaveTradingExecutionPolicyResponse { TradingExecutionPolicy policy = 1; }
+
+message RevokeTradingExecutionPolicyRequest { string policy_id = 1; }
+message RevokeTradingExecutionPolicyResponse { TradingExecutionPolicy policy = 1; }

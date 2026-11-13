@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 
 	"go.yaml.in/yaml/v3"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -17,7 +19,15 @@ import (
 
 // bundleFormatVersion is the version of the import/export document. An
 // import refuses a newer one rather than dropping fields it cannot read.
-const bundleFormatVersion = 1
+// Version 2 added engine coordination, role isolation, step inputs, output
+// schemas, frozen outputs and executor steps; version 1 documents still read.
+const bundleFormatVersion = 2
+
+// bundleSchema is the JSON Schema of the document, checked before it is read
+// so a misspelled field fails by name instead of being dropped.
+//
+//go:embed schema/workflow-template.schema.json
+var bundleSchema string
 
 // maxDocumentBytes bounds an imported document.
 const maxDocumentBytes = 1 << 20
@@ -35,7 +45,7 @@ func (e *Engine) Library(ctx context.Context, userID string) (*leapmuxv1.ListWor
 	if err != nil {
 		return nil, err
 	}
-	return &leapmuxv1.ListWorkflowLibraryResponse{Profiles: profiles, Templates: templates}, nil
+	return &leapmuxv1.ListWorkflowLibraryResponse{Profiles: profiles, Templates: templates, Examples: Examples()}, nil
 }
 
 // SaveProfile creates a profile (no id) or replaces one.
@@ -145,6 +155,8 @@ func fileSlug(name string) string {
 // would only describe this computer.
 func EncodeBundle(b *leapmuxv1.WorkflowTemplateBundle, format leapmuxv1.WorkflowExportFormat) (string, error) {
 	b = proto.Clone(b).(*leapmuxv1.WorkflowTemplateBundle)
+	// Written in this LeapMux's format, whatever the bundle was read as.
+	b.FormatVersion = bundleFormatVersion
 	b.GetTemplate().Version, b.GetTemplate().UpdatedAtMs = 0, 0
 	for _, p := range b.GetProfiles() {
 		p.UpdatedAtMs = 0
@@ -189,6 +201,9 @@ func DecodeBundle(doc string) (*leapmuxv1.WorkflowTemplateBundle, error) {
 		if data, err = json.Marshal(tree); err != nil {
 			return nil, invalidf("the YAML holds a value JSON cannot represent: %v", err)
 		}
+	}
+	if _, _, err := ValidateOutput(bundleSchema, string(data)); err != nil {
+		return nil, invalidf("the document does not follow the workflow template format: %s", strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": "))
 	}
 	b := &leapmuxv1.WorkflowTemplateBundle{}
 	if err := (protojson.UnmarshalOptions{}).Unmarshal(data, b); err != nil {
@@ -258,8 +273,59 @@ func (e *Engine) importBundle(ctx context.Context, userID string, b *leapmuxv1.W
 	return out, nil
 }
 
-// InstallExample saves the bundled development, audit and iOS testing
-// template into the library.
-func (e *Engine) InstallExample(ctx context.Context, userID string) (*leapmuxv1.ImportWorkflowTemplateResponse, error) {
-	return e.Import(ctx, userID, exampleBundle)
+// ExampleIOS is the bundled development, audit and iOS testing example.
+const ExampleIOS = "ios"
+
+// Example is a bundled template the Workflows dialog offers to install.
+type Example struct {
+	Info   *leapmuxv1.WorkflowExample
+	Bundle func() (*leapmuxv1.WorkflowTemplateBundle, error)
+}
+
+var (
+	examplesMu sync.RWMutex
+	examples   = map[string]Example{
+		ExampleIOS: {
+			Info:   &leapmuxv1.WorkflowExample{Name: ExampleIOS, Title: "Develop, audit and test on iOS", Description: "A Lead plans; a Builder implements; an Auditor reviews; an iOS Tester validates on a Mac."},
+			Bundle: func() (*leapmuxv1.WorkflowTemplateBundle, error) { return DecodeBundle(exampleBundle) },
+		},
+	}
+)
+
+// RegisterExample adds a bundled template, by name, to every engine.
+func RegisterExample(x Example) {
+	examplesMu.Lock()
+	defer examplesMu.Unlock()
+	examples[x.Info.GetName()] = x
+}
+
+// Examples lists the bundled templates by name.
+func Examples() []*leapmuxv1.WorkflowExample {
+	examplesMu.RLock()
+	defer examplesMu.RUnlock()
+	out := make([]*leapmuxv1.WorkflowExample, 0, len(examples))
+	for _, x := range examples {
+		out = append(out, proto.Clone(x.Info).(*leapmuxv1.WorkflowExample))
+	}
+	slices.SortFunc(out, func(a, b *leapmuxv1.WorkflowExample) int { return strings.Compare(a.GetTitle(), b.GetTitle()) })
+	return out
+}
+
+// InstallExample saves a bundled template and its profiles into the
+// library. An empty name installs the iOS example.
+func (e *Engine) InstallExample(ctx context.Context, userID, name string) (*leapmuxv1.ImportWorkflowTemplateResponse, error) {
+	if name == "" {
+		name = ExampleIOS
+	}
+	examplesMu.RLock()
+	x, ok := examples[name]
+	examplesMu.RUnlock()
+	if !ok {
+		return nil, invalidf("there is no bundled template %q", name)
+	}
+	b, err := x.Bundle()
+	if err != nil {
+		return nil, err
+	}
+	return e.importBundle(ctx, userID, b)
 }

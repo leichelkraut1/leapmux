@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Anonymous evaluation",
+  "description": "Component scores (0-5) for every recommendation of every submission, by one rubric. The lab computes each total from these with fixed weights; the evaluator states no total.",
+  "type": "object",
+  "required": ["schema_version", "rubric_version", "submissions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1},
+    "rubric_version": {"const": "options-v1"},
+    "submissions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["label", "recommendations"],
+        "additionalProperties": false,
+        "properties": {
+          "label": {"type": "string", "pattern": "^Submission [A-Z]+$"},
+          "no_trade_assessment": {"type": "string", "maxLength": 2000},
+          "recommendations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["recommendation_id", "scores", "verdict", "notes"],
+              "additionalProperties": false,
+              "properties": {
+                "recommendation_id": {"type": "string"},
+                "scores": {
+                  "type": "object",
+                  "required": ["evidence", "pricing", "catalyst", "risk_reward", "calibration", "executability"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "evidence": {"$ref": "#/$defs/score"},
+                    "pricing": {"$ref": "#/$defs/score"},
+                    "catalyst": {"$ref": "#/$defs/score"},
+                    "risk_reward": {"$ref": "#/$defs/score"},
+                    "calibration": {"$ref": "#/$defs/score"},
+                    "executability": {"$ref": "#/$defs/score"}
+                  }
+                },
+                "verdict": {"enum": ["strong", "acceptable", "weak", "reject"]},
+                "notes": {"type": "string", "maxLength": 2000}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "score": {"type": "integer", "minimum": 0, "maximum": 5}
+  }
+}
