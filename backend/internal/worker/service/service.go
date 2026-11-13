@@ -22,6 +22,7 @@ import (
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/worker/bgtask"
 
+	"github.com/leapmux/leapmux/internal/util/id"
 	"github.com/leapmux/leapmux/internal/util/optionids"
 	"github.com/leapmux/leapmux/internal/util/sqltime"
 	"github.com/leapmux/leapmux/internal/util/userid"
@@ -32,6 +33,7 @@ import (
 	"github.com/leapmux/leapmux/internal/worker/gitutil"
 	"github.com/leapmux/leapmux/internal/worker/inputqueue"
 	"github.com/leapmux/leapmux/internal/worker/terminal"
+	"github.com/leapmux/leapmux/internal/worker/tradinglab"
 	"github.com/leapmux/leapmux/internal/worker/wakelock"
 	"github.com/leapmux/leapmux/internal/worker/workflow"
 	"github.com/leapmux/leapmux/util/pathutil"
@@ -72,6 +74,10 @@ type Service struct {
 	Watchers   *WatcherManager // Fan-out manager for event broadcasting
 	Output     *OutputHandler  // Agent output NDJSON processor
 	InputQueue *inputqueue.Manager
+	// TradingLab is the privileged half of the blind-trading-lab workflow:
+	// its executors run in Workflows, and its gateway is the only code that
+	// can place an order.
+	TradingLab *tradinglab.Lab
 	// Workflows coordinates the workflow runs whose Lead this worker hosts,
 	// and keeps the bindings of the workflow agents it hosts. Bootstrap
 	// installs its platform and runs its loop.
@@ -610,6 +616,9 @@ func New(cfg Config) *Service {
 	}
 	// The seed is config data, so it is minted here -- the one place the raw
 	// string exists -- rather than inside the setter.
+	svc.TradingLab = tradinglab.New(tradinglab.Config{DB: cfg.DB, Clock: cfg.Clock, NewID: id.Generate})
+	svc.TradingLab.Register(svc.Workflows)
+	tradinglab.RegisterExample()
 	if seed, ok := userid.New(cfg.SeedRegisteredBy); ok {
 		svc.SetRegisteredBy(seed)
 	}
@@ -1493,6 +1502,7 @@ func registerAllClassified(d *channel.Dispatcher, svc *Service) (map[string]meth
 	registerNativeControlHandlers(r, svc)
 	registerCleanupHandlers(r, svc)
 	registerWorkflowHandlers(r, svc)
+	registerTradingLabHandlers(r, svc)
 	registerSysInfoHandlers(ownerOnly, svc)
 	tunnels := registerTunnelHandlers(ownerOnly)
 	// Swap in the new manager and Stop the prior one it displaced. A

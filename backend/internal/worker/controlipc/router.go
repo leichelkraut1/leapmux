@@ -193,7 +193,7 @@ func (r *Router) dispatchLocal(ctx context.Context, info TokenInfo, method strin
 	collector := &responseCollector{}
 	r.withLocalStream(info, func(streamID string) {
 		collector.streamID = streamID
-		r.LocalDispatcher.DispatchWith(ctx, r.caller(), &leapmuxv1.InnerRpcRequest{Method: method, Payload: payload}, collector)
+		r.LocalDispatcher.DispatchWith(channel.WithAgentSocket(ctx), r.caller(), &leapmuxv1.InnerRpcRequest{Method: method, Payload: payload}, collector)
 	})
 	return collector.toResponse()
 }
@@ -265,7 +265,7 @@ func (r *Router) streamLocal(ctx context.Context, info TokenInfo, method string,
 	r.withLocalStream(info, func(streamID string) {
 		collector = newStreamCollector(ctx, streamID, onMsg)
 		collector.entry = entry
-		r.LocalDispatcher.DispatchWith(ctx, r.caller(), &leapmuxv1.InnerRpcRequest{Method: method, Payload: payload}, collector)
+		r.LocalDispatcher.DispatchWith(channel.WithAgentSocket(ctx), r.caller(), &leapmuxv1.InnerRpcRequest{Method: method, Payload: payload}, collector)
 		collector.wait()
 	})
 	return collector.outcome()

@@ -1,6 +1,7 @@
 package tradinglab
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -8,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 )
 
 // SampleSymbols are the underlyings of the synthetic recording.
@@ -131,3 +134,27 @@ func blackScholes(right string, s, k, t, iv float64) (price, delta, gamma, theta
 }
 
 func cdf(x float64) float64 { return 0.5 * math.Erfc(-x/math.Sqrt2) }
+
+// InstallSampleData writes a fresh synthetic recording under the worker's
+// data directory, ending today, and points the user's replay at it.
+func (l *Lab) InstallSampleData(ctx context.Context, userID, dataDir string) (*leapmuxv1.InstallTradingSampleDataResponse, error) {
+	now := l.now()
+	dir, err := filepath.Abs(filepath.Join(dataDir, "tradinglab", "synthetic-replay", now.Format("20060102T150405")))
+	if err != nil {
+		return nil, err
+	}
+	files, err := GenerateSampleReplay(dir, now.AddDate(0, 0, -21), 15, uint64(now.UnixNano()))
+	if err != nil {
+		return nil, err
+	}
+	s, err := l.Settings(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	s.MarketData, s.ReplayDir, s.Watchlist = leapmuxv1.TradingMarketDataSource_TRADING_MARKET_DATA_SOURCE_REPLAY, dir, SampleSymbols
+	saved, err := l.SaveSettings(ctx, userID, &leapmuxv1.SaveTradingLabSettingsRequest{Settings: s})
+	if err != nil {
+		return nil, err
+	}
+	return &leapmuxv1.InstallTradingSampleDataResponse{Settings: saved, Files: files}, nil
+}

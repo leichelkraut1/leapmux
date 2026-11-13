@@ -542,6 +542,32 @@ var ownerGuardedProbes = func() []ownerGuardedProbe {
 		{"WorkflowAgentComplete", func() proto.Message {
 			return &leapmuxv1.WorkflowAgentCompleteRequest{Auth: workflowAuth, Summary: "done"}
 		}},
+		{"GetTradingLabSettings", func() proto.Message { return &leapmuxv1.GetTradingLabSettingsRequest{} }},
+		{"SaveTradingLabSettings", func() proto.Message {
+			return &leapmuxv1.SaveTradingLabSettingsRequest{Settings: &leapmuxv1.TradingLabSettings{Mode: leapmuxv1.TradingLabMode_TRADING_LAB_MODE_PAPER}}
+		}},
+		{"VerifyTradingBroker", func() proto.Message { return &leapmuxv1.VerifyTradingBrokerRequest{} }},
+		{"InstallTradingSampleData", func() proto.Message { return &leapmuxv1.InstallTradingSampleDataRequest{} }},
+		{"GetTradingLabRun", func() proto.Message { return &leapmuxv1.GetTradingLabRunRequest{RunId: "run-1"} }},
+		{"DecideTradingCandidate", func() proto.Message {
+			return &leapmuxv1.DecideTradingCandidateRequest{CandidateId: "cand-1", Approve: true}
+		}},
+		{"GetTradingDashboard", func() proto.Message { return &leapmuxv1.GetTradingDashboardRequest{} }},
+		{"MarkTradingBooks", func() proto.Message { return &leapmuxv1.MarkTradingBooksRequest{} }},
+		{"PrepareTradingOrder", func() proto.Message {
+			return &leapmuxv1.PrepareTradingOrderRequest{CandidateId: "cand-1", Quantity: 1, LimitPrice: 1}
+		}},
+		{"ConfirmTradingOrder", func() proto.Message {
+			return &leapmuxv1.ConfirmTradingOrderRequest{OrderId: "order-1", Fingerprint: "f", Passphrase: "p"}
+		}},
+		{"CancelTradingOrder", func() proto.Message { return &leapmuxv1.CancelTradingOrderRequest{OrderId: "order-1"} }},
+		{"ReconcileTradingOrders", func() proto.Message { return &leapmuxv1.ReconcileTradingOrdersRequest{} }},
+		{"SaveTradingExecutionPolicy", func() proto.Message {
+			return &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: &leapmuxv1.TradingExecutionPolicy{PositionId: "pos-1"}, Passphrase: "p"}
+		}},
+		{"RevokeTradingExecutionPolicy", func() proto.Message {
+			return &leapmuxv1.RevokeTradingExecutionPolicyRequest{PolicyId: "policy-1"}
+		}},
 	} {
 		probes = append(probes, ownerGuardedProbe{p.method, p.method, p.req})
 	}

@@ -1,6 +1,7 @@
 package controlipc_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/util/userid"
+	"github.com/leapmux/leapmux/internal/worker/channel"
 	"github.com/leapmux/leapmux/internal/worker/controlipc"
 	"github.com/leapmux/leapmux/internal/worker/service"
 )
@@ -55,6 +57,9 @@ func TestRouterWorkflowConfinement(t *testing.T) {
 		"refuses the hub":                        {"hub.ListWorkers", ""},
 		"refuses a file read on the coordinator": {"worker.ReadFile", "lead"},
 		"refuses a terminal on another computer": {"worker.OpenTerminal", "mac"},
+		"refuses confirming a live order":        {"worker.ConfirmTradingOrder", "lead"},
+		"refuses preparing a live order":         {"worker.PrepareTradingOrder", "lead"},
+		"refuses reading the trading books":      {"worker.GetTradingDashboard", "lead"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -96,4 +101,26 @@ func TestEnvVarsCarryTheWorkflowCredential(t *testing.T) {
 	}
 	plain := strings.Join(controlipc.EnvVars("unix:/sock", "tok", controlipc.TokenInfo{UserID: userid.MustNew("u")}), "\n")
 	assert.NotContains(t, plain, "LEAPMUX_WORKFLOW_", "an ordinary agent carries no workflow credential")
+}
+
+// ctxDispatcher records whether a dispatched call carried the local-socket
+// mark.
+type ctxDispatcher struct{ marked bool }
+
+func (d *ctxDispatcher) DispatchWith(ctx context.Context, _ channel.Caller, _ *leapmuxv1.InnerRpcRequest, w channel.ResponseWriter) {
+	d.marked = channel.ViaAgentSocket(ctx)
+	_ = w.SendResponse(&leapmuxv1.InnerRpcResponse{})
+}
+
+// Every call through a local control socket is marked, so a handler that must
+// be a person's own act (confirming a live order) can refuse an agent even
+// though the agent holds the owner's unscoped grant.
+func TestRouterMarksLocalSocketCalls(t *testing.T) {
+	t.Parallel()
+	d := &ctxDispatcher{}
+	r := &controlipc.Router{WorkerID: "w", UserID: userid.MustNew("u"), LocalDispatcher: d}
+	_, err := r.CallInner(t.Context(), controlipc.TokenInfo{UserID: userid.MustNew("u"), WorkerID: "w"}, "worker.ConfirmTradingOrder", nil, "")
+	require.NoError(t, err)
+	assert.True(t, d.marked)
+	assert.False(t, channel.ViaAgentSocket(t.Context()), "an ordinary context is not marked")
 }

@@ -472,3 +472,12 @@ message SaveTradingExecutionPolicyResponse { TradingExecutionPolicy policy = 1; 
 
 message RevokeTradingExecutionPolicyRequest { string policy_id = 1; }
 message RevokeTradingExecutionPolicyResponse { TradingExecutionPolicy policy = 1; }
+
+// InstallTradingSampleData writes a synthetic market recording on this
+// worker and points the lab's replay at it, so a paper lab runs with no data
+// source of its own. Every value is invented and every file is named so.
+message InstallTradingSampleDataRequest {}
+message InstallTradingSampleDataResponse {
+  TradingLabSettings settings = 1;
+  repeated string files = 2;
+}

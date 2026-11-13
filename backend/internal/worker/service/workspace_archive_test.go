@@ -744,6 +744,13 @@ func TestWorkspaceArchive_RefusesEveryWriteRPCOnAnArchivedTab(t *testing.T) {
 	} {
 		unguarded[method] = "addresses the workflow library or a run, not one tab"
 	}
+	for _, method := range []string{
+		"SaveTradingLabSettings", "VerifyTradingBroker", "InstallTradingSampleData", "DecideTradingCandidate",
+		"MarkTradingBooks", "PrepareTradingOrder", "ConfirmTradingOrder", "CancelTradingOrder",
+		"ReconcileTradingOrders", "SaveTradingExecutionPolicy", "RevokeTradingExecutionPolicy",
+	} {
+		unguarded[method] = "addresses the trading lab, not one tab"
+	}
 	_, _, scopes := registerAllClassified(channel.NewDispatcher(), svc)
 	// These write scopes authorize the machine owner's external native chat,
 	// not a managed agent/tab. A native UUID has no workspace archive state.
