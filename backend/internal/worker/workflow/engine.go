@@ -116,6 +116,13 @@ type Engine struct {
 	namesMu sync.RWMutex
 	names   map[string]string
 
+	executorsMu sync.RWMutex
+	executors   map[string]Executor
+	// executing holds the executor tasks this process is running, so a pass
+	// that overlaps a slow executor does not start it twice.
+	executing sync.Map
+	execWG    sync.WaitGroup
+
 	newID    func() string
 	newToken func() string
 }
@@ -147,6 +154,7 @@ func New(cfg Config) *Engine {
 		interval:     interval,
 		wake:         make(chan struct{}, 1),
 		names:        map[string]string{},
+		executors:    map[string]Executor{},
 		newID:        id.Generate,
 		newToken:     mintToken,
 	}
@@ -315,9 +323,30 @@ func (rs *runState) detail(ctx context.Context, q querier) (*leapmuxv1.WorkflowR
 	if err != nil {
 		return nil, err
 	}
+	frozen, err := listFrozen(ctx, q, rs.run.GetId())
+	if err != nil {
+		return nil, err
+	}
+	labels, err := listInputLabels(ctx, q, rs.run.GetId())
+	if err != nil {
+		return nil, err
+	}
 	return &leapmuxv1.WorkflowRunDetail{
 		Run: rs.run, Roles: rs.roles, Agents: rs.slots, Tasks: rs.tasks, Approvals: rs.approvals, Events: events,
+		FrozenOutputs: frozen, InputLabels: labels,
 	}, nil
+}
+
+func (rs *runState) engineCoordinated() bool {
+	return rs.run.GetTemplate().GetCoordination() == leapmuxv1.WorkflowCoordination_WORKFLOW_COORDINATION_ENGINE
+}
+
+// isolation is a role's isolation; never nil.
+func (rs *runState) isolation(roleKey string) *leapmuxv1.WorkflowRoleIsolation {
+	if a := rs.role(roleKey); a != nil && a.GetRole().GetIsolation() != nil {
+		return a.GetRole().GetIsolation()
+	}
+	return &leapmuxv1.WorkflowRoleIsolation{}
 }
 
 // --- Status vocabulary ---
@@ -433,10 +462,18 @@ func (e *Engine) setTaskStatus(ctx context.Context, q querier, rs *runState, t *
 		return nil
 	}
 	moved := t.GetStatus() != status
+	if moved && status == leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_SUCCEEDED {
+		if err := e.freezeResult(ctx, q, rs, t); err != nil {
+			return err
+		}
+	}
 	t.Status, t.StatusDetail = status, detail
 	if taskFinal(status) {
 		t.CompletedAtMs = e.nowMs()
 		if err := e.releaseSlot(ctx, q, rs, t); err != nil {
+			return err
+		}
+		if err := e.closeFreshSlot(ctx, q, rs, t); err != nil {
 			return err
 		}
 	}
@@ -461,6 +498,21 @@ func (e *Engine) releaseSlot(ctx context.Context, q querier, rs *runState, t *le
 	}
 	slot.CurrentTaskId = ""
 	return e.saveSlot(ctx, q, slot)
+}
+
+// closeFreshSlot retires the agent of a finished task when its role takes a
+// fresh agent per task. The agent stays open as a tab for the user to read;
+// the engine never sends it anything again.
+func (e *Engine) closeFreshSlot(ctx context.Context, q querier, rs *runState, t *leapmuxv1.WorkflowTask) error {
+	slot := rs.slot(t.GetSlotId())
+	if slot == nil || rs.isLead(slot) || !rs.isolation(t.GetRoleKey()).GetFreshAgentPerTask() || !slotHolds(slot.GetStatus()) {
+		return nil
+	}
+	slot.Status, slot.StatusDetail, slot.CurrentTaskId = leapmuxv1.WorkflowAgentStatus_WORKFLOW_AGENT_STATUS_CLOSED, "Finished its task; each task gets a fresh agent", ""
+	if err := e.saveSlot(ctx, q, slot); err != nil {
+		return err
+	}
+	return e.dropOutbox(ctx, q, rs, slot.GetSlotId(), "agent retired")
 }
 
 func taskWord(s leapmuxv1.WorkflowTaskStatus) string {
@@ -611,17 +663,20 @@ func (e *Engine) Pass(ctx context.Context, reconcile bool) {
 		if reconcile && werr == nil {
 			e.reconcile(ctx, platform, ref, workers)
 		}
-		var toOpen []string
+		var toOpen, toExec []string
 		if err := e.mutate(ctx, func(q querier) error {
 			rs, err := loadRun(ctx, q, ref.userID, ref.runID)
 			if err != nil {
 				return err
 			}
-			toOpen, err = e.schedule(ctx, q, rs, workers, werr == nil)
+			toOpen, toExec, err = e.schedule(ctx, q, rs, workers, werr == nil)
 			return err
 		}); err != nil {
 			e.log.Warn("schedule workflow run", "run", ref.runID, "error", err)
 			continue
+		}
+		for _, taskID := range toExec {
+			e.startExecutor(ctx, ref, taskID)
 		}
 		for _, slotID := range toOpen {
 			e.openSlot(ctx, platform, ref, slotID)
@@ -630,10 +685,119 @@ func (e *Engine) Pass(ctx context.Context, reconcile bool) {
 	}
 }
 
+// WaitExecutors blocks until every executor this process started returns.
+func (e *Engine) WaitExecutors() { e.execWG.Wait() }
+
 // schedule assigns every ready task an agent, reserving new slots where a
 // role has room, and records each dispatch message. It returns the reserved
-// slots that still need opening.
-func (e *Engine) schedule(ctx context.Context, q querier, rs *runState, workers []WorkerCandidate, workersKnown bool) ([]string, error) {
+// slots that still need opening and the executor tasks this process must run.
+func (e *Engine) schedule(ctx context.Context, q querier, rs *runState, workers []WorkerCandidate, workersKnown bool) ([]string, []string, error) {
+	// Settle before scheduling too, so a run the user just unblocked
+	// dispatches in this pass rather than the next.
+	if err := e.settleEngineRun(ctx, q, rs); err != nil {
+		return nil, nil, err
+	}
+	toOpen, err := e.scheduleAgents(ctx, q, rs, workers, workersKnown)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := e.settleEngineRun(ctx, q, rs); err != nil {
+		return nil, nil, err
+	}
+	var toExec []string
+	if runDispatches(rs.run.GetStatus()) {
+		for _, t := range rs.tasks {
+			if t.GetStatus() != leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_RUNNING || stepOf(rs.run, t.GetStepKey()).GetExecutor() == "" {
+				continue
+			}
+			if _, busy := e.executing.Load(t.GetId()); !busy {
+				toExec = append(toExec, t.GetId())
+			}
+		}
+	}
+	return toOpen, toExec, nil
+}
+
+// settleEngineRun finishes an engine-coordinated run once every task is
+// final, blocks it while every open task is blocked, and unblocks it when the
+// user re-queues one. A Lead-coordinated run is the Lead's to finish.
+func (e *Engine) settleEngineRun(ctx context.Context, q querier, rs *runState) error {
+	status := rs.run.GetStatus()
+	if !rs.engineCoordinated() || runFinal(status) || status == leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_PAUSED ||
+		status == leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_PENDING {
+		return nil
+	}
+	// A task can progress unless it is final or blocked, or it waits on a
+	// dependency that cannot. The template's graph is acyclic.
+	var progresses func(t *leapmuxv1.WorkflowTask) bool
+	progresses = func(t *leapmuxv1.WorkflowTask) bool {
+		if taskFinal(t.GetStatus()) || t.GetStatus() == leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_BLOCKED {
+			return false
+		}
+		if t.GetStatus() != leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_QUEUED && t.GetStatus() != leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_PENDING {
+			return true
+		}
+		for _, id := range t.GetDependsOn() {
+			if dep := rs.task(id); dep != nil && dep.GetStatus() != leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_SUCCEEDED && !progresses(dep) {
+				return false
+			}
+		}
+		return true
+	}
+	var failed, blocked []string
+	open, waiting := 0, 0
+	for _, t := range rs.tasks {
+		switch {
+		case t.GetStatus() == leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_BLOCKED:
+			blocked = append(blocked, fmt.Sprintf("%q (%s)", t.GetTitle(), t.GetStatusDetail()))
+		case progresses(t):
+			open++
+		case !taskFinal(t.GetStatus()):
+			waiting++ // behind a blocked dependency
+		case t.GetStatus() != leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_SUCCEEDED:
+			failed = append(failed, fmt.Sprintf("%q %s", t.GetTitle(), taskWord(t.GetStatus())))
+		}
+	}
+	pendingApproval := false
+	for _, a := range rs.approvals {
+		if a.GetStatus() == leapmuxv1.WorkflowApprovalStatus_WORKFLOW_APPROVAL_STATUS_PENDING {
+			pendingApproval = true
+		}
+	}
+	switch {
+	case open == 0 && len(blocked) == 0 && len(failed) > 0:
+		rs.run.Summary = "Did not succeed: " + strings.Join(failed, "; ")
+		return e.setRunStatus(ctx, q, rs, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_FAILED, rs.run.GetSummary(), "engine")
+	case open == 0 && len(blocked) == 0:
+		rs.run.Summary = fmt.Sprintf("All %d tasks succeeded", len(rs.tasks))
+		if rs.run.GetTemplate().GetRequireFinalApproval() {
+			if _, err := e.requestApproval(ctx, q, rs, leapmuxv1.WorkflowApprovalKind_WORKFLOW_APPROVAL_KIND_RUN_COMPLETION, "",
+				"Complete the run?", rs.run.GetSummary(), "engine"); err != nil {
+				return err
+			}
+			if err := e.saveRun(ctx, q, rs); err != nil {
+				return err
+			}
+			return e.settleRunStatus(ctx, q, rs)
+		}
+		return e.setRunStatus(ctx, q, rs, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_COMPLETED, "", "engine")
+	case open == 0 && !pendingApproval:
+		detail := "Blocked: " + strings.Join(blocked, "; ") + "."
+		if waiting > 0 {
+			detail += fmt.Sprintf(" %d later task(s) wait on it.", waiting)
+		}
+		return e.setRunStatus(ctx, q, rs, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_BLOCKED,
+			detail+" Retry or reassign the task, or cancel the run.", "engine")
+	case status == leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_BLOCKED && open > 0:
+		if err := e.setRunStatus(ctx, q, rs, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_RUNNING, "", "engine"); err != nil {
+			return err
+		}
+		return e.settleRunStatus(ctx, q, rs)
+	}
+	return nil
+}
+
+func (e *Engine) scheduleAgents(ctx context.Context, q querier, rs *runState, workers []WorkerCandidate, workersKnown bool) ([]string, error) {
 	run := rs.run
 	if runDispatches(run.GetStatus()) {
 		maxParallel := int(max(run.GetTemplate().GetMaxParallelTasks(), 1))
@@ -714,6 +878,15 @@ func (e *Engine) scheduleTask(ctx context.Context, q querier, rs *runState, t *l
 	if *inFlight >= maxParallel {
 		return wait(fmt.Sprintf("Waiting for a free task slot (%d running, limit %d)", *inFlight, maxParallel))
 	}
+	if step := stepOf(rs.run, t.GetStepKey()); step.GetExecutor() != "" {
+		*inFlight++
+		t.Attempt++
+		if t.GetStartedAtMs() == 0 {
+			t.StartedAtMs = e.nowMs()
+		}
+		return e.setTaskStatus(ctx, q, rs, t, leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_RUNNING, "engine",
+			fmt.Sprintf("Running %s on the coordinator", step.GetExecutor()))
+	}
 	assignment := rs.role(t.GetRoleKey())
 	if assignment == nil {
 		return e.setTaskStatus(ctx, q, rs, t, leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_BLOCKED, "engine", "Its role no longer exists")
@@ -729,7 +902,12 @@ func (e *Engine) scheduleTask(ctx context.Context, q querier, rs *runState, t *l
 // pickSlot finds or reserves the agent for a task. It returns nil (having
 // recorded why) when the task must wait.
 func (e *Engine) pickSlot(ctx context.Context, q querier, rs *runState, t *leapmuxv1.WorkflowTask, assignment *leapmuxv1.WorkflowRoleAssignment, workers []WorkerCandidate, workersKnown bool, wait func(string) error) (*leapmuxv1.WorkflowRunAgent, error) {
+	fresh := rs.isolation(t.GetRoleKey()).GetFreshAgentPerTask()
 	free := func(s *leapmuxv1.WorkflowRunAgent) bool {
+		if fresh && s.GetSlotId() != t.GetSlotId() {
+			// Only this task's own agent may take it again (a retry).
+			return false
+		}
 		return s.GetRoleKey() == t.GetRoleKey() && slotTakesWork(s.GetStatus()) && !rs.isLead(s) &&
 			(s.GetCurrentTaskId() == "" || s.GetCurrentTaskId() == t.GetId()) &&
 			(t.GetWorkerId() == "" || s.GetWorkerId() == t.GetWorkerId())
@@ -808,6 +986,10 @@ func (e *Engine) dispatch(ctx context.Context, q querier, rs *runState, t *leapm
 	if err != nil {
 		return err
 	}
+	inputs, err := e.composeInputs(ctx, q, rs, t)
+	if err != nil {
+		return err
+	}
 	t.Attempt++
 	t.SlotId = slot.GetSlotId()
 	if t.GetStartedAtMs() == 0 {
@@ -817,7 +999,7 @@ func (e *Engine) dispatch(ctx context.Context, q querier, rs *runState, t *leapm
 	if err := e.saveSlot(ctx, q, slot); err != nil {
 		return err
 	}
-	if err := e.send(ctx, q, rs, slot.GetSlotId(), t.GetId(), taskDispatch(rs.run, assignment.GetRole(), t, !briefed)); err != nil {
+	if err := e.send(ctx, q, rs, slot.GetSlotId(), t.GetId(), taskDispatch(rs.run, assignment.GetRole(), t, stepOf(rs.run, t.GetStepKey()), inputs, !briefed)); err != nil {
 		return err
 	}
 	return e.setTaskStatus(ctx, q, rs, t, leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_DISPATCHING, "engine",
@@ -902,6 +1084,7 @@ func (e *Engine) openRequest(rs *runState, role *leapmuxv1.WorkflowRole, slot *l
 	if workingDir == "" {
 		workingDir = rs.run.GetWorkingDir()
 	}
+	isolation := role.GetIsolation()
 	req := &leapmuxv1.OpenAgentRequest{
 		WorkerId:      slot.GetWorkerId(),
 		WorkingDir:    workingDir,
@@ -910,7 +1093,9 @@ func (e *Engine) openRequest(rs *runState, role *leapmuxv1.WorkflowRole, slot *l
 		Title:         fmt.Sprintf("%s: %s", rs.run.GetName(), role.GetName()),
 		Workflow: &leapmuxv1.WorkflowBinding{
 			RunId: rs.run.GetId(), SlotId: slot.GetSlotId(), RoleKey: role.GetKey(),
-			CoordinatorWorkerId: e.workerID, Token: token, Confine: rs.run.GetTemplate().GetConfineAgents(),
+			CoordinatorWorkerId: e.workerID, Token: token,
+			Confine:    rs.run.GetTemplate().GetConfineAgents() || isolation.GetConfine(),
+			PrivateDir: isolation.GetPrivateWorkingDir(),
 		},
 	}
 	if role.GetGitIsolation() == leapmuxv1.WorkflowGitIsolation_WORKFLOW_GIT_ISOLATION_WORKTREE {

@@ -190,6 +190,9 @@ message WorkflowBinding {
   // The run's template set confine_agents: the agent's control socket then
   // reaches only the workflow participant methods on the coordinator.
   bool confine = 6;
+  // Start the agent in an empty private directory the hosting worker creates
+  // for this slot instead of working_dir (a role's private_working_dir).
+  bool private_dir = 7;
 }
 
 message OpenAgentResponse {

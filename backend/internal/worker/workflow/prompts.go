@@ -147,22 +147,39 @@ func rolesOf(assignments []*leapmuxv1.WorkflowRoleAssignment) []*leapmuxv1.Workf
 
 // taskDispatch is the message that hands a task to its agent. The first
 // message a slot receives also carries the role briefing.
-func taskDispatch(run *leapmuxv1.WorkflowRun, role *leapmuxv1.WorkflowRole, task *leapmuxv1.WorkflowTask, briefing bool) string {
+func taskDispatch(run *leapmuxv1.WorkflowRun, role *leapmuxv1.WorkflowRole, task *leapmuxv1.WorkflowTask, step *leapmuxv1.WorkflowStep, inputs []*leapmuxv1.WorkflowTaskInput, briefing bool) string {
 	var b strings.Builder
+	isolation := role.GetIsolation()
+	engine := run.GetTemplate().GetCoordination() == leapmuxv1.WorkflowCoordination_WORKFLOW_COORDINATION_ENGINE
 	if briefing {
-		fmt.Fprintf(&b, "%s You are the **%s** in the workflow run %q, coordinated by a Lead agent.\n\n", notePrefix, role.GetName(), run.GetName())
+		switch {
+		case isolation.GetBlind():
+			// Nothing about the run: its name, objective and team could
+			// carry what this agent must not know.
+			fmt.Fprintf(&b, "%s You are the **%s**. You work alone: no other participant reads this conversation, and you cannot read theirs.\n\n", notePrefix, role.GetName())
+		case engine:
+			fmt.Fprintf(&b, "%s You are the **%s** in the workflow run %q, coordinated by the LeapMux workflow engine.\n\n", notePrefix, role.GetName(), run.GetName())
+		default:
+			fmt.Fprintf(&b, "%s You are the **%s** in the workflow run %q, coordinated by a Lead agent.\n\n", notePrefix, role.GetName(), run.GetName())
+		}
 		if instructions := strings.TrimSpace(role.GetAgent().GetInstructions()); instructions != "" {
 			b.WriteString("## Your role\n\n")
 			b.WriteString(instructions)
 			b.WriteString("\n\n")
 		}
-		b.WriteString("## Objective of the run\n\n")
-		b.WriteString(strings.TrimSpace(run.GetObjective()))
-		b.WriteString("\n\n")
-		if ops := run.GetTemplate().GetSensitiveOperations(); len(ops) > 0 {
-			fmt.Fprintf(&b, "Never do any of these without an approved request from the Lead: %s.\n\n", strings.Join(ops, "; "))
+		if !isolation.GetBlind() {
+			b.WriteString("## Objective of the run\n\n")
+			b.WriteString(strings.TrimSpace(run.GetObjective()))
+			b.WriteString("\n\n")
 		}
-		if !run.GetTemplate().GetConfineAgents() {
+		if ops := run.GetTemplate().GetSensitiveOperations(); len(ops) > 0 {
+			who := "the Lead"
+			if engine {
+				who = "the user"
+			}
+			fmt.Fprintf(&b, "Never do any of these without an approved request from %s: %s.\n\n", who, strings.Join(ops, "; "))
+		}
+		if !run.GetTemplate().GetConfineAgents() && !isolation.GetConfine() {
 			b.WriteString("You may open helper agents with `leapmux control tab open --type agent ...` when that helps; report the task's result yourself.\n\n")
 		}
 	} else {
@@ -180,8 +197,22 @@ func taskDispatch(run *leapmuxv1.WorkflowRun, role *leapmuxv1.WorkflowRole, task
 		b.WriteString(feedback)
 		b.WriteString("\n\n")
 	}
+	b.WriteString(inputsText(inputs))
+	schema := strings.TrimSpace(step.GetOutputSchema())
+	if schema != "" {
+		b.WriteString("## Required output\n\nWrite your result as one JSON document that satisfies this JSON Schema, save it to a file, and pass it with `--output-file`. The engine validates it and refuses a report that does not match")
+		if step.GetFreezeOutput() {
+			b.WriteString("; once accepted it is frozen with its SHA-256 and can never be changed")
+		}
+		b.WriteString(".\n\n```json\n")
+		b.WriteString(schema)
+		b.WriteString("\n```\n\n")
+	}
 	b.WriteString("When you finish, report a structured result. Do not just reply in chat.\n\n```\n")
 	fmt.Fprintf(&b, "leapmux control workflow report --task %s --outcome completed|failed|blocked --summary <text>", task.GetId())
+	if schema != "" {
+		b.WriteString(" --output-file <path.json>")
+	}
 	outs := role.GetRequiredOutputs()
 	for _, o := range outs {
 		switch o {

@@ -41,8 +41,7 @@ func (e *Engine) CreateRun(ctx context.Context, userID string, req *leapmuxv1.Cr
 	if strings.TrimSpace(req.GetWorkspaceId()) == "" {
 		return nil, invalidf("a run needs a workspace for its agents' tabs")
 	}
-	lead := leadRole(roles)
-	if err := e.leadMayRunHere(lead.GetAgent().GetPlacement()); err != nil {
+	if err := e.checkExecutors(template); err != nil {
 		return nil, err
 	}
 	name := strings.TrimSpace(req.GetName())
@@ -50,6 +49,13 @@ func (e *Engine) CreateRun(ctx context.Context, userID string, req *leapmuxv1.Cr
 		name = template.GetName()
 	}
 	if name, err = checkName("a run", name); err != nil {
+		return nil, err
+	}
+	if template.GetCoordination() == leapmuxv1.WorkflowCoordination_WORKFLOW_COORDINATION_ENGINE {
+		return e.createEngineRun(ctx, userID, req, template, roles, name, objective, workingDir)
+	}
+	lead := leadRole(roles)
+	if err := e.leadMayRunHere(lead.GetAgent().GetPlacement()); err != nil {
 		return nil, err
 	}
 
@@ -100,6 +106,55 @@ func (e *Engine) CreateRun(ctx context.Context, userID string, req *leapmuxv1.Cr
 		},
 		LeadRole: lead,
 	}, nil
+}
+
+// createEngineRun records an engine-coordinated run and starts it at once:
+// there is no Lead to open and attach, so every step is planned as a queued
+// task and the next pass begins the ones whose dependencies are met.
+func (e *Engine) createEngineRun(ctx context.Context, userID string, req *leapmuxv1.CreateWorkflowRunRequest, template *leapmuxv1.WorkflowTemplate, roles []*leapmuxv1.WorkflowRole, name, objective, workingDir string) (*leapmuxv1.CreateWorkflowRunResponse, error) {
+	now := e.nowMs()
+	run := &leapmuxv1.WorkflowRun{
+		Id: e.newID(), Name: name, TemplateId: template.GetId(), TemplateVersion: template.GetVersion(), Template: template,
+		Status: leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_PENDING, Objective: objective, WorkingDir: workingDir,
+		BaseBranch: strings.TrimSpace(req.GetBaseBranch()), WorkspaceId: req.GetWorkspaceId(), CoordinatorWorkerId: e.workerID,
+		CreatedAtMs: now, StartedAtMs: now, UpdatedAtMs: now,
+	}
+	err := e.mutate(ctx, func(q querier) error {
+		if err := insertRun(ctx, q, userID, run); err != nil {
+			return err
+		}
+		rs := &runState{userID: userID, run: run}
+		for _, role := range roles {
+			workerID := ""
+			if p := role.GetAgent().GetPlacement(); p.GetStrategy() == leapmuxv1.WorkerPlacementStrategy_WORKER_PLACEMENT_STRATEGY_SPECIFIC_WORKER {
+				workerID = p.GetWorkerId()
+			}
+			a := &leapmuxv1.WorkflowRoleAssignment{RoleKey: role.GetKey(), Role: role, WorkerId: workerID}
+			if err := putRole(ctx, q, run.GetId(), a); err != nil {
+				return err
+			}
+			rs.roles = append(rs.roles, a)
+		}
+		if err := e.event(ctx, q, rs, "", leapmuxv1.WorkflowEventKind_WORKFLOW_EVENT_KIND_RUN, "user",
+			"Run created from template %q (version %d), coordinated by the engine", template.GetName(), template.GetVersion()); err != nil {
+			return err
+		}
+		for _, a := range rs.roles {
+			if err := e.event(ctx, q, rs, "", leapmuxv1.WorkflowEventKind_WORKFLOW_EVENT_KIND_RUN, "engine",
+				"Role %s: %s, %s", a.GetRole().GetName(), roleSummary(a.GetRole()), placementSummary(a, e.workerName)); err != nil {
+				return err
+			}
+		}
+		if err := e.planSteps(ctx, q, rs); err != nil {
+			return err
+		}
+		return e.setRunStatus(ctx, q, rs, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_RUNNING, "", "user")
+	})
+	if err != nil {
+		return nil, err
+	}
+	e.Wake()
+	return &leapmuxv1.CreateWorkflowRunResponse{Run: run}, nil
 }
 
 // leadMayRunHere refuses a Lead whose placement excludes this computer. A run
@@ -304,7 +359,7 @@ func (e *Engine) ControlRun(ctx context.Context, userID, runID string, action le
 			if status != leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_PAUSED && status != leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_BLOCKED {
 				return conflictf("only a paused or blocked run can be resumed")
 			}
-			if lead := rs.slot(rs.run.GetLeadSlotId()); lead == nil || !slotHolds(lead.GetStatus()) {
+			if lead := rs.slot(rs.run.GetLeadSlotId()); !rs.engineCoordinated() && (lead == nil || !slotHolds(lead.GetStatus())) {
 				return conflictf("the Lead agent is gone, so the run cannot continue; cancel it")
 			}
 			if err := e.setRunStatus(ctx, q, rs, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_RUNNING, "", "user"); err != nil {
@@ -335,6 +390,13 @@ func (e *Engine) ControlRun(ctx context.Context, userID, runID string, action le
 		case leapmuxv1.WorkflowRunAction_WORKFLOW_RUN_ACTION_DELETE:
 			if !runFinal(status) && status != leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_PENDING {
 				return conflictf("cancel the run before deleting it")
+			}
+			frozen, err := runHasFrozen(ctx, q, rs.run.GetId())
+			if err != nil {
+				return err
+			}
+			if frozen {
+				return conflictf("the run holds frozen outputs, which are kept as its permanent record")
 			}
 			return deleteRun(ctx, q, rs.run.GetId())
 		default:
@@ -604,6 +666,10 @@ func (e *Engine) applyDecision(ctx context.Context, q querier, rs *runState, a *
 		if approved {
 			return e.setRunStatus(ctx, q, rs, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_COMPLETED, "Approved by the user", "user")
 		}
+		if rs.engineCoordinated() {
+			// No Lead will try again, so a refusal ends the run.
+			return e.setRunStatus(ctx, q, rs, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_FAILED, "The user did not accept the run's completion", "user")
+		}
 		rs.run.Summary = ""
 		return e.setRunStatus(ctx, q, rs, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_RUNNING, "", "user")
 	case leapmuxv1.WorkflowApprovalKind_WORKFLOW_APPROVAL_KIND_OPERATION:
@@ -694,6 +760,21 @@ func (e *Engine) AgentContext(ctx context.Context, userID string, auth *leapmuxv
 				}
 			}
 			resp.Tasks, resp.Approvals = mine, nil
+			if cur := rs.task(slot.GetCurrentTaskId()); cur != nil {
+				// Labels were recorded at dispatch, so this reads the same
+				// inputs the agent was sent.
+				if resp.Inputs, err = e.composeInputs(ctx, q, rs, cur); err != nil {
+					return err
+				}
+			}
+		}
+		if rs.isolation(slot.GetRoleKey()).GetBlind() {
+			// A blind agent learns nothing about the run beyond its own role
+			// and tasks: the template would name the other roles and their
+			// instructions, and the objective may state a hypothesis.
+			resp.Run = &leapmuxv1.WorkflowRun{Id: rs.run.GetId(), Status: rs.run.GetStatus(), CoordinatorWorkerId: rs.run.GetCoordinatorWorkerId()}
+			resp.Roles = []*leapmuxv1.WorkflowRoleAssignment{rs.role(slot.GetRoleKey())}
+			resp.Agents = []*leapmuxv1.WorkflowRunAgent{slot}
 		}
 		return nil
 	})
@@ -893,6 +974,9 @@ func (e *Engine) Report(ctx context.Context, userID string, req *leapmuxv1.Workf
 		if err := validateResult(assignment.GetRole(), result); err != nil {
 			return err
 		}
+		if err := validateStructured(stepOf(rs.run, t.GetStepKey()), result); err != nil {
+			return err
+		}
 		result.ReportedBySlotId, result.ReportedAtMs = slot.GetSlotId(), e.nowMs()
 		t.Result = result
 		if err := e.event(ctx, q, rs, t.GetId(), leapmuxv1.WorkflowEventKind_WORKFLOW_EVENT_KIND_RESULT, slot.GetRoleKey(),
@@ -920,6 +1004,36 @@ func (e *Engine) Report(ctx context.Context, userID string, req *leapmuxv1.Workf
 		return e.retryOrEscalate(ctx, q, rs, t, "engine", result.GetSummary())
 	})
 	return out, err
+}
+
+// validateStructured checks a report's structured output against its step:
+// a completed report of a step with a schema must carry an output that
+// satisfies it. The output is stored in canonical form with its hash, so the
+// hash the agent is told is the one that is later frozen.
+func validateStructured(step *leapmuxv1.WorkflowStep, r *leapmuxv1.WorkflowTaskResult) error {
+	r.OutputSha256 = ""
+	if strings.TrimSpace(r.GetStructuredOutput()) == "" {
+		r.StructuredOutput = ""
+		if step.GetOutputSchema() != "" && r.GetOutcome() == leapmuxv1.WorkflowTaskOutcome_WORKFLOW_TASK_OUTCOME_COMPLETED {
+			return invalidf("a completed report of step %q must include its structured output (--output-file)", step.GetKey())
+		}
+		return nil
+	}
+	if len(r.GetStructuredOutput()) > maxInputBytes {
+		return invalidf("the structured output is longer than %d bytes", maxInputBytes)
+	}
+	schema := step.GetOutputSchema()
+	if r.GetOutcome() != leapmuxv1.WorkflowTaskOutcome_WORKFLOW_TASK_OUTCOME_COMPLETED {
+		// A failed or blocked report may attach partial output; only a
+		// completed one must satisfy the schema.
+		schema = ""
+	}
+	canonical, sum, err := ValidateOutput(schema, r.GetStructuredOutput())
+	if err != nil {
+		return err
+	}
+	r.StructuredOutput, r.OutputSha256 = canonical, sum
+	return nil
 }
 
 func firstLine(s string) string {

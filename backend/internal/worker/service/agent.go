@@ -125,7 +125,16 @@ func registerAgentHandlers(d registrar, svc *Service) {
 			agentID := id.Generate()
 			agent.TraceStartupPhase(agentID, "handler_begin")
 
-			workingDir, err := normalizeWorkingDir(r.GetWorkingDir(), svc.HomeDir, svc.HomeDir)
+			rawWorkingDir := r.GetWorkingDir()
+			if b := r.GetWorkflow(); b.GetPrivateDir() {
+				// The role keeps its agents out of every shared directory, so
+				// the requested one is replaced, never used.
+				if rawWorkingDir, err = svc.workflowPrivateDir(b); err != nil {
+					sendInternalError(sender, "create the workflow agent's private directory: "+err.Error())
+					return
+				}
+			}
+			workingDir, err := normalizeWorkingDir(rawWorkingDir, svc.HomeDir, svc.HomeDir)
 			if err != nil {
 				sendInvalidArgument(sender, err.Error())
 				return

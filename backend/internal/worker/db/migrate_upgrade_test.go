@@ -48,6 +48,20 @@ func TestMigrateUpgradesADatabaseThatRecordedOnlyTheInitialMigration(t *testing.
 	require.NoError(t, workerdb.Migrate(ctx, conn), "a second start finds nothing to do")
 }
 
+// latestMigration is the highest version among the embedded migration files.
+func latestMigration(t *testing.T) int64 {
+	t.Helper()
+	entries, err := os.ReadDir("migrations")
+	require.NoError(t, err)
+	var latest int64
+	for _, e := range entries {
+		if v, err := goose.NumericComponent(e.Name()); err == nil && v > latest {
+			latest = v
+		}
+	}
+	return latest
+}
+
 // An older migration manifest must preserve existing chats and new workflow rows.
 func TestWorkflowReleaseOldMigratorAgainstLatestSchema(t *testing.T) {
 	ctx := t.Context()
@@ -68,7 +82,7 @@ func TestWorkflowReleaseOldMigratorAgainstLatestSchema(t *testing.T) {
 	require.NoError(t, err)
 	var before int64
 	require.NoError(t, conn.QueryRowContext(ctx, `SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&before))
-	require.EqualValues(t, 3, before)
+	require.EqualValues(t, latestMigration(t), before)
 	// A fresh provider avoids reusing the older provider's cached state. This
 	// matches an old executable opening an already upgraded database.
 	oldAgain, createErr := goose.NewProvider(goose.DialectSQLite3, conn, oldFS)

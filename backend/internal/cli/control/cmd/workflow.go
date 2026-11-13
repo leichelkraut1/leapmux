@@ -202,7 +202,7 @@ func RunWorkflowSend(rawCtx any, args []string) error {
 
 // RunWorkflowReport files a task's structured result.
 func RunWorkflowReport(rawCtx any, args []string) error {
-	var taskID, outcome, summary, branch, commit, testSummary string
+	var taskID, outcome, summary, branch, commit, testSummary, output, outputFile string
 	var testsPassed, testsFailed bool
 	var artifacts, evidence rawList
 	return runWorkflow(rawCtx, args, func(fs *flag.FlagSet) {
@@ -216,6 +216,8 @@ func RunWorkflowReport(rawCtx any, args []string) error {
 		fs.StringVar(&testSummary, "test-summary", "", "test command and its outcome")
 		fs.Var(&artifacts, "artifact", "path or URL of an artifact (repeatable)")
 		fs.Var(&evidence, "evidence", "label=value evidence (repeatable)")
+		fs.StringVar(&output, "output", "", "structured output as JSON (\"-\" reads stdin)")
+		fs.StringVar(&outputFile, "output-file", "", "file holding the structured output as JSON")
 	}, func(auth *leapmuxv1.WorkflowAgentAuth) (string, proto.Message, proto.Message, error) {
 		o, err := parseOutcome(outcome)
 		if err != nil {
@@ -231,9 +233,14 @@ func RunWorkflowReport(rawCtx any, args []string) error {
 		if testsPassed && testsFailed {
 			return "", nil, nil, invalidRequest("--tests-passed and --tests-failed exclude each other")
 		}
+		structured, err := readStructuredOutput(output, outputFile)
+		if err != nil {
+			return "", nil, nil, err
+		}
 		result := &leapmuxv1.WorkflowTaskResult{
 			Outcome: o, Summary: text, Artifacts: artifacts, GitBranch: branch, GitCommit: commit,
 			TestSummary: testSummary, TestsRan: testsPassed || testsFailed, TestsPassed: testsPassed,
+			StructuredOutput: structured,
 		}
 		for _, e := range evidence {
 			label, value, ok := strings.Cut(e, "=")
@@ -244,6 +251,23 @@ func RunWorkflowReport(rawCtx any, args []string) error {
 		}
 		return "WorkflowAgentReport", &leapmuxv1.WorkflowAgentReportRequest{Auth: auth, TaskId: taskID, Result: result}, &leapmuxv1.WorkflowAgentReportResponse{}, nil
 	})
+}
+
+// readStructuredOutput takes the report's JSON from --output or --output-file.
+// The coordinator validates it against the step's schema; this only reads it.
+func readStructuredOutput(inline, file string) (string, error) {
+	switch {
+	case inline != "" && file != "":
+		return "", invalidRequest("--output and --output-file exclude each other")
+	case file != "":
+		buf, err := os.ReadFile(file)
+		if err != nil {
+			return "", control.EmitErrorWith("output_file_read_failed", err)
+		}
+		return string(buf), nil
+	default:
+		return readValue(inline)
+	}
 }
 
 // RunWorkflowProgress records a progress note on a task.

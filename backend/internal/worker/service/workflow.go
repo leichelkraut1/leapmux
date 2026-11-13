@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -225,6 +226,34 @@ func (svc *Service) workflowBindingFor(agentID string) (*leapmuxv1.WorkflowBindi
 		return nil, nil
 	}
 	return svc.Workflows.Store().Binding(bgCtx(), agentID)
+}
+
+// workflowPrivateDir creates the empty directory a private_dir binding starts
+// its agent in: one per slot, under this worker's data directory, readable by
+// its owner only. Re-opening the same slot (a resume) finds the same one.
+func (svc *Service) workflowPrivateDir(b *leapmuxv1.WorkflowBinding) (string, error) {
+	run, slot := safePathSegment(b.GetRunId()), safePathSegment(b.GetSlotId())
+	if run == "" || slot == "" {
+		return "", errors.New("the binding names no run or slot")
+	}
+	dir, err := filepath.Abs(filepath.Join(svc.DataDir, "workflow-sandboxes", run, slot))
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// safePathSegment keeps an id to the characters a path segment cannot misread.
+func safePathSegment(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return -1
+	}, s)
 }
 
 // workerCapabilities is what this computer offers workflow placement: its OS

@@ -52,6 +52,8 @@ var knownOutputs = []string{OutputSummary, OutputCommit, OutputTests, OutputArti
 
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
 
+var executorPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$`)
+
 // ErrInvalid marks a definition or request the caller must correct.
 var ErrInvalid = errors.New("invalid workflow definition")
 
@@ -216,6 +218,14 @@ func NormalizeTemplate(t *leapmuxv1.WorkflowTemplate) error {
 		t.MaxAgents = defaultMaxAgents
 	}
 	t.SensitiveOperations = normalizeList(t.GetSensitiveOperations(), false)
+	switch t.GetCoordination() {
+	case leapmuxv1.WorkflowCoordination_WORKFLOW_COORDINATION_UNSPECIFIED:
+		t.Coordination = leapmuxv1.WorkflowCoordination_WORKFLOW_COORDINATION_LEAD
+	case leapmuxv1.WorkflowCoordination_WORKFLOW_COORDINATION_LEAD, leapmuxv1.WorkflowCoordination_WORKFLOW_COORDINATION_ENGINE:
+	default:
+		return invalidf("template %q names unknown coordination %v", name, t.GetCoordination())
+	}
+	engineRun := t.GetCoordination() == leapmuxv1.WorkflowCoordination_WORKFLOW_COORDINATION_ENGINE
 
 	roles := map[string]*leapmuxv1.WorkflowRole{}
 	leads := 0
@@ -259,8 +269,25 @@ func NormalizeTemplate(t *leapmuxv1.WorkflowTemplate) error {
 		if err := checkText("role instructions", r.GetAgent().GetInstructions()); err != nil {
 			return err
 		}
+		if r.GetIsolation() == nil {
+			r.Isolation = &leapmuxv1.WorkflowRoleIsolation{}
+		}
+		if r.GetIsolation().GetBlind() {
+			// A blind agent with the owner's whole socket could read every
+			// other result through GetWorkflowRun, so blind implies confined.
+			r.Isolation.Confine = true
+		}
+		if r.GetIsolation().GetPrivateWorkingDir() && r.GetGitIsolation() == leapmuxv1.WorkflowGitIsolation_WORKFLOW_GIT_ISOLATION_WORKTREE {
+			return invalidf("role %q cannot work both in a private directory and in a worktree", r.GetKey())
+		}
+		if engineRun && r.GetReviewRequired() {
+			return invalidf("role %q asks for a Lead's review, but an engine-coordinated template has no Lead; use an approval gate", r.GetKey())
+		}
 	}
-	if leads != 1 {
+	switch {
+	case engineRun && leads != 0:
+		return invalidf("template %q is coordinated by the engine, so it cannot have a Lead role", name)
+	case !engineRun && leads != 1:
 		return invalidf("template %q needs exactly one Lead role, has %d", name, leads)
 	}
 
@@ -282,12 +309,23 @@ func NormalizeTemplate(t *leapmuxv1.WorkflowTemplate) error {
 			return err
 		}
 		s.Title = title
-		role := roles[s.GetRoleKey()]
-		if role == nil {
-			return invalidf("step %q names unknown role %q", s.GetKey(), s.GetRoleKey())
-		}
-		if role.GetIsLead() {
-			return invalidf("step %q is assigned to the Lead, which coordinates rather than takes tasks", s.GetKey())
+		s.Executor = strings.TrimSpace(s.GetExecutor())
+		s.RoleKey = strings.TrimSpace(s.GetRoleKey())
+		if s.GetExecutor() != "" {
+			if !executorPattern.MatchString(s.GetExecutor()) {
+				return invalidf("step %q names executor %q, which is not a lowercase dotted name", s.GetKey(), s.GetExecutor())
+			}
+			if s.GetRoleKey() != "" {
+				return invalidf("step %q has an executor, so it takes no role", s.GetKey())
+			}
+		} else {
+			role := roles[s.GetRoleKey()]
+			if role == nil {
+				return invalidf("step %q names unknown role %q", s.GetKey(), s.GetRoleKey())
+			}
+			if role.GetIsLead() {
+				return invalidf("step %q is assigned to the Lead, which coordinates rather than takes tasks", s.GetKey())
+			}
 		}
 		if err := checkText("step instructions", s.GetInstructions()); err != nil {
 			return err
@@ -296,11 +334,47 @@ func NormalizeTemplate(t *leapmuxv1.WorkflowTemplate) error {
 			s.Approval = leapmuxv1.WorkflowApprovalGate_WORKFLOW_APPROVAL_GATE_NONE
 		}
 		s.DependsOn = normalizeList(s.GetDependsOn(), false)
+		if engineRun {
+			s.AutoStart = true
+		}
+		if strings.TrimSpace(s.GetOutputSchema()) != "" {
+			if err := checkText("an output schema", s.GetOutputSchema()); err != nil {
+				return err
+			}
+			if _, err := CompileSchema(s.GetOutputSchema()); err != nil {
+				return fmt.Errorf("step %q: %w", s.GetKey(), err)
+			}
+		} else {
+			s.OutputSchema = ""
+		}
+		if s.GetFreezeOutput() && s.GetOutputSchema() == "" && s.GetExecutor() == "" {
+			return invalidf("step %q freezes its output, so it needs an output schema", s.GetKey())
+		}
+		s.Params = normalizeOptions(s.GetParams())
 	}
 	for _, s := range t.GetSteps() {
 		for _, dep := range s.GetDependsOn() {
 			if steps[dep] == nil {
 				return invalidf("step %q depends on unknown step %q", s.GetKey(), dep)
+			}
+		}
+		seen := map[string]bool{}
+		for _, in := range s.GetInputs() {
+			if in == nil {
+				return invalidf("step %q has an empty input", s.GetKey())
+			}
+			in.StepKey = strings.TrimSpace(in.GetStepKey())
+			in.Label = strings.TrimSpace(in.GetLabel())
+			in.RedactFields = normalizeList(in.GetRedactFields(), false)
+			if seen[in.GetStepKey()] {
+				return invalidf("step %q takes step %q as an input twice", s.GetKey(), in.GetStepKey())
+			}
+			seen[in.GetStepKey()] = true
+			if !slices.Contains(s.GetDependsOn(), in.GetStepKey()) {
+				return invalidf("step %q takes %q as an input, so it must depend on it", s.GetKey(), in.GetStepKey())
+			}
+			if src := steps[in.GetStepKey()]; src == nil || !src.GetFreezeOutput() {
+				return invalidf("step %q takes %q as an input, which does not freeze its output", s.GetKey(), in.GetStepKey())
 			}
 		}
 	}

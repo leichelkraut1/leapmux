@@ -112,7 +112,8 @@ func TestNativeConversationTabsUpgradePreservesPrivateRows(t *testing.T) {
 	require.NoError(t, workerdb.Migrate(ctx, conn), "restart is idempotent")
 	provider, err := goose.NewProvider(goose.DialectSQLite3, conn, os.DirFS("migrations"))
 	require.NoError(t, err)
-	_, err = provider.Down(ctx)
+	// Down to before 00003: the later migrations roll back, then 00003 refuses.
+	_, err = provider.DownTo(ctx, 2)
 	require.Error(t, err, "downgrading must refuse rather than discard native links")
 	require.NoError(t, conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM worker_tab_payloads`).Scan(&n))
 	assert.Equal(t, 3, n, "failed downgrade rolled all rows back")

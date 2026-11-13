@@ -149,6 +149,17 @@ enum WorkflowExportFormat {
   WORKFLOW_EXPORT_FORMAT_JSON = 2;
 }
 
+// Who moves a run forward.
+enum WorkflowCoordination {
+  WORKFLOW_COORDINATION_UNSPECIFIED = 0;
+  // A Lead agent plans, releases and reviews tasks.
+  WORKFLOW_COORDINATION_LEAD = 1;
+  // No Lead: every step is released at launch and starts when its
+  // dependencies succeed, and the run finishes when every task is final. No
+  // participant sees every result, which is what a blind experiment needs.
+  WORKFLOW_COORDINATION_ENGINE = 2;
+}
+
 // --- Definitions ---
 
 message WorkerPlacement {
@@ -197,6 +208,41 @@ message WorkflowRole {
   repeated string required_outputs = 7;
   // A result waits for the Lead's review before the task succeeds.
   bool review_required = 8;
+  WorkflowRoleIsolation isolation = 9;
+}
+
+// How far a role's agents are kept apart from the rest of the run.
+message WorkflowRoleIsolation {
+  // Never reuse an agent for a second task: each task gets a new session,
+  // which is closed when the task finishes. A retry of the same task keeps
+  // its agent.
+  bool fresh_agent_per_task = 1;
+  // The hosting worker creates an empty directory (mode 0700) for each agent
+  // under its own data directory and starts the agent there, instead of the
+  // run's project directory or a worktree.
+  bool private_working_dir = 2;
+  // Confine this role's control socket to its run's participant methods,
+  // whatever the template's confine_agents says.
+  bool confine = 3;
+  // The agent learns only its role, its task and the step inputs declared
+  // for it: never the run's name or objective, the template, or the other
+  // roles. Its `workflow context` is redacted the same way.
+  bool blind = 4;
+}
+
+// One earlier step's frozen output handed to a step's agent or executor.
+message WorkflowStepInput {
+  // A step this step depends on, whose output is frozen.
+  string step_key = 1;
+  // The heading the input appears under. Empty uses the step's title. Ignored
+  // when anonymize is set.
+  string label = 2;
+  // Relabel the anonymized inputs of the step "Submission A", "Submission B",
+  // ... in an order seeded by the run and step, so the reader cannot tell
+  // which step produced which. The mapping is recorded for the user.
+  bool anonymize = 3;
+  // Object keys removed from the input at any depth before it is handed on.
+  repeated string redact_fields = 4;
 }
 
 message WorkflowStep {
@@ -208,8 +254,22 @@ message WorkflowStep {
   WorkflowApprovalGate approval = 6;
   // 0 uses the template's default_max_attempts.
   uint32 max_attempts = 7;
-  // Released at launch rather than waiting for the Lead.
+  // Released at launch rather than waiting for the Lead. Every step of an
+  // engine-coordinated template starts this way.
   bool auto_start = 8;
+  // Frozen outputs of earlier steps, attached to the task's dispatch.
+  repeated WorkflowStepInput inputs = 9;
+  // A JSON Schema (draft 2020-12) a completed report's structured_output
+  // must satisfy. Empty accepts a report without one.
+  string output_schema = 10;
+  // Store the accepted structured output immutably, with its SHA-256, so a
+  // later step and the user read exactly what was submitted.
+  bool freeze_output = 11;
+  // Run the step in-process on the coordinator through the named registered
+  // executor instead of an agent. role_key is then empty.
+  string executor = 12;
+  // Parameters for the executor.
+  map<string, string> params = 13;
 }
 
 message WorkflowTemplate {
@@ -238,6 +298,8 @@ message WorkflowTemplate {
   // agents, read other tabs and drive other workflows, as any of the owner's
   // agents can.
   bool confine_agents = 15;
+  // 0 means LEAD.
+  WorkflowCoordination coordination = 16;
 }
 
 // WorkflowTemplateBundle is the import/export document: a template and the
@@ -289,6 +351,44 @@ message WorkflowTaskResult {
   repeated WorkflowEvidence evidence = 9;
   string reported_by_slot_id = 10;
   int64 reported_at_ms = 11;
+  // A JSON document, validated against its step's output_schema.
+  string structured_output = 12;
+  // SHA-256 (hex) of structured_output in canonical form. Set by the engine.
+  string output_sha256 = 13;
+}
+
+// An accepted structured output, stored once and never changed.
+message WorkflowFrozenOutput {
+  string run_id = 1;
+  string task_id = 2;
+  string step_key = 3;
+  // Empty for an executor step.
+  string role_key = 4;
+  string executor = 5;
+  // SHA-256 (hex) of canonical_json.
+  string sha256 = 6;
+  // Sorted keys, no insignificant whitespace, numbers as written.
+  string canonical_json = 7;
+  uint32 attempt = 8;
+  string slot_id = 9;
+  int64 frozen_at_ms = 10;
+}
+
+// The label an anonymized input was shown under, revealed to the user only.
+message WorkflowInputLabel {
+  // The step that received the input.
+  string step_key = 1;
+  string label = 2;
+  string source_step_key = 3;
+  string source_task_id = 4;
+  string sha256 = 5;
+}
+
+// One input as its reader receives it.
+message WorkflowTaskInput {
+  string label = 1;
+  string sha256 = 2;
+  string json = 3;
 }
 
 message WorkflowTask {
@@ -381,6 +481,8 @@ message WorkflowRunDetail {
   repeated WorkflowApproval approvals = 5;
   // Newest last; at most the latest 200.
   repeated WorkflowEvent events = 6;
+  repeated WorkflowFrozenOutput frozen_outputs = 7;
+  repeated WorkflowInputLabel input_labels = 8;
 }
 
 // --- User methods (SCOPE_WORKFLOW_MANAGE) ---
@@ -557,6 +659,8 @@ message WorkflowAgentContextResponse {
   repeated WorkflowRunAgent agents = 6;
   repeated WorkflowTask tasks = 7;
   repeated WorkflowApproval approvals = 8;
+  // The inputs of the participant's current task, as dispatched.
+  repeated WorkflowTaskInput inputs = 9;
 }
 
 // Lead only: create a task for a role.
