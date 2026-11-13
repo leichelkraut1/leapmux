@@ -73,6 +73,22 @@ import type {
   UpdateTerminalTitleResponse,
 } from '~/generated/proto/leapmux/v1/terminal_pb'
 import type {
+  CancelTradingOrderResponse,
+  ConfirmTradingOrderResponse,
+  DecideTradingCandidateResponse,
+  GetTradingDashboardResponse,
+  GetTradingLabRunResponse,
+  GetTradingLabSettingsResponse,
+  InstallTradingSampleDataResponse,
+  MarkTradingBooksResponse,
+  PrepareTradingOrderResponse,
+  ReconcileTradingOrdersResponse,
+  RevokeTradingExecutionPolicyResponse,
+  SaveTradingExecutionPolicyResponse,
+  SaveTradingLabSettingsResponse,
+  VerifyTradingBrokerResponse,
+} from '~/generated/proto/leapmux/v1/trading_lab_pb'
+import type {
   AnswerNativeSessionApprovalResponse,
   GetWorkerSystemInfoResponse,
   InspectNativeAgentProcessesResponse,
@@ -233,6 +249,36 @@ import {
   UpdateTerminalTitleRequestSchema,
   UpdateTerminalTitleResponseSchema,
 } from '~/generated/proto/leapmux/v1/terminal_pb'
+import {
+  CancelTradingOrderRequestSchema,
+  CancelTradingOrderResponseSchema,
+  ConfirmTradingOrderRequestSchema,
+  ConfirmTradingOrderResponseSchema,
+  DecideTradingCandidateRequestSchema,
+  DecideTradingCandidateResponseSchema,
+  GetTradingDashboardRequestSchema,
+  GetTradingDashboardResponseSchema,
+  GetTradingLabRunRequestSchema,
+  GetTradingLabRunResponseSchema,
+  GetTradingLabSettingsRequestSchema,
+  GetTradingLabSettingsResponseSchema,
+  InstallTradingSampleDataRequestSchema,
+  InstallTradingSampleDataResponseSchema,
+  MarkTradingBooksRequestSchema,
+  MarkTradingBooksResponseSchema,
+  PrepareTradingOrderRequestSchema,
+  PrepareTradingOrderResponseSchema,
+  ReconcileTradingOrdersRequestSchema,
+  ReconcileTradingOrdersResponseSchema,
+  RevokeTradingExecutionPolicyRequestSchema,
+  RevokeTradingExecutionPolicyResponseSchema,
+  SaveTradingExecutionPolicyRequestSchema,
+  SaveTradingExecutionPolicyResponseSchema,
+  SaveTradingLabSettingsRequestSchema,
+  SaveTradingLabSettingsResponseSchema,
+  VerifyTradingBrokerRequestSchema,
+  VerifyTradingBrokerResponseSchema,
+} from '~/generated/proto/leapmux/v1/trading_lab_pb'
 import {
   AnswerNativeSessionApprovalRequestSchema,
   AnswerNativeSessionApprovalResponseSchema,
@@ -912,6 +958,66 @@ export function decideWorkflowApproval(workerId: string, req: MessageInitShape<t
 
 export function sendWorkflowAgentMessage(workerId: string, req: MessageInitShape<typeof SendWorkflowAgentMessageRequestSchema>): Promise<SendWorkflowAgentMessageResponse> {
   return callWorker(workerId, 'SendWorkflowAgentMessage', SendWorkflowAgentMessageRequestSchema, SendWorkflowAgentMessageResponseSchema, req)
+}
+
+// ---------------------------------------------------------------------------
+// Trading lab (proto/leapmux/v1/trading_lab.proto), on a run's coordinator
+// ---------------------------------------------------------------------------
+
+export function getTradingLabSettings(workerId: string, req: MessageInitShape<typeof GetTradingLabSettingsRequestSchema>): Promise<GetTradingLabSettingsResponse> {
+  return callWorker(workerId, 'GetTradingLabSettings', GetTradingLabSettingsRequestSchema, GetTradingLabSettingsResponseSchema, req)
+}
+
+export function saveTradingLabSettings(workerId: string, req: MessageInitShape<typeof SaveTradingLabSettingsRequestSchema>): Promise<SaveTradingLabSettingsResponse> {
+  return callWorker(workerId, 'SaveTradingLabSettings', SaveTradingLabSettingsRequestSchema, SaveTradingLabSettingsResponseSchema, req)
+}
+
+export function verifyTradingBroker(workerId: string, req: MessageInitShape<typeof VerifyTradingBrokerRequestSchema>): Promise<VerifyTradingBrokerResponse> {
+  return callWorker(workerId, 'VerifyTradingBroker', VerifyTradingBrokerRequestSchema, VerifyTradingBrokerResponseSchema, req)
+}
+
+export function installTradingSampleData(workerId: string, req: MessageInitShape<typeof InstallTradingSampleDataRequestSchema>): Promise<InstallTradingSampleDataResponse> {
+  return callWorker(workerId, 'InstallTradingSampleData', InstallTradingSampleDataRequestSchema, InstallTradingSampleDataResponseSchema, req)
+}
+
+export function getTradingLabRun(workerId: string, req: MessageInitShape<typeof GetTradingLabRunRequestSchema>): Promise<GetTradingLabRunResponse> {
+  return callWorker(workerId, 'GetTradingLabRun', GetTradingLabRunRequestSchema, GetTradingLabRunResponseSchema, req)
+}
+
+export function decideTradingCandidate(workerId: string, req: MessageInitShape<typeof DecideTradingCandidateRequestSchema>): Promise<DecideTradingCandidateResponse> {
+  return callWorker(workerId, 'DecideTradingCandidate', DecideTradingCandidateRequestSchema, DecideTradingCandidateResponseSchema, req)
+}
+
+export function getTradingDashboard(workerId: string, req: MessageInitShape<typeof GetTradingDashboardRequestSchema>): Promise<GetTradingDashboardResponse> {
+  return callWorker(workerId, 'GetTradingDashboard', GetTradingDashboardRequestSchema, GetTradingDashboardResponseSchema, req)
+}
+
+export function markTradingBooks(workerId: string, req: MessageInitShape<typeof MarkTradingBooksRequestSchema>): Promise<MarkTradingBooksResponse> {
+  return callWorker(workerId, 'MarkTradingBooks', MarkTradingBooksRequestSchema, MarkTradingBooksResponseSchema, req)
+}
+
+export function prepareTradingOrder(workerId: string, req: MessageInitShape<typeof PrepareTradingOrderRequestSchema>): Promise<PrepareTradingOrderResponse> {
+  return callWorker(workerId, 'PrepareTradingOrder', PrepareTradingOrderRequestSchema, PrepareTradingOrderResponseSchema, req)
+}
+
+export function confirmTradingOrder(workerId: string, req: MessageInitShape<typeof ConfirmTradingOrderRequestSchema>): Promise<ConfirmTradingOrderResponse> {
+  return callWorker(workerId, 'ConfirmTradingOrder', ConfirmTradingOrderRequestSchema, ConfirmTradingOrderResponseSchema, req)
+}
+
+export function cancelTradingOrder(workerId: string, req: MessageInitShape<typeof CancelTradingOrderRequestSchema>): Promise<CancelTradingOrderResponse> {
+  return callWorker(workerId, 'CancelTradingOrder', CancelTradingOrderRequestSchema, CancelTradingOrderResponseSchema, req)
+}
+
+export function reconcileTradingOrders(workerId: string, req: MessageInitShape<typeof ReconcileTradingOrdersRequestSchema>): Promise<ReconcileTradingOrdersResponse> {
+  return callWorker(workerId, 'ReconcileTradingOrders', ReconcileTradingOrdersRequestSchema, ReconcileTradingOrdersResponseSchema, req)
+}
+
+export function saveTradingExecutionPolicy(workerId: string, req: MessageInitShape<typeof SaveTradingExecutionPolicyRequestSchema>): Promise<SaveTradingExecutionPolicyResponse> {
+  return callWorker(workerId, 'SaveTradingExecutionPolicy', SaveTradingExecutionPolicyRequestSchema, SaveTradingExecutionPolicyResponseSchema, req)
+}
+
+export function revokeTradingExecutionPolicy(workerId: string, req: MessageInitShape<typeof RevokeTradingExecutionPolicyRequestSchema>): Promise<RevokeTradingExecutionPolicyResponse> {
+  return callWorker(workerId, 'RevokeTradingExecutionPolicy', RevokeTradingExecutionPolicyRequestSchema, RevokeTradingExecutionPolicyResponseSchema, req)
 }
 
 // ---------------------------------------------------------------------------

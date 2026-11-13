@@ -1,7 +1,7 @@
 import { create } from '@bufbuild/protobuf'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentInfoSchema, AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
-import { WorkflowRunAction, WorkflowTemplateSchema } from '~/generated/proto/leapmux/v1/workflow_pb'
+import { WorkflowCoordination, WorkflowRunAction, WorkflowTemplateSchema } from '~/generated/proto/leapmux/v1/workflow_pb'
 import { launchWorkflowRun } from './launchWorkflowRun'
 
 const calls: string[] = []
@@ -101,5 +101,20 @@ describe('launchWorkflowRun', () => {
     const launched = await launchWorkflowRun(input(vi.fn(() => false)))
     expect(rpc.attachWorkflowLead).toHaveBeenCalled()
     expect(launched.leadTabPlaced).toBe(false)
+  })
+
+  it('starts an engine-coordinated run with no Lead to open or attach', async () => {
+    rpc.createWorkflowRun.mockImplementation(async () => {
+      calls.push('create')
+      return { run: { id: 'run-2', name: 'Blind', workingDir: '/lab' } }
+    })
+    const placeLeadTab = vi.fn(() => true)
+    const launched = await launchWorkflowRun({
+      ...input(placeLeadTab),
+      template: create(WorkflowTemplateSchema, { id: 't', name: 'Blind', coordination: WorkflowCoordination.ENGINE }),
+    })
+    expect(calls).toEqual(['create'])
+    expect(placeLeadTab).not.toHaveBeenCalled()
+    expect(launched).toEqual({ coordinatorWorkerId: 'mac', runId: 'run-2', leadAgentId: '', leadTabPlaced: false })
   })
 })

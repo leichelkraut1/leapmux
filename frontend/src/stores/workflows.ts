@@ -19,6 +19,7 @@ import type {
   WorkflowRoleOverrideSchema,
   WorkflowRunSummary,
   WorkflowStep,
+  WorkflowStepInput,
   WorkflowTemplate,
   WorkflowTemplateSchema,
 } from '~/generated/proto/leapmux/v1/workflow_pb'
@@ -29,6 +30,7 @@ import {
   WorkflowApprovalGate,
   WorkflowApprovalKind,
   WorkflowApprovalStatus,
+  WorkflowCoordination,
   WorkflowEventKind,
   WorkflowGitIsolation,
   WorkflowRunStatus,
@@ -672,6 +674,15 @@ export interface RoleDraft {
   workingDir: string
   instructions: string
   maxInstances: number
+  /** How far the role's agents are kept apart (format 2). */
+  isolation: RoleIsolationDraft
+}
+
+export interface RoleIsolationDraft {
+  freshAgentPerTask: boolean
+  privateWorkingDir: boolean
+  confine: boolean
+  blind: boolean
 }
 
 export interface StepDraft {
@@ -683,6 +694,12 @@ export interface StepDraft {
   approval: WorkflowApprovalGate
   maxAttempts: number
   autoStart: boolean
+  /** The format-2 step fields the editor shows read-only, carried through a save. */
+  executor: string
+  inputs: WorkflowStepInput[]
+  outputSchema: string
+  freezeOutput: boolean
+  params: Record<string, string>
 }
 
 export interface TemplateDraft {
@@ -702,6 +719,7 @@ export interface TemplateDraft {
   confineAgents: boolean
   /** One per line. */
   sensitiveOperations: string
+  coordination: WorkflowCoordination
 }
 
 export function roleDraft(role?: WorkflowRole): RoleDraft {
@@ -721,6 +739,12 @@ export function roleDraft(role?: WorkflowRole): RoleDraft {
     workingDir: agent?.workingDir ?? '',
     instructions: agent?.instructions ?? '',
     maxInstances: agent?.maxInstances ?? 0,
+    isolation: {
+      freshAgentPerTask: role?.isolation?.freshAgentPerTask ?? false,
+      privateWorkingDir: role?.isolation?.privateWorkingDir ?? false,
+      confine: role?.isolation?.confine ?? false,
+      blind: role?.isolation?.blind ?? false,
+    },
   }
 }
 
@@ -734,6 +758,11 @@ export function stepDraft(step?: WorkflowStep): StepDraft {
     approval: step?.approval || WorkflowApprovalGate.NONE,
     maxAttempts: step?.maxAttempts ?? 0,
     autoStart: step?.autoStart ?? false,
+    executor: step?.executor ?? '',
+    inputs: [...(step?.inputs ?? [])],
+    outputSchema: step?.outputSchema ?? '',
+    freezeOutput: step?.freezeOutput ?? false,
+    params: { ...(step?.params ?? {}) },
   }
 }
 
@@ -753,6 +782,7 @@ export function templateDraft(template?: WorkflowTemplate): TemplateDraft {
     requireFinalApproval: template?.requireFinalApproval ?? false,
     confineAgents: template?.confineAgents ?? false,
     sensitiveOperations: (template?.sensitiveOperations ?? []).join('\n'),
+    coordination: template?.coordination || WorkflowCoordination.LEAD,
   }
 }
 
@@ -784,6 +814,7 @@ export function templateInit(draft: TemplateDraft): MessageInitShape<typeof Work
         instructions: role.instructions,
         maxInstances: count(role.maxInstances),
       },
+      isolation: { ...role.isolation },
     })),
     steps: draft.steps.map(step => ({
       key: step.key.trim(),
@@ -794,6 +825,11 @@ export function templateInit(draft: TemplateDraft): MessageInitShape<typeof Work
       approval: step.approval,
       maxAttempts: count(step.maxAttempts),
       autoStart: step.autoStart,
+      executor: step.executor,
+      inputs: step.inputs.map(i => ({ stepKey: i.stepKey, label: i.label, anonymize: i.anonymize, redactFields: [...i.redactFields] })),
+      outputSchema: step.outputSchema,
+      freezeOutput: step.freezeOutput,
+      params: { ...step.params },
     })),
     defaultMaxAttempts: count(draft.defaultMaxAttempts),
     maxParallelTasks: count(draft.maxParallelTasks),
@@ -801,6 +837,7 @@ export function templateInit(draft: TemplateDraft): MessageInitShape<typeof Work
     requireFinalApproval: draft.requireFinalApproval,
     confineAgents: draft.confineAgents,
     sensitiveOperations: draft.sensitiveOperations.split('\n').map(s => s.trim()).filter(Boolean),
+    coordination: draft.coordination,
   }
 }
 

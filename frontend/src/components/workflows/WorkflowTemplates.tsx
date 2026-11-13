@@ -1,9 +1,10 @@
-import type { AgentProfile, WorkflowTemplate } from '~/generated/proto/leapmux/v1/workflow_pb'
+import type { AgentProfile, WorkflowExample, WorkflowTemplate } from '~/generated/proto/leapmux/v1/workflow_pb'
 import { createSignal, For, Show } from 'solid-js'
 import * as workerRpc from '~/api/workerRpc'
 import { Alert } from '~/components/common/Alert'
 import { ConfirmButton } from '~/components/common/ConfirmButton'
 import { showInfoToast } from '~/components/common/Toast'
+import { Tooltip } from '~/components/common/Tooltip'
 import { WorkflowExportFormat } from '~/generated/proto/leapmux/v1/workflow_pb'
 import { duplicateTemplateDraft, exportFileName, missingProfileRoles, templateInit } from '~/stores/workflows'
 import { createWorkflowAction } from './createWorkflowAction'
@@ -29,6 +30,8 @@ export function downloadTextFile(fileName: string, text: string, type: string): 
 export interface WorkflowTemplatesProps {
   libraryWorkerId: string
   templates: readonly WorkflowTemplate[]
+  /** The bundled templates this computer can add. */
+  examples: readonly WorkflowExample[]
   profiles: readonly AgentProfile[]
   onChanged: () => void
   onNew: () => void
@@ -74,20 +77,27 @@ export function WorkflowTemplates(props: WorkflowTemplatesProps) {
   return (
     <div class={styles.form}>
       <div class={styles.sectionHeader}>
-        <p class={styles.description}>A template is a team (roles) and a default process (steps) the Lead follows.</p>
+        <p class={styles.description}>A template is a team (roles) and a default process (steps) that a Lead follows, or that the engine runs by itself.</p>
         <div class={styles.actions}>
-          <button
-            type="button"
-            class="outline"
-            disabled={!props.libraryWorkerId || action.busy()}
-            onClick={() => void action.run(async () => {
-              const resp = await workerRpc.installExampleWorkflow(props.libraryWorkerId, {})
-              showInfoToast(`Added "${resp.template?.name ?? 'the example workflow'}".`)
-              props.onChanged()
-            })}
-          >
-            Add example
-          </button>
+          <For each={props.examples}>
+            {example => (
+              <Tooltip text={example.description}>
+                <button
+                  type="button"
+                  class="outline"
+                  disabled={!props.libraryWorkerId || action.busy()}
+                  onClick={() => void action.run(async () => {
+                    const resp = await workerRpc.installExampleWorkflow(props.libraryWorkerId, { example: example.name })
+                    showInfoToast(`Added "${resp.template?.name ?? example.title}".`)
+                    props.onChanged()
+                  })}
+                  data-testid={`workflow-add-example-${example.name}`}
+                >
+                  {`Add example: ${example.title}`}
+                </button>
+              </Tooltip>
+            )}
+          </For>
           <button type="button" class="outline" disabled={!props.libraryWorkerId} onClick={() => setImporting(v => !v)}>Import...</button>
           <button type="button" disabled={!props.libraryWorkerId} onClick={() => props.onNew()}>New template</button>
         </div>

@@ -6,7 +6,7 @@ import { createEffect, createMemo, createSignal, For, on, Show } from 'solid-js'
 import { createStore } from 'solid-js/store'
 import { agentProviderLabel } from '~/components/common/AgentProviderIcon'
 import { Alert } from '~/components/common/Alert'
-import { WorkerPlacementStrategy } from '~/generated/proto/leapmux/v1/workflow_pb'
+import { WorkerPlacementStrategy, WorkflowCoordination } from '~/generated/proto/leapmux/v1/workflow_pb'
 import {
   buildLaunchOverrides,
   computerName,
@@ -43,6 +43,7 @@ export interface WorkflowLaunchFormProps {
 
 export function WorkflowLaunchForm(props: WorkflowLaunchFormProps) {
   const lead = createMemo(() => leadRoleOf(props.template.roles))
+  const engineRun = () => props.template.coordination === WorkflowCoordination.ENGINE
   const resolved = (roleKey: string) => {
     const role = props.template.roles.find(r => r.key === roleKey)
     return role ? resolveRoleAgent(role, props.profiles) : undefined
@@ -92,12 +93,12 @@ export function WorkflowLaunchForm(props: WorkflowLaunchFormProps) {
       return props.blockedReason
     if (!props.workspaceId)
       return 'Open a workspace first: the agents\' tabs go into the active workspace.'
-    if (!lead())
+    if (!lead() && !engineRun())
       return 'This template has no Lead role.'
     if (missing().length > 0)
       return `The library has no profile for role${missing().length === 1 ? '' : 's'} ${missing().join(', ')}.`
     if (!coordinator().workerId)
-      return 'Choose the computer the Lead runs on.'
+      return engineRun() ? 'Choose the computer that coordinates the run.' : 'Choose the computer the Lead runs on.'
     if (!objective().trim())
       return 'Describe the objective.'
     if (!projectDir().trim())
@@ -155,8 +156,12 @@ export function WorkflowLaunchForm(props: WorkflowLaunchFormProps) {
       </label>
 
       <fieldset class={styles.fieldset}>
-        <legend>Lead and coordinator</legend>
-        <p class={styles.hint}>The run is coordinated on the Lead's computer and its state is stored there.</p>
+        <legend>{engineRun() ? 'Coordinator' : 'Lead and coordinator'}</legend>
+        <p class={styles.hint}>
+          {engineRun()
+            ? 'The engine runs this workflow on this computer: its executor steps run here, and its state and frozen outputs are stored here.'
+            : 'The run is coordinated on the Lead\'s computer and its state is stored there.'}
+        </p>
         <Show
           when={!coordinator().pinned}
           fallback={(
@@ -167,7 +172,7 @@ export function WorkflowLaunchForm(props: WorkflowLaunchFormProps) {
           )}
         >
           <div class={styles.field}>
-            <span>Lead computer</span>
+            <span>{engineRun() ? 'Coordinating computer' : 'Lead computer'}</span>
             <ComputerPicker
               label="Lead computer"
               computers={props.computers}

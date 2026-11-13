@@ -3,7 +3,7 @@ import type { AgentProfile, WorkflowTemplate } from '~/generated/proto/leapmux/v
 import type { RoleOverrideInit } from '~/stores/workflows'
 import * as workerRpc from '~/api/workerRpc'
 import { openAgentRequestOptions } from '~/components/chat/providers/registry'
-import { WorkflowRunAction } from '~/generated/proto/leapmux/v1/workflow_pb'
+import { WorkflowCoordination, WorkflowRunAction } from '~/generated/proto/leapmux/v1/workflow_pb'
 
 export interface LaunchWorkflowInput {
   /** The Lead's computer, which becomes the run's coordinator. */
@@ -44,6 +44,9 @@ export interface LaunchedWorkflow {
  *   4. AttachWorkflowLead starts the run -- the engine then opens every other
  *      agent itself, on its own computer.
  *
+ * An engine-coordinated template has no Lead: CreateWorkflowRun starts it, and
+ * steps 2 to 4 do not apply.
+ *
  * A Lead that fails to open leaves the run PENDING with nobody to attach, so
  * the run is deleted rather than left in the list.
  */
@@ -60,6 +63,10 @@ export async function launchWorkflowRun(input: LaunchWorkflowInput): Promise<Lau
     workspaceId: input.workspaceId,
   })
   const run = created.run
+  if (run && input.template.coordination === WorkflowCoordination.ENGINE) {
+    // No Lead: the coordinator started the run and opens every agent itself.
+    return { coordinatorWorkerId: worker, runId: run.id, leadAgentId: '', leadTabPlaced: false }
+  }
   const binding = created.leadBinding
   const lead = created.leadRole?.agent
   if (!run || !binding || !lead)

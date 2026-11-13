@@ -8,7 +8,7 @@ import { Alert } from '~/components/common/Alert'
 import { DropdownMenu, DropdownMenuCheckableItem } from '~/components/common/DropdownMenu'
 import { PillGroup } from '~/components/common/PillGroup'
 import { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
-import { WorkflowApprovalGate, WorkflowGitIsolation } from '~/generated/proto/leapmux/v1/workflow_pb'
+import { WorkflowApprovalGate, WorkflowCoordination, WorkflowGitIsolation } from '~/generated/proto/leapmux/v1/workflow_pb'
 import {
   removeStep,
   renameStepKey,
@@ -28,6 +28,18 @@ import * as styles from './Workflows.css'
 const ISOLATION = [
   { key: WorkflowGitIsolation.SHARED, label: 'Shared' },
   { key: WorkflowGitIsolation.WORKTREE, label: 'Worktree' },
+] as const
+
+const COORDINATION = [
+  { key: WorkflowCoordination.LEAD, label: 'A Lead agent' },
+  { key: WorkflowCoordination.ENGINE, label: 'The engine (no Lead)' },
+] as const
+
+const ROLE_ISOLATION = [
+  ['freshAgentPerTask', 'A fresh agent for every task'],
+  ['privateWorkingDir', 'Work in a private empty directory'],
+  ['confine', 'Restrict to this workflow'],
+  ['blind', 'Blind: tell it nothing about the run or other roles'],
 ] as const
 
 const GATES = [
@@ -226,6 +238,20 @@ export function WorkflowTemplateEditor(props: WorkflowTemplateEditorProps) {
                   Lead reviews every result
                 </label>
               </div>
+              <div class={styles.inline}>
+                <For each={ROLE_ISOLATION}>
+                  {([key, label]) => (
+                    <label class={styles.checkboxLabel}>
+                      <input
+                        type="checkbox"
+                        checked={role().isolation[key]}
+                        onChange={e => setRole(index, { isolation: { ...role().isolation, [key]: e.currentTarget.checked } })}
+                      />
+                      {label}
+                    </label>
+                  )}
+                </For>
+              </div>
               <div class={styles.grid2}>
                 <div class={styles.field}>
                   <span>Git isolation</span>
@@ -370,6 +396,16 @@ export function WorkflowTemplateEditor(props: WorkflowTemplateEditorProps) {
                   <input type="checkbox" checked={step().autoStart} onChange={e => setStep(index, { autoStart: e.currentTarget.checked })} />
                   Start at launch
                 </label>
+                <Show when={step().executor || step().freezeOutput || step().inputs.length > 0}>
+                  <span class={styles.hint} data-testid="workflow-step-v2-summary">
+                    {[
+                      step().executor && `Runs ${step().executor} on the coordinator`,
+                      step().inputs.length > 0 && `Reads ${step().inputs.map(i => (i.anonymize ? `${i.stepKey} (anonymized)` : i.stepKey)).join(', ')}`,
+                      step().outputSchema && 'Validated output',
+                      step().freezeOutput && 'Frozen with its hash',
+                    ].filter(Boolean).join(' · ')}
+                  </span>
+                </Show>
                 <label class={styles.checkboxLabel}>
                   Max attempts
                   <input type="number" min={0} value={step().maxAttempts} onInput={e => setStep(index, { maxAttempts: e.currentTarget.valueAsNumber || 0 })} />
@@ -416,6 +452,16 @@ export function WorkflowTemplateEditor(props: WorkflowTemplateEditorProps) {
           <input type="checkbox" checked={draft.requireFinalApproval} onChange={e => setDraft('requireFinalApproval', e.currentTarget.checked)} />
           Require my approval before the run completes
         </label>
+        <div class={styles.field}>
+          <span>Coordinated by</span>
+          <PillGroup<WorkflowCoordination>
+            label="Coordinated by"
+            options={COORDINATION}
+            selectedKey={draft.coordination}
+            onSelect={coordination => setDraft('coordination', coordination)}
+            small
+          />
+        </div>
         <label class={styles.checkboxLabel}>
           <input type="checkbox" checked={draft.confineAgents} onChange={e => setDraft('confineAgents', e.currentTarget.checked)} />
           Restrict agents to this workflow (off: they keep full control and can open helper agents)

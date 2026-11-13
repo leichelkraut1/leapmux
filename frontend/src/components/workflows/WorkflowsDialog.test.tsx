@@ -54,7 +54,14 @@ const template = create(WorkflowTemplateSchema, {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  rpc.listWorkflowLibrary.mockResolvedValue({ profiles: [profile], templates: [template] })
+  rpc.listWorkflowLibrary.mockResolvedValue({
+    profiles: [profile],
+    templates: [template],
+    examples: [
+      { name: 'ios', title: 'Develop, audit and test on iOS', description: '' },
+      { name: 'blind-trading-lab', title: 'Blind trading research', description: '' },
+    ],
+  })
   rpc.listWorkflowRuns.mockResolvedValue({ runs: [] })
   rpc.installExampleWorkflow.mockResolvedValue({ template: { name: 'Develop, audit and test on iOS' }, profiles: [] })
 })
@@ -98,11 +105,11 @@ describe('WorkflowsDialog', () => {
     expect(screen.getByTestId('workflow-library-computer')).toHaveTextContent('Mac Studio')
   })
 
-  it('adds the example workflow to the library computer and reloads it', async () => {
+  it('adds the chosen example workflow to the library computer and reloads it', async () => {
     renderDialog()
     await screen.findByText('Ship it')
-    fireEvent.click(screen.getByRole('button', { name: 'Add example' }))
-    await waitFor(() => expect(rpc.installExampleWorkflow).toHaveBeenCalledWith('mac', {}))
+    fireEvent.click(screen.getByTestId('workflow-add-example-blind-trading-lab'))
+    await waitFor(() => expect(rpc.installExampleWorkflow).toHaveBeenCalledWith('mac', { example: 'blind-trading-lab' }))
     await waitFor(() => expect(rpc.listWorkflowLibrary).toHaveBeenCalledTimes(2))
   })
 
