@@ -117,6 +117,30 @@ every external call sits between a recorded intent and a recorded outcome.
   broker call. After a crash in `SUBMITTING`, reconciliation looks the order up
   at the broker before anything is resubmitted.
 
+## Known limits
+
+- **The Robinhood MCP tool vocabulary is not verified against a live
+  server.** The adapter discovers tools by name (`defaultToolNames`,
+  overridable per operation in the settings) and reads results tolerantly
+  (common field spellings, `results`/`data` envelopes). Before trusting live
+  data, run **Verify broker** against your server and check the reported
+  operations; the tests use a fake server with the shapes documented in
+  `robinhood.go`. OAuth flows are out of scope: the token comes from an
+  environment variable or a file.
+- **Human-only actions rest on the passphrase.** A call through a local
+  control socket is marked and refused for confirmations, policies, the
+  passphrase and live mode. But a call an agent relays through another
+  worker arrives as an ordinary channel call. The argon2id-hashed passphrase
+  is what an agent cannot supply.
+- **Agents share the OS user.** Private directories and confined sockets keep
+  LeapMux surfaces apart, but a provider with unrestricted shell access can
+  read the user's files. Use the provider's sandbox or another computer for
+  stronger isolation.
+- **Long calls and puts only.** Defined-risk spreads need multi-leg orders,
+  previews and fills, and a spread-aware simulator.
+- **Executors run on the coordinator.** The snapshot reaches analysts on
+  other computers inline in their task message (bounded at 1 MiB of inputs).
+
 ## Implementation plan (each stage ships with tests)
 
 1. Generic engine: proto fields, migration `00003`, engine coordination,
