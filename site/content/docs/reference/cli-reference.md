@@ -175,6 +175,7 @@ leapmux worker -hub https://hub.example.com
 | `-max-incomplete-chunked` | `0` (= 4) | Max in-flight chunked sequences per channel |
 | `-max-message-size` | `0` (= 16 MiB) | Max application payload size in bytes; reassembled ceiling adds 64 KiB headroom |
 | `-agent-startup-timeout` | `5m` | Agent startup timeout |
+| `-agent-idle-release` | `60m` | Stop an idle agent's process after this long, keeping its tab and session; negative disables |
 | `-api-timeout` | `10s` | JSON-RPC request timeout |
 | `-agent-startup-concurrency` | `0` (= 4, or the CPU count when lower) | How many agents the Worker brings back at once after a restart |
 

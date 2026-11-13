@@ -496,6 +496,7 @@ Every timeout below takes a unit suffix; see [Duration values](#duration-values)
 | `max_message_size` | `0` | Maximum application payload size in bytes (`0` = 16 MiB default). Negotiated per channel as `min(hub, worker)` — the Hub's side is the `max_message_size_bytes` setting; the reassembled ceiling is this plus 64 KiB of envelope headroom. |
 | `agent_startup_timeout` | `5m` | Agent startup timeout. `0` means the default. |
 | `api_timeout` | `10s` | JSON-RPC request timeout. `0` means the default. |
+| `agent_idle_release` | `60m` | Stops an open agent's process after this long with nothing to do: no turn, no waiting prompt, no background task, no queued message and no new message. The tab and its session stay, and the next message resumes the conversation. While a process runs it holds its conversation, which other clients (such as Claude Code in VS Code) report as "still open somewhere else". After a Worker restart, a tab idle longer than this stays stopped until its next message. `0` means the default; a negative value disables it. Standalone Worker only. |
 | `agent_startup_concurrency` | `0` | How many agents the Worker brings back at once after a restart. `0` means 4, or the number of CPUs available to the Worker when that is lower. See [Agents after a Worker restart](#agents-after-a-worker-restart). |
 
 ### Agents after a Worker restart
