@@ -548,10 +548,14 @@ type Config struct {
 	// Hub writes; a promoted field of that name would compile while
 	// shadowing nothing and reading like the live value.
 	SeedRegisteredBy    string
-	AgentStartupTimeout time.Duration             // Timeout for agent startup handshake (default: 5m)
-	APITimeout          time.Duration             // Timeout for JSON-RPC requests (default: 10s)
-	UseLoginShell       bool                      // Wrap claude invocation in user's login shell
-	WakeLock            *wakelock.ActivityTracker // Keep-awake tracker (nil = disabled)
+	AgentStartupTimeout time.Duration // Timeout for agent startup handshake (default: 5m)
+	APITimeout          time.Duration // Timeout for JSON-RPC requests (default: 10s)
+	// AgentIdleRelease stops an open agent's process after this long with
+	// nothing to do, keeping its tab and session (see RunIdleRelease). Zero
+	// disables it.
+	AgentIdleRelease time.Duration
+	UseLoginShell    bool                      // Wrap claude invocation in user's login shell
+	WakeLock         *wakelock.ActivityTracker // Keep-awake tracker (nil = disabled)
 	// MaxMessageSize is the worker's configured application payload budget
 	// (0 = contracts.MaxMessageSize). Raises agent stdout scanner ceiling
 	// and ReadFile's payload budget; other stream sends still reject at

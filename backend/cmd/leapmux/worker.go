@@ -184,6 +184,7 @@ func runWorker(args []string) error {
 		AgentStartupTimeout:     cfg.AgentStartupTimeout,
 		APITimeout:              cfg.APITimeout,
 		AgentStartupConcurrency: cfg.AgentStartupConcurrency,
+		AgentIdleRelease:        cfg.AgentIdleRelease,
 		UseLoginShell:           cfg.UseLoginShell,
 		WakeLock:                wakeLockTracker,
 	})

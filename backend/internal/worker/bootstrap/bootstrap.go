@@ -82,8 +82,12 @@ type Params struct {
 	// agent manager, which is the one place that holds it: the sweep reads it
 	// back from there. It never limits a spawn the user asked for.
 	AgentStartupConcurrency int
-	UseLoginShell           bool
-	WakeLock                *wakelock.ActivityTracker
+	// AgentIdleRelease stops an idle agent's process after this long, keeping
+	// its tab and session (service.Config.AgentIdleRelease). Zero or less
+	// disables it.
+	AgentIdleRelease time.Duration
+	UseLoginShell    bool
+	WakeLock         *wakelock.ActivityTracker
 }
 
 // Wiring is the assembled worker. Callers own the lifecycle: nothing here
@@ -179,6 +183,7 @@ func Wire(p Params) *Wiring {
 		SeedRegisteredBy:    p.SeedRegisteredBy,
 		AgentStartupTimeout: p.AgentStartupTimeout,
 		APITimeout:          p.APITimeout,
+		AgentIdleRelease:    p.AgentIdleRelease,
 		UseLoginShell:       p.UseLoginShell,
 		WakeLock:            p.WakeLock,
 		MaxMessageSize:      p.MaxMessageSize,
@@ -233,6 +238,7 @@ func Wire(p Params) *Wiring {
 	// where the database says the run stood.
 	svc.Workflows.SetPlatform(&controlipc.WorkflowPlatform{Factory: controlFactory, Owner: svc.RegisteredBy})
 	go svc.Workflows.Run(p.Ctx)
+	go svc.RunIdleRelease(p.Ctx)
 
 	// Only now is the manager reachable from the connect loop.
 	p.Client.SetChannelMgr(channelMgr)

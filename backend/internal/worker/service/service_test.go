@@ -293,6 +293,7 @@ func TestNew_CarriesEveryConfigField(t *testing.T) {
 		SeedRegisteredBy:    "user-1",
 		AgentStartupTimeout: 11 * time.Second,
 		APITimeout:          7 * time.Second,
+		AgentIdleRelease:    13 * time.Minute,
 		UseLoginShell:       true,
 		WakeLock:            wakelock.NewActivityTracker(),
 		MaxMessageSize:      32 << 20,

@@ -447,6 +447,7 @@ const (
 	resumeSkipStartupFailed  resumeSkipReason = "previous startup failed"
 	resumeSkipArchived       resumeSkipReason = "workspace archived"
 	resumeSkipNeverStarted   resumeSkipReason = "never started and not created from a session"
+	resumeSkipIdle           resumeSkipReason = "idle longer than the idle-release window"
 )
 
 // skipReason reports why this row identifies an agent NOT worth respawning, or
@@ -514,6 +515,12 @@ func (r *AgentResumer) skipReason(dbAgent db.Agent) resumeSkipReason {
 	}
 	if dbAgent.AgentSessionID == "" && dbAgent.Resumed == 0 {
 		return resumeSkipNeverStarted
+	}
+	// A tab quiet for longer than the idle-release window stays cold: a process
+	// started for it would only hold its conversation, open in no other client,
+	// until the releaser stopped it again. Its next message resumes it.
+	if r.svc.releasedWhileIdle(bgCtx(), dbAgent) {
+		return resumeSkipIdle
 	}
 	return ""
 }

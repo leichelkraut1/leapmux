@@ -32,6 +32,10 @@ const (
 	// slow MCP servers during the handshake (e.g. Claude Code loading a
 	// workspace .mcp.json with multiple servers).
 	DefaultAgentStartupTimeout = 5 * time.Minute
+	// DefaultAgentIdleRelease is how long an open agent may sit with nothing
+	// to do before its process is stopped. It matches the one-hour prompt cache
+	// lifetime: past it, a resumed session pays the full context again anyway.
+	DefaultAgentIdleRelease = 60 * time.Minute
 
 	// DefaultAPITimeout is the default timeout for JSON-RPC requests to agent
 	// processes (e.g. turn/start, session/new).
@@ -98,10 +102,14 @@ type Config struct {
 	// follows this machine's CPU budget, which is a runtime property rather than
 	// a loaded one, so ResolveStartupConcurrency resolves it at the point of use.
 	// That is also why the flag's default below is the literal 0.
-	AgentStartupConcurrency int    `koanf:"agent_startup_concurrency" json:"agent_startup_concurrency"`
-	LogLevel                string `koanf:"log_level" json:"log_level"`
-	EncryptionMode          string `koanf:"encryption_mode" json:"encryption_mode"`
-	UseLoginShell           bool   `koanf:"use_login_shell" json:"use_login_shell"`
+	AgentStartupConcurrency int `koanf:"agent_startup_concurrency" json:"agent_startup_concurrency"`
+	// AgentIdleRelease stops an open agent's process after this long with
+	// nothing to do; the tab keeps its session and its next message resumes
+	// it. Zero resolves to DefaultAgentIdleRelease; a negative value disables it.
+	AgentIdleRelease time.Duration `koanf:"agent_idle_release" json:"agent_idle_release"`
+	LogLevel         string        `koanf:"log_level" json:"log_level"`
+	EncryptionMode   string        `koanf:"encryption_mode" json:"encryption_mode"`
+	UseLoginShell    bool          `koanf:"use_login_shell" json:"use_login_shell"`
 }
 
 // EncryptionModeProto returns the protobuf EncryptionMode value.
@@ -125,6 +133,9 @@ func ParseEncryptionMode(s string) leapmuxv1.EncryptionMode {
 // left at zero, so every reader of a loaded Config finds a usable value and
 // none of them repeats the fallback.
 func (c *Config) applyDurationDefaults() {
+	if c.AgentIdleRelease == 0 {
+		c.AgentIdleRelease = DefaultAgentIdleRelease
+	}
 	if c.AgentStartupTimeout == 0 {
 		c.AgentStartupTimeout = DefaultAgentStartupTimeout
 	}
@@ -219,6 +230,8 @@ func Load(args []string) (*Config, bool, error) {
 	fs.Int("max-message-size", 0, "maximum application payload size in bytes (0 = 16 MiB default); reassembled ceiling is this plus 64 KiB headroom")
 	fs.Var(internalconfig.NewDurationFlag(new(time.Duration), DefaultAgentStartupTimeout),
 		"agent-startup-timeout", "agent startup timeout. "+internalconfig.UnitSyntax)
+	fs.Var(internalconfig.NewDurationFlag(new(time.Duration), DefaultAgentIdleRelease),
+		"agent-idle-release", "stop an idle agent's process after this long, keeping its tab and session (negative disables). "+internalconfig.UnitSyntax)
 	fs.Var(internalconfig.NewDurationFlag(new(time.Duration), DefaultAPITimeout),
 		"api-timeout", "JSON-RPC request timeout. "+internalconfig.UnitSyntax)
 	fs.Int("agent-startup-concurrency", 0,
@@ -268,6 +281,7 @@ func Load(args []string) (*Config, bool, error) {
 		"max-incomplete-chunked":    "max_incomplete_chunked",
 		"max-message-size":          "max_message_size",
 		"agent-startup-timeout":     "agent_startup_timeout",
+		"agent-idle-release":        "agent_idle_release",
 		"api-timeout":               "api_timeout",
 		"agent-startup-concurrency": "agent_startup_concurrency",
 		"log-level":                 "log_level",
@@ -286,6 +300,7 @@ func Load(args []string) (*Config, bool, error) {
 		"max_incomplete_chunked": 0,
 		"max_message_size":       0,
 		"agent_startup_timeout":  DefaultAgentStartupTimeout,
+		"agent_idle_release":     DefaultAgentIdleRelease,
 		"api_timeout":            DefaultAPITimeout,
 		// 0 means "resolve from this machine's core count" -- see the field's
 		// comment on Config.AgentStartupConcurrency.
