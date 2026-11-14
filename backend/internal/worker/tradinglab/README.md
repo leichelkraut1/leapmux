@@ -95,20 +95,27 @@ internal/util/mcpclient/  a minimal MCP client (stdio and streamable HTTP)
 - **No live order happens without a human.** The gateway submits only:
   - an order whose exact canonical parameters (account, symbol, contract,
     side, quantity, limit price, time in force) hash to the fingerprint a
-    person confirmed in the UI, within its time limit; or
+    person approved in their own browser, within its time limit; or
   - an order matching an active execution policy that a person approved,
     with a scope, quantity and price limit and an expiry.
 
   Closing orders follow the same rule. AI output can add a candidate to the
   queue. It never approves one.
+- "A person" is a channel the Hub opened for a browser session
+  (`ChannelOpenRequest.browser_session`), reaching the worker through no
+  local control socket. An agent, an API token, an app and the read-only
+  connector all act as the owner, but none is a browser session, so none can
+  approve an order or a policy, switch to live mode or sign in to the broker.
+- The broker sign-in (`brokerauth.go`) is OAuth 2.1 with PKCE against the
+  broker's MCP server. The worker keeps the tokens sealed for its OS user
+  (DPAPI on Windows) and refreshes them; only the lab's adapter uses them.
 - Paper mode is the default and needs no credentials. In paper mode the
   gateway refuses every live submission.
 - The read-only Claude connector (`internal/worker/labmcp`), served only when
   the worker sets `trading_connector_listen`, calls the lab's read methods
   and nothing else. It signs a person in with a connector passphrase of its
-  own, which must differ from the confirmation passphrase, so the passphrase
-  that confirms orders is never typed into a sign-in page. It never returns
-  the broker settings, the account number or an order's fingerprint.
+  own. It never returns the broker settings, the account number or an
+  order's fingerprint.
 
 ### State and recovery
 
@@ -131,13 +138,15 @@ every external call sits between a recorded intent and a recorded outcome.
   (common field spellings, `results`/`data` envelopes). Before trusting live
   data, run **Verify broker** against your server and check the reported
   operations; the tests use a fake server with the shapes documented in
-  `robinhood.go`. OAuth flows are out of scope: the token comes from an
-  environment variable or a file.
-- **Human-only actions rest on the passphrase.** A call through a local
-  control socket is marked and refused for confirmations, policies, the
-  passphrase and live mode. But a call an agent relays through another
-  worker arrives as an ordinary channel call. The argon2id-hashed passphrase
-  is what an agent cannot supply.
+  `robinhood.go`. The broker sign-in follows the server's published OAuth
+  metadata; it was checked against Robinhood's metadata and registration,
+  not yet against a completed sign-in.
+- **Human-only actions rest on the browser session.** The Hub tells the
+  worker whether a person's cookie session opened the channel; a call an
+  agent relays through another worker arrives on a delegation and is refused,
+  as is one through a local control socket. An agent that could drive the
+  person's own logged-in browser could still click an approval: keep agents
+  away from that browser profile.
 - **Agents share the OS user.** Private directories and confined sockets keep
   LeapMux surfaces apart, but a provider with unrestricted shell access can
   read the user's files. Use the provider's sandbox or another computer for

@@ -65,32 +65,33 @@ func scanSpec[T proto.Message](rows *sql.Rows, newT func() T) ([]T, error) {
 
 // --- Settings ---
 
-func getSettings(ctx context.Context, q querier, userID string) (*leapmuxv1.TradingLabSettings, string, error) {
+func getSettings(ctx context.Context, q querier, userID string) (*leapmuxv1.TradingLabSettings, error) {
 	var spec []byte
-	var hash string
-	err := q.QueryRowContext(ctx, `SELECT spec, passphrase_hash FROM trading_lab_settings WHERE user_id = ?`, userID).Scan(&spec, &hash)
+	err := q.QueryRowContext(ctx, `SELECT spec FROM trading_lab_settings WHERE user_id = ?`, userID).Scan(&spec)
 	if errors.Is(err, sql.ErrNoRows) {
-		return DefaultSettings(), "", nil
+		return DefaultSettings(), nil
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	s := &leapmuxv1.TradingLabSettings{}
 	if err := proto.Unmarshal(spec, s); err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	s.HasConfirmationPassphrase = hash != ""
-	return s, hash, nil
+	return s, nil
 }
 
-func putSettings(ctx context.Context, q querier, userID string, s *leapmuxv1.TradingLabSettings, hash string) error {
+// putSettings stores settings. passphrase_hash held the order confirmation
+// passphrase, which approval in the person's browser replaced; writing it
+// empty clears any a deployed worker kept.
+func putSettings(ctx context.Context, q querier, userID string, s *leapmuxv1.TradingLabSettings) error {
 	spec, err := marshal(s)
 	if err != nil {
 		return err
 	}
 	_, err = q.ExecContext(ctx, `INSERT INTO trading_lab_settings (user_id, spec, passphrase_hash, updated_at_ms) VALUES (?, ?, ?, ?)
 		ON CONFLICT (user_id) DO UPDATE SET spec = excluded.spec, passphrase_hash = excluded.passphrase_hash, updated_at_ms = excluded.updated_at_ms`,
-		userID, spec, hash, s.GetUpdatedAtMs())
+		userID, spec, "", s.GetUpdatedAtMs())
 	return err
 }
 

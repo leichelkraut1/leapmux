@@ -20,23 +20,20 @@ func TestLabConnectorPassphrase(t *testing.T) {
 		req.Settings = s
 		return h.lab.SaveSettings(h.ctx, userID, req)
 	}
-	_, err = save(&leapmuxv1.SaveTradingLabSettingsRequest{NewConnectorPassphrase: "correct horse battery"})
-	assert.ErrorIs(t, err, ErrInvalid, "the confirmation passphrase cannot double as the connector's")
 	_, err = save(&leapmuxv1.SaveTradingLabSettingsRequest{NewConnectorPassphrase: "short"})
 	assert.ErrorIs(t, err, ErrInvalid)
 
 	out, err := save(&leapmuxv1.SaveTradingLabSettingsRequest{NewConnectorPassphrase: "phone sign-in words"})
 	require.NoError(t, err)
 	assert.True(t, out.GetHasConnectorPassphrase())
-	assert.True(t, out.GetHasConfirmationPassphrase())
 	require.NoError(t, h.lab.CheckConnectorPassphrase(h.ctx, userID, "phone sign-in words"))
-	assert.ErrorIs(t, h.lab.CheckConnectorPassphrase(h.ctx, userID, "correct horse battery"), ErrPassphrase)
+	assert.ErrorIs(t, h.lab.CheckConnectorPassphrase(h.ctx, userID, "a wrong guess"), ErrPassphrase)
 
 	// Saving other settings keeps it, and the stored settings never carry it.
 	out, err = save(&leapmuxv1.SaveTradingLabSettingsRequest{})
 	require.NoError(t, err)
 	assert.True(t, out.GetHasConnectorPassphrase())
-	stored, _, err := getSettings(h.ctx, h.db, userID)
+	stored, err := getSettings(h.ctx, h.db, userID)
 	require.NoError(t, err)
 	assert.False(t, stored.GetHasConnectorPassphrase())
 }

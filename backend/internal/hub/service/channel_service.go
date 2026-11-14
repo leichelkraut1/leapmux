@@ -215,7 +215,11 @@ func (s *ChannelService) OpenChannel(
 						// refuses an empty list outright, so a hub that stopped
 						// sending this opens no channel at all rather than
 						// silently promoting a narrow app to full authority.
-						GrantedScopes:    authscope.ScopesToWire(user.Scopes),
+						GrantedScopes: authscope.ScopesToWire(user.Scopes),
+						// Only a person's cookie session may approve a live
+						// order on the Worker; every bearer, app grant and
+						// agent delegation arrives as false.
+						BrowserSession:   user.Credential.SessionID() != "",
 						HandshakePayload: req.Msg.GetHandshakePayload(),
 						MaxMessageSize:   uint64(s.channelMgr.MaxMessageSize()),
 					},

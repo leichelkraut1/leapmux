@@ -103,15 +103,27 @@ type Robinhood struct {
 }
 
 // ConnectRobinhood dials the configured server and classifies its tools.
-func ConnectRobinhood(ctx context.Context, cfg *leapmuxv1.TradingMcpConfig, dial McpDialer) (*Robinhood, error) {
+//
+// With SIGN_IN auth, tokens supplies the access token of the person's
+// browser sign-in, refreshed as it nears expiry; otherwise the token comes
+// from the configured environment variable or file.
+func ConnectRobinhood(ctx context.Context, cfg *leapmuxv1.TradingMcpConfig, dial McpDialer, tokens func(context.Context) (string, error)) (*Robinhood, error) {
 	if cfg == nil || (cfg.GetUrl() == "" && cfg.GetCommand() == "") {
 		return nil, errors.New("no Robinhood MCP server is configured")
 	}
-	token, err := ResolveToken(cfg)
-	if err != nil {
-		return nil, err
+	mc := mcpclient.Config{URL: cfg.GetUrl(), Command: cfg.GetCommand(), Args: cfg.GetArgs(), ClientName: "leapmux-tradinglab"}
+	if cfg.GetAuth() == leapmuxv1.TradingBrokerAuth_TRADING_BROKER_AUTH_SIGN_IN {
+		if tokens == nil || cfg.GetUrl() == "" {
+			return nil, errors.New("signing in to the broker needs its HTTP URL")
+		}
+		mc.TokenSource = tokens
+	} else {
+		token, err := ResolveToken(cfg)
+		if err != nil {
+			return nil, err
+		}
+		mc.BearerToken = token
 	}
-	mc := mcpclient.Config{URL: cfg.GetUrl(), Command: cfg.GetCommand(), Args: cfg.GetArgs(), BearerToken: token, ClientName: "leapmux-tradinglab"}
 	if cfg.GetTransport() == leapmuxv1.TradingMcpTransport_TRADING_MCP_TRANSPORT_STDIO {
 		mc.URL = ""
 	} else if cfg.GetTransport() == leapmuxv1.TradingMcpTransport_TRADING_MCP_TRANSPORT_HTTP {

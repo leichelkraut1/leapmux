@@ -356,7 +356,7 @@ func newLabHarness(t *testing.T) *labHarness {
 	s.ReplayDir, s.Watchlist = dir, SampleSymbols
 	s.Risk.MaxLossPerOrder, s.Risk.MaxDailyRisk, s.Risk.MaxOpenRisk = 1000, 2000, 2000
 	s.Robinhood = &leapmuxv1.TradingMcpConfig{Transport: leapmuxv1.TradingMcpTransport_TRADING_MCP_TRANSPORT_HTTP, Url: h.broker.url(), TokenEnv: "TEST_RH_TOKEN"}
-	_, err = h.lab.SaveSettings(h.ctx, userID, &leapmuxv1.SaveTradingLabSettingsRequest{Settings: s, NewConfirmationPassphrase: "correct horse battery"})
+	_, err = h.lab.SaveSettings(h.ctx, userID, &leapmuxv1.SaveTradingLabSettingsRequest{Settings: s})
 	require.NoError(t, err)
 	return h
 }
@@ -411,7 +411,7 @@ func TestRobinhoodToolsAreClassifiedAndAuthenticationVerified(t *testing.T) {
 	s.Robinhood.ToolNames = map[string]string{OpQuote: "place_crypto_trade"}
 	_, err = h.lab.SaveSettings(h.ctx, userID, &leapmuxv1.SaveTradingLabSettingsRequest{Settings: s})
 	require.NoError(t, err)
-	sess, err := ConnectRobinhood(h.ctx, s.GetRobinhood(), nil)
+	sess, err := ConnectRobinhood(h.ctx, s.GetRobinhood(), nil, nil)
 	require.NoError(t, err)
 	defer func() { _ = sess.Close() }()
 	assert.False(t, sess.Reader().Supports(OpQuote), "a read operation mapped to an order tool is refused")
@@ -486,17 +486,16 @@ func TestConfirmNeedsThePersonTheExactOrderAndTime(t *testing.T) {
 	c := h.approvedCandidate()
 	o, err := h.lab.Prepare(h.ctx, userID, &leapmuxv1.PrepareTradingOrderRequest{CandidateId: c.GetId(), Quantity: 1})
 	require.NoError(t, err)
-	confirm := func(fingerprint, pass string, viaAgent bool) error {
-		_, err := h.lab.Confirm(h.ctx, userID, &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: fingerprint, Passphrase: pass}, viaAgent)
+	confirm := func(fingerprint string, byPerson bool) error {
+		_, err := h.lab.Confirm(h.ctx, userID, &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: fingerprint}, byPerson)
 		return err
 	}
-	assert.ErrorIs(t, confirm(o.GetFingerprint(), "correct horse battery", true), ErrDenied, "never through an agent's socket")
-	assert.ErrorIs(t, confirm(o.GetFingerprint(), "guess", false), ErrDenied)
-	assert.ErrorIs(t, confirm(strings.Repeat("a", 64), "correct horse battery", false), ErrDenied, "a different order's fingerprint")
+	assert.ErrorIs(t, confirm(o.GetFingerprint(), false), ErrDenied, "never an agent, a token or an app")
+	assert.ErrorIs(t, confirm(strings.Repeat("a", 64), true), ErrDenied, "a different order's fingerprint")
 	assert.Zero(t, h.broker.placements())
 
 	h.clock.Set(h.frames[0].AsOf.Add(3 * time.Minute))
-	assert.ErrorIs(t, confirm(o.GetFingerprint(), "correct horse battery", false), ErrConflict, "the window closed")
+	assert.ErrorIs(t, confirm(o.GetFingerprint(), true), ErrConflict, "the window closed")
 	got, err := getOrder(h.ctx, h.db, userID, o.GetId())
 	require.NoError(t, err)
 	assert.Equal(t, leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_EXPIRED, got.GetState())
@@ -509,11 +508,11 @@ func TestConfirmSubmitsOnceAndReconcilesFillsIntoTheLiveBook(t *testing.T) {
 	c := h.approvedCandidate()
 	o, err := h.lab.Prepare(h.ctx, userID, &leapmuxv1.PrepareTradingOrderRequest{CandidateId: c.GetId(), Quantity: 2})
 	require.NoError(t, err)
-	req := &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: o.GetFingerprint(), Passphrase: "correct horse battery"}
-	placed, err := h.lab.Confirm(h.ctx, userID, req, false)
+	req := &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: o.GetFingerprint()}
+	placed, err := h.lab.Confirm(h.ctx, userID, req, true)
 	require.NoError(t, err)
 	assert.Equal(t, leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_SUBMITTED, placed.GetState())
-	_, err = h.lab.Confirm(h.ctx, userID, req, false)
+	_, err = h.lab.Confirm(h.ctx, userID, req, true)
 	assert.ErrorIs(t, err, ErrConflict, "a second confirmation of one order")
 	assert.Equal(t, 1, h.broker.placements())
 	cand, _ := getCandidate(h.ctx, h.db, userID, c.GetId())
@@ -553,7 +552,7 @@ func TestALostSubmissionReplyIsReconciledNeverResent(t *testing.T) {
 	o, err := h.lab.Prepare(h.ctx, userID, &leapmuxv1.PrepareTradingOrderRequest{CandidateId: c.GetId(), Quantity: 1})
 	require.NoError(t, err)
 	h.broker.set(func(b *fakeBroker) { b.dropPlaceReply = true })
-	got, err := h.lab.Confirm(h.ctx, userID, &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: o.GetFingerprint(), Passphrase: "correct horse battery"}, false)
+	got, err := h.lab.Confirm(h.ctx, userID, &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: o.GetFingerprint()}, true)
 	require.NoError(t, err)
 	assert.Equal(t, leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_SUBMITTING, got.GetState(), "an unknown outcome is not a failure")
 	assert.Equal(t, 1, h.broker.placements())
@@ -577,7 +576,7 @@ func TestARejectedSubmissionIsFinal(t *testing.T) {
 	o, err := h.lab.Prepare(h.ctx, userID, &leapmuxv1.PrepareTradingOrderRequest{CandidateId: c.GetId(), Quantity: 1})
 	require.NoError(t, err)
 	h.broker.set(func(b *fakeBroker) { b.rejectPlace = "insufficient options approval" })
-	got, err := h.lab.Confirm(h.ctx, userID, &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: o.GetFingerprint(), Passphrase: "correct horse battery"}, false)
+	got, err := h.lab.Confirm(h.ctx, userID, &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: o.GetFingerprint()}, true)
 	require.NoError(t, err)
 	assert.Equal(t, leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_REJECTED, got.GetState())
 	assert.Contains(t, got.GetDetail(), "insufficient options approval")
@@ -591,7 +590,7 @@ func TestAClosingOrderNeedsAConfirmationOrAScopedPolicy(t *testing.T) {
 	c := h.approvedCandidate()
 	o, err := h.lab.Prepare(h.ctx, userID, &leapmuxv1.PrepareTradingOrderRequest{CandidateId: c.GetId(), Quantity: 1})
 	require.NoError(t, err)
-	placed, err := h.lab.Confirm(h.ctx, userID, &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: o.GetFingerprint(), Passphrase: "correct horse battery"}, false)
+	placed, err := h.lab.Confirm(h.ctx, userID, &leapmuxv1.ConfirmTradingOrderRequest{OrderId: o.GetId(), Fingerprint: o.GetFingerprint()}, true)
 	require.NoError(t, err)
 	h.broker.fill(placed.GetBrokerOrderId(), 1, c.GetEntryLimit())
 	_, err = h.lab.Reconcile(h.ctx, userID)
@@ -608,17 +607,17 @@ func TestAClosingOrderNeedsAConfirmationOrAScopedPolicy(t *testing.T) {
 		PositionId: live.GetId(), Side: leapmuxv1.TradingOrderSide_TRADING_ORDER_SIDE_SELL_TO_CLOSE, MaxQuantity: 1,
 		LimitPriceBound: 0.01, ExpiresAtMs: h.frames[0].AsOf.Add(24 * time.Hour).UnixMilli(),
 	}
-	_, err = h.lab.SavePolicy(h.ctx, userID, &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: policy, Passphrase: "correct horse battery"}, true)
+	_, err = h.lab.SavePolicy(h.ctx, userID, &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: policy}, false)
 	assert.ErrorIs(t, err, ErrDenied, "an agent cannot approve a policy")
 	opening := proto.Clone(policy).(*leapmuxv1.TradingExecutionPolicy)
 	opening.Side = leapmuxv1.TradingOrderSide_TRADING_ORDER_SIDE_BUY_TO_OPEN
-	_, err = h.lab.SavePolicy(h.ctx, userID, &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: opening, Passphrase: "correct horse battery"}, false)
+	_, err = h.lab.SavePolicy(h.ctx, userID, &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: opening}, true)
 	assert.ErrorIs(t, err, ErrInvalid, "a policy never opens a position")
 	wide := proto.Clone(policy).(*leapmuxv1.TradingExecutionPolicy)
 	wide.MaxQuantity = 5
-	_, err = h.lab.SavePolicy(h.ctx, userID, &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: wide, Passphrase: "correct horse battery"}, false)
+	_, err = h.lab.SavePolicy(h.ctx, userID, &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: wide}, true)
 	assert.ErrorIs(t, err, ErrInvalid, "a policy cannot cover more than is held")
-	saved, err := h.lab.SavePolicy(h.ctx, userID, &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: policy, Passphrase: "correct horse battery"}, false)
+	saved, err := h.lab.SavePolicy(h.ctx, userID, &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: policy}, true)
 	require.NoError(t, err)
 
 	_, err = h.lab.MarkBooks(h.ctx, userID)
@@ -641,15 +640,15 @@ func TestAClosingOrderNeedsAConfirmationOrAScopedPolicy(t *testing.T) {
 	assert.Equal(t, "policy "+saved.GetId(), sale.GetConfirmedBy())
 }
 
-func TestPassphraseIsStoredOnlyAsAHash(t *testing.T) {
+func TestSavingSettingsClearsAnOldConfirmationPassphrase(t *testing.T) {
 	h := newLabHarness(t)
-	var stored string
-	require.NoError(t, h.db.QueryRow(`SELECT passphrase_hash FROM trading_lab_settings`).Scan(&stored))
-	assert.True(t, strings.HasPrefix(stored, "argon2id$"))
-	assert.NotContains(t, stored, "correct horse")
+	_, err := h.db.Exec(`UPDATE trading_lab_settings SET passphrase_hash = 'argon2id$old'`)
+	require.NoError(t, err)
 	s, err := h.lab.Settings(h.ctx, userID)
 	require.NoError(t, err)
-	assert.True(t, s.GetHasConfirmationPassphrase())
-	_, err = h.lab.SaveSettings(h.ctx, userID, &leapmuxv1.SaveTradingLabSettingsRequest{Settings: s, NewConfirmationPassphrase: "another long passphrase"})
-	assert.ErrorIs(t, err, ErrDenied, "changing it needs the current one")
+	_, err = h.lab.SaveSettings(h.ctx, userID, &leapmuxv1.SaveTradingLabSettingsRequest{Settings: s})
+	require.NoError(t, err)
+	var stored string
+	require.NoError(t, h.db.QueryRow(`SELECT passphrase_hash FROM trading_lab_settings`).Scan(&stored))
+	assert.Empty(t, stored, "approval in the browser replaced it")
 }

@@ -150,6 +150,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+s.base+"/register", s.handleRegister)
 	mux.HandleFunc(s.base+"/authorize", s.handleAuthorize)
 	mux.HandleFunc("POST "+s.base+"/token", s.handleToken)
+	mux.HandleFunc("GET "+s.base+tradinglab.BrokerCallbackPath, s.handleBrokerCallback)
 	return http.MaxBytesHandler(securityHeaders(mux), maxBody)
 }
 

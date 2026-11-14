@@ -23,7 +23,7 @@ import (
 //
 // Preparing re-checks the account, the quote, the contract and the risk
 // budget, and runs the broker's preview. Submitting needs either a person
-// confirming that exact order (its fingerprint) with the passphrase before it
+// approving that exact order (its fingerprint) in their own browser before it
 // expires, or an active execution policy whose scope covers it. Every
 // transition is written before the broker call it leads to, and the client
 // order id is unique, so an order is submitted at most once; after a crash
@@ -34,11 +34,11 @@ const timeInForce = "gfd"
 // ErrPaperMode is the gateway refusing a live order in paper mode.
 var ErrPaperMode = errors.New("the lab is in paper mode, so the gateway places no live orders")
 
-func (l *Lab) liveBroker(ctx context.Context, s *leapmuxv1.TradingLabSettings) (BrokerSession, error) {
+func (l *Lab) liveBroker(ctx context.Context, userID string, s *leapmuxv1.TradingLabSettings) (BrokerSession, error) {
 	if s.GetMode() != leapmuxv1.TradingLabMode_TRADING_LAB_MODE_LIVE {
 		return nil, fmt.Errorf("%w: %w", ErrConflict, ErrPaperMode)
 	}
-	sess, err := l.connect(ctx, s.GetRobinhood())
+	sess, err := l.connect(ctx, userID, s.GetRobinhood())
 	if err != nil {
 		return nil, conflictf("the broker is unreachable: %v", err)
 	}
@@ -106,14 +106,11 @@ func (l *Lab) openRisk(ctx context.Context, q querier, userID string, now time.T
 
 // Prepare checks a proposed order and records it PREPARED. It places nothing.
 func (l *Lab) Prepare(ctx context.Context, userID string, req *leapmuxv1.PrepareTradingOrderRequest) (*leapmuxv1.TradingOrder, error) {
-	s, _, err := getSettings(ctx, l.store.db, userID)
+	s, err := getSettings(ctx, l.store.db, userID)
 	if err != nil {
 		return nil, err
 	}
-	if !s.GetHasConfirmationPassphrase() {
-		return nil, conflictf("set a confirmation passphrase before preparing a live order")
-	}
-	sess, err := l.liveBroker(ctx, s)
+	sess, err := l.liveBroker(ctx, userID, s)
 	if err != nil {
 		return nil, err
 	}
@@ -273,21 +270,19 @@ func (l *Lab) prepareWith(ctx context.Context, userID string, s *leapmuxv1.Tradi
 	return o, nil
 }
 
-// Confirm submits a prepared order that a person confirmed. viaAgentSocket
-// is set for a call that arrived through an agent's control socket, which
-// can never confirm.
-func (l *Lab) Confirm(ctx context.Context, userID string, req *leapmuxv1.ConfirmTradingOrderRequest, viaAgentSocket bool) (*leapmuxv1.TradingOrder, error) {
-	if viaAgentSocket {
-		return nil, deniedf("an agent cannot confirm an order; a person confirms it in the Trading Research view")
+// Confirm submits a prepared order that a person approved. byPerson is set
+// only for a call from the person's own browser session: never a control
+// socket, an API token, an app or an agent's delegation, which all hold the
+// owner's identity and so cannot be told apart from them otherwise.
+func (l *Lab) Confirm(ctx context.Context, userID string, req *leapmuxv1.ConfirmTradingOrderRequest, byPerson bool) (*leapmuxv1.TradingOrder, error) {
+	if !byPerson {
+		return nil, deniedf("only you can approve an order, in the Trading Research view in your browser; an agent or app cannot")
 	}
-	s, hash, err := getSettings(ctx, l.store.db, userID)
+	s, err := getSettings(ctx, l.store.db, userID)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkPassphrase(hash, req.GetPassphrase()); err != nil {
-		return nil, deniedf("%v", err)
-	}
-	sess, err := l.liveBroker(ctx, s)
+	sess, err := l.liveBroker(ctx, userID, s)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +396,7 @@ func (l *Lab) Cancel(ctx context.Context, userID, orderID string) (*leapmuxv1.Tr
 	if err != nil {
 		return nil, err
 	}
-	sess, err := l.connect(ctx, s.GetRobinhood())
+	sess, err := l.connect(ctx, userID, s.GetRobinhood())
 	if err != nil {
 		return nil, conflictf("the broker is unreachable: %v", err)
 	}
@@ -444,7 +439,7 @@ func (l *Lab) Reconcile(ctx context.Context, userID string) ([]*leapmuxv1.Tradin
 		if err != nil {
 			return nil, err
 		}
-		sess, err := l.connect(ctx, s.GetRobinhood())
+		sess, err := l.connect(ctx, userID, s.GetRobinhood())
 		if err != nil {
 			return nil, conflictf("the broker is unreachable: %v", err)
 		}
@@ -573,19 +568,12 @@ func (l *Lab) applyFill(ctx context.Context, q querier, userID string, o *leapmu
 // --- Execution policies ---
 
 // SavePolicy approves a standing, precisely scoped policy. It is the user's
-// decision as much as a confirmation is, so it takes the same passphrase and
-// refuses an agent's socket. The lab supports only closing policies: a
-// policy may sell an open live position at or above a price, never buy.
-func (l *Lab) SavePolicy(ctx context.Context, userID string, req *leapmuxv1.SaveTradingExecutionPolicyRequest, viaAgentSocket bool) (*leapmuxv1.TradingExecutionPolicy, error) {
-	if viaAgentSocket {
-		return nil, deniedf("an agent cannot approve an execution policy")
-	}
-	_, hash, err := getSettings(ctx, l.store.db, userID)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkPassphrase(hash, req.GetPassphrase()); err != nil {
-		return nil, deniedf("%v", err)
+// decision as much as a confirmation is, so like Confirm it needs byPerson.
+// The lab supports only closing policies: a policy may sell an open live
+// position at or above a price, never buy.
+func (l *Lab) SavePolicy(ctx context.Context, userID string, req *leapmuxv1.SaveTradingExecutionPolicyRequest, byPerson bool) (*leapmuxv1.TradingExecutionPolicy, error) {
+	if !byPerson {
+		return nil, deniedf("only you can approve an execution policy, in your browser; an agent or app cannot")
 	}
 	p := proto.Clone(req.GetPolicy()).(*leapmuxv1.TradingExecutionPolicy)
 	if p == nil {
@@ -651,7 +639,7 @@ func (l *Lab) runPolicies(ctx context.Context, userID string, s *leapmuxv1.Tradi
 			_ = putPolicy(ctx, l.store.db, userID, p)
 			continue
 		}
-		sess, err := l.liveBroker(ctx, s)
+		sess, err := l.liveBroker(ctx, userID, s)
 		if err != nil {
 			notes = append(notes, "policy "+p.GetId()+": "+err.Error())
 			continue

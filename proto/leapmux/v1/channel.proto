@@ -97,6 +97,12 @@ message ChannelOpenRequest {
   // narrow app to full authority: the failure is loud and immediate, and the
   // alternative is silent and total.
   repeated Scope granted_scopes = 5;
+  // Set when the credential that opened this channel is a person's
+  // cookie-backed browser session: never an API token, an app's grant or an
+  // agent's delegation. The Worker lets only such a channel approve an act
+  // that must be the person's own, such as placing a live order. It arrives
+  // from the Hub on the same terms as user_id; false refuses those acts.
+  bool browser_session = 6;
 }
 
 // Worker -> Hub: response to channel open request.

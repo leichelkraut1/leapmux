@@ -558,13 +558,15 @@ var ownerGuardedProbes = func() []ownerGuardedProbe {
 			return &leapmuxv1.PrepareTradingOrderRequest{CandidateId: "cand-1", Quantity: 1, LimitPrice: 1}
 		}},
 		{"ConfirmTradingOrder", func() proto.Message {
-			return &leapmuxv1.ConfirmTradingOrderRequest{OrderId: "order-1", Fingerprint: "f", Passphrase: "p"}
+			return &leapmuxv1.ConfirmTradingOrderRequest{OrderId: "order-1", Fingerprint: "f"}
 		}},
 		{"CancelTradingOrder", func() proto.Message { return &leapmuxv1.CancelTradingOrderRequest{OrderId: "order-1"} }},
 		{"ReconcileTradingOrders", func() proto.Message { return &leapmuxv1.ReconcileTradingOrdersRequest{} }},
 		{"SaveTradingExecutionPolicy", func() proto.Message {
-			return &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: &leapmuxv1.TradingExecutionPolicy{PositionId: "pos-1"}, Passphrase: "p"}
+			return &leapmuxv1.SaveTradingExecutionPolicyRequest{Policy: &leapmuxv1.TradingExecutionPolicy{PositionId: "pos-1"}}
 		}},
+		{"StartTradingBrokerSignIn", func() proto.Message { return &leapmuxv1.StartTradingBrokerSignInRequest{} }},
+		{"SignOutTradingBroker", func() proto.Message { return &leapmuxv1.SignOutTradingBrokerRequest{} }},
 		{"RevokeTradingExecutionPolicy", func() proto.Message {
 			return &leapmuxv1.RevokeTradingExecutionPolicyRequest{PolicyId: "policy-1"}
 		}},

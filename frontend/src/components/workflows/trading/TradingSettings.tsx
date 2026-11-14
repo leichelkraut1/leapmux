@@ -1,11 +1,12 @@
 import type { TradingBrokerStatus, TradingLabSettings } from '~/generated/proto/leapmux/v1/trading_lab_pb'
 import { clone } from '@bufbuild/protobuf'
-import { createEffect, createSignal, For, on, Show } from 'solid-js'
+import { createEffect, createSignal, For, on, onCleanup, Show } from 'solid-js'
 import * as workerRpc from '~/api/workerRpc'
 import { Alert } from '~/components/common/Alert'
 import { PillGroup } from '~/components/common/PillGroup'
 import { showInfoToast } from '~/components/common/Toast'
 import {
+  TradingBrokerAuth,
   TradingLabMode,
   TradingLabSettingsSchema,
   TradingMarketDataSource,
@@ -27,22 +28,34 @@ const SOURCES = [
   { key: TradingMarketDataSource.ROBINHOOD, label: 'Robinhood MCP (read-only)' },
 ] as const
 
+const AUTHS = [
+  { key: TradingBrokerAuth.SIGN_IN, label: 'Sign in (Robinhood agent server)' },
+  { key: TradingBrokerAuth.TOKEN, label: 'Token on this computer' },
+] as const
+
+/** Robinhood's MCP server for agents, which the sign-in reaches. */
+const ROBINHOOD_AGENT_URL = 'https://agent.robinhood.com/mcp/trading'
+
+/** An unset value is a token, as the worker reads it. */
+function authOf(s: TradingLabSettings): TradingBrokerAuth {
+  return s.robinhood?.auth === TradingBrokerAuth.SIGN_IN ? TradingBrokerAuth.SIGN_IN : TradingBrokerAuth.TOKEN
+}
+
 const TRANSPORTS = [
   { key: TradingMcpTransport.HTTP, label: 'HTTP' },
   { key: TradingMcpTransport.STDIO, label: 'Local command' },
 ] as const
 
 /**
- * The lab's settings, the broker verification and the confirmation
- * passphrase. The broker token is never entered here: the settings name the
- * environment variable or file on the lab computer that holds it.
+ * The lab's settings, the broker sign-in and verification, and the read-only
+ * connector. No broker token is entered here: the sign-in happens on the
+ * broker's own page and the worker keeps the tokens, or the settings name the
+ * environment variable or file on the lab computer that holds one.
  */
 export function TradingSettings(props: { workerId: string }) {
   const [draft, setDraft] = createSignal<TradingLabSettings>()
   const [broker, setBroker] = createSignal<TradingBrokerStatus>()
   const [error, setError] = createSignal<string | null>(null)
-  const [newPass, setNewPass] = createSignal('')
-  const [currentPass, setCurrentPass] = createSignal('')
   const [connectorPass, setConnectorPass] = createSignal('')
   const action = createWorkflowAction()
 
@@ -61,6 +74,10 @@ export function TradingSettings(props: { workerId: string }) {
     }
   }
   createEffect(on(() => props.workerId, () => void load()))
+  // The broker sign-in finishes in another tab; coming back re-reads it.
+  const onFocus = () => void load()
+  window.addEventListener('focus', onFocus)
+  onCleanup(() => window.removeEventListener('focus', onFocus))
 
   /** Edits a copy, so a refused save leaves the stored settings as they were. */
   const edit = (fn: (s: TradingLabSettings) => void) => {
@@ -76,16 +93,40 @@ export function TradingSettings(props: { workerId: string }) {
   const save = () => void action.run(async () => {
     const resp = await workerRpc.saveTradingLabSettings(props.workerId, {
       settings: draft(),
-      newConfirmationPassphrase: newPass(),
-      currentConfirmationPassphrase: currentPass(),
       newConnectorPassphrase: connectorPass(),
     })
     setDraft(resp.settings)
-    setNewPass('')
-    setCurrentPass('')
     setConnectorPass('')
     showInfoToast('Saved the lab settings.')
   })
+
+  const [signInUrl, setSignInUrl] = createSignal<string>()
+  /**
+   * Saves the settings, then opens the broker's sign-in page. The tab is
+   * opened during the click, so a popup blocker lets it through, and pointed
+   * at the page once the worker answers.
+   */
+  const signIn = () => {
+    setSignInUrl(undefined)
+    const tab = window.open('', '_blank')
+    void action.run(async () => {
+      try {
+        await workerRpc.saveTradingLabSettings(props.workerId, { settings: draft() })
+        const resp = await workerRpc.startTradingBrokerSignIn(props.workerId, {})
+        if (tab) {
+          tab.opener = null
+          tab.location.href = resp.authorizeUrl
+        }
+        else {
+          setSignInUrl(resp.authorizeUrl)
+        }
+      }
+      catch (err) {
+        tab?.close()
+        throw err
+      }
+    })
+  }
 
   return (
     <div class={styles.form} data-testid="trading-settings">
@@ -97,7 +138,7 @@ export function TradingSettings(props: { workerId: string }) {
             <fieldset class={styles.fieldset}>
               <legend>Mode</legend>
               <PillGroup<TradingLabMode> label="Trading mode" options={MODES} selectedKey={s().mode} onSelect={mode => edit(x => (x.mode = mode))} small />
-              <p class={styles.hint}>Live mode needs a confirmation passphrase and a broker verified as ready. Even then, every order waits for you to confirm it.</p>
+              <p class={styles.hint}>Live mode needs a broker verified as ready. Even then, every order waits for you to approve it here, in your browser; an agent or app cannot.</p>
             </fieldset>
 
             <fieldset class={styles.fieldset}>
@@ -136,39 +177,110 @@ export function TradingSettings(props: { workerId: string }) {
             </fieldset>
 
             <fieldset class={styles.fieldset}>
-              <legend>Robinhood MCP server</legend>
+              <legend>Robinhood</legend>
               <p class={styles.hint}>
-                The connection your ChatGPT account uses is not available here. Configure an MCP server this computer can reach, then verify it: the lab reports which tools it found, keeps order tools away from research, and refuses tools it does not recognize.
+                Connect the lab to Robinhood so research runs on live quotes and option chains, and live orders can go through the gateway. The Robinhood connection in ChatGPT cannot be shared; signing in here reaches the same Robinhood agent server with LeapMux's own sign-in. Research agents never see it.
               </p>
-              <PillGroup<TradingMcpTransport> label="Transport" options={TRANSPORTS} selectedKey={s().robinhood?.transport ?? TradingMcpTransport.HTTP} onSelect={tr => edit(x => x.robinhood && (x.robinhood.transport = tr))} small />
-              <div class={styles.grid2}>
-                <Show
-                  when={(s().robinhood?.transport ?? TradingMcpTransport.HTTP) === TradingMcpTransport.HTTP}
-                  fallback={(
-                    <label class={styles.field}>
-                      Command
-                      <input value={s().robinhood?.command ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.command = e.currentTarget.value))} />
-                    </label>
-                  )}
-                >
+              <PillGroup<TradingBrokerAuth>
+                label="How to connect"
+                options={AUTHS}
+                selectedKey={authOf(s())}
+                onSelect={auth => edit((x) => {
+                  if (!x.robinhood)
+                    return
+                  x.robinhood.auth = auth
+                  if (auth === TradingBrokerAuth.SIGN_IN) {
+                    x.robinhood.transport = TradingMcpTransport.HTTP
+                    x.robinhood.url ||= ROBINHOOD_AGENT_URL
+                  }
+                })}
+                small
+              />
+              <Show
+                when={authOf(s()) === TradingBrokerAuth.SIGN_IN}
+                fallback={(
+                  <>
+                    <PillGroup<TradingMcpTransport> label="Transport" options={TRANSPORTS} selectedKey={s().robinhood?.transport ?? TradingMcpTransport.HTTP} onSelect={tr => edit(x => x.robinhood && (x.robinhood.transport = tr))} small />
+                    <div class={styles.grid2}>
+                      <Show
+                        when={(s().robinhood?.transport ?? TradingMcpTransport.HTTP) === TradingMcpTransport.HTTP}
+                        fallback={(
+                          <label class={styles.field}>
+                            Command
+                            <input value={s().robinhood?.command ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.command = e.currentTarget.value))} />
+                          </label>
+                        )}
+                      >
+                        <label class={styles.field}>
+                          Server URL
+                          <input value={s().robinhood?.url ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.url = e.currentTarget.value))} data-testid="trading-mcp-url" />
+                        </label>
+                      </Show>
+                      <label class={styles.field}>
+                        Token environment variable
+                        <input value={s().robinhood?.tokenEnv ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.tokenEnv = e.currentTarget.value))} placeholder="ROBINHOOD_MCP_TOKEN" />
+                      </label>
+                      <label class={styles.field}>
+                        or token file
+                        <input value={s().robinhood?.tokenFile ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.tokenFile = e.currentTarget.value))} />
+                      </label>
+                      <label class={styles.field}>
+                        Account number (empty: the only one)
+                        <input value={s().robinhood?.accountId ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.accountId = e.currentTarget.value))} />
+                      </label>
+                    </div>
+                  </>
+                )}
+              >
+                <div class={styles.grid2}>
                   <label class={styles.field}>
                     Server URL
                     <input value={s().robinhood?.url ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.url = e.currentTarget.value))} data-testid="trading-mcp-url" />
                   </label>
-                </Show>
-                <label class={styles.field}>
-                  Token environment variable
-                  <input value={s().robinhood?.tokenEnv ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.tokenEnv = e.currentTarget.value))} placeholder="ROBINHOOD_MCP_TOKEN" />
-                </label>
-                <label class={styles.field}>
-                  or token file
-                  <input value={s().robinhood?.tokenFile ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.tokenFile = e.currentTarget.value))} />
-                </label>
-                <label class={styles.field}>
-                  Account number (empty: the only one)
-                  <input value={s().robinhood?.accountId ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.accountId = e.currentTarget.value))} />
-                </label>
-              </div>
+                  <label class={styles.field}>
+                    Account number (empty: the only one)
+                    <input value={s().robinhood?.accountId ?? ''} onInput={e => edit(x => x.robinhood && (x.robinhood.accountId = e.currentTarget.value))} />
+                  </label>
+                </div>
+                <div class={styles.card} data-testid="trading-broker-sign-in">
+                  <div class={styles.row}>
+                    <StatusBadge label={s().brokerSignIn?.signedIn ? 'Signed in' : 'Not signed in'} tone={s().brokerSignIn?.signedIn ? 'success' : 'warning'} />
+                    <Show when={s().brokerSignIn?.signedIn}>
+                      <span class={styles.secondary}>{`since ${new Date(Number(s().brokerSignIn?.signedInAtMs ?? 0)).toLocaleString()}`}</span>
+                    </Show>
+                  </div>
+                  <Show when={!s().connectorUrl}>
+                    <p class={styles.hint}>Signing in needs this computer's connector address (trading_connector_url), where Robinhood sends you back. Use the lab on the computer that serves the connector.</p>
+                  </Show>
+                  <Show when={signInUrl()}>
+                    {u => (
+                      <p class={styles.hint}>
+                        <a href={u()} target="_blank" rel="noopener noreferrer">Open the Robinhood sign-in</a>
+                        {' (your browser blocked the new tab).'}
+                      </p>
+                    )}
+                  </Show>
+                  <div class={styles.actions}>
+                    <button type="button" disabled={action.busy() || !s().connectorUrl} onClick={signIn} data-testid="trading-broker-sign-in-button">
+                      {s().brokerSignIn?.signedIn ? 'Sign in again' : 'Sign in to Robinhood'}
+                    </button>
+                    <Show when={s().brokerSignIn?.signedIn}>
+                      <button
+                        type="button"
+                        class="outline"
+                        disabled={action.busy()}
+                        onClick={() => void action.run(async () => {
+                          const resp = await workerRpc.signOutTradingBroker(props.workerId, {})
+                          setDraft(resp.settings)
+                        })}
+                      >
+                        Sign out
+                      </button>
+                    </Show>
+                  </div>
+                  <p class={styles.hint}>Robinhood opens in a new tab. After you sign in there, come back here, then verify the broker.</p>
+                </div>
+              </Show>
               <div class={styles.actions}>
                 <button
                   type="button"
@@ -265,37 +377,16 @@ export function TradingSettings(props: { workerId: string }) {
               </div>
             </fieldset>
 
-            <fieldset class={styles.fieldset}>
-              <legend>Confirmation passphrase</legend>
-              <p class={styles.hint}>
-                {s().hasConfirmationPassphrase
-                  ? 'A passphrase is set. Every live order and execution policy asks for it. Agents never see it.'
-                  : 'No passphrase is set. Live orders are impossible until you set one (at least 10 characters).'}
-              </p>
-              <div class={styles.grid2}>
-                <Show when={s().hasConfirmationPassphrase}>
-                  <label class={styles.field}>
-                    Current passphrase
-                    <input type="password" autocomplete="off" value={currentPass()} onInput={e => setCurrentPass(e.currentTarget.value)} />
-                  </label>
-                </Show>
-                <label class={styles.field}>
-                  New passphrase
-                  <input type="password" autocomplete="new-password" value={newPass()} onInput={e => setNewPass(e.currentTarget.value)} data-testid="trading-new-passphrase" />
-                </label>
-              </div>
-            </fieldset>
-
             <fieldset class={styles.fieldset} data-testid="trading-connector">
-              <legend>Claude connector (read-only)</legend>
+              <legend>Read-only connector (Claude, ChatGPT, Codex)</legend>
               <Show
                 when={s().connectorUrl}
-                fallback={<p class={styles.hint}>This computer does not serve the connector. A worker started with trading_connector_listen and trading_connector_url lets Claude on your phone read the lab.</p>}
+                fallback={<p class={styles.hint}>This computer does not serve the connector. A worker started with trading_connector_listen and trading_connector_url lets Claude, ChatGPT or Codex read the lab.</p>}
               >
                 {url => (
                   <>
                     <p class={styles.hint}>
-                      Add this URL as a custom connector in Claude (Settings, Connectors). Claude can then read runs, predictions, the shadow books and metrics. It cannot prepare, confirm or cancel an order.
+                      Add this URL as a custom connector in Claude, ChatGPT or Codex. It can then read runs, predictions, the shadow books and metrics. It cannot prepare, approve or cancel an order.
                     </p>
                     <div class={t.mono} data-testid="trading-connector-url">{url()}</div>
                   </>
@@ -303,8 +394,8 @@ export function TradingSettings(props: { workerId: string }) {
               </Show>
               <p class={styles.hint}>
                 {s().hasConnectorPassphrase
-                  ? 'A connector passphrase is set. Claude asks for it when you connect. Setting a new one signs out every connected app.'
-                  : 'No connector passphrase is set, so no app can sign in. Use at least 10 characters, different from the confirmation passphrase.'}
+                  ? 'A connector passphrase is set. The app asks for it when you connect. Setting a new one signs out every connected app.'
+                  : 'No connector passphrase is set, so no app can sign in. Use at least 10 characters.'}
               </p>
               <div class={styles.grid2}>
                 <label class={styles.field}>

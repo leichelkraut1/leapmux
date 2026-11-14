@@ -70,11 +70,14 @@ type Config struct {
 
 // Lab is the trading lab of one coordinator.
 type Lab struct {
-	store   *store
-	clock   quartz.Clock
-	log     *slog.Logger
-	newID   func() string
-	connect func(ctx context.Context, cfg *leapmuxv1.TradingMcpConfig) (BrokerSession, error)
+	store *store
+	clock quartz.Clock
+	log   *slog.Logger
+	newID func() string
+	// connect opens the broker for a user, whose sign-in it may need.
+	connect func(ctx context.Context, userID string, cfg *leapmuxv1.TradingMcpConfig) (BrokerSession, error)
+	// signIns holds the broker sign-ins waiting for the browser to return.
+	signIns brokerSignIns
 	// connectorURL is Config.ConnectorURL.
 	connectorURL string
 	// gateMu serializes the gateway's state transitions, so a double click
@@ -92,13 +95,17 @@ func New(cfg Config) *Lab {
 	if log == nil {
 		log = slog.Default()
 	}
-	connect := cfg.Connect
-	if connect == nil {
-		connect = func(ctx context.Context, c *leapmuxv1.TradingMcpConfig) (BrokerSession, error) {
-			return ConnectRobinhood(ctx, c, nil)
+	l := &Lab{store: &store{db: cfg.DB}, clock: clock, log: log.With("component", "tradinglab"), newID: cfg.NewID, connectorURL: cfg.ConnectorURL}
+	if cfg.Connect != nil {
+		l.connect = func(ctx context.Context, _ string, c *leapmuxv1.TradingMcpConfig) (BrokerSession, error) {
+			return cfg.Connect(ctx, c)
+		}
+	} else {
+		l.connect = func(ctx context.Context, userID string, c *leapmuxv1.TradingMcpConfig) (BrokerSession, error) {
+			return ConnectRobinhood(ctx, c, nil, func(ctx context.Context) (string, error) { return l.brokerToken(ctx, userID, c.GetUrl()) })
 		}
 	}
-	return &Lab{store: &store{db: cfg.DB}, clock: clock, log: log.With("component", "tradinglab"), newID: cfg.NewID, connect: connect, connectorURL: cfg.ConnectorURL}
+	return l
 }
 
 func (l *Lab) now() time.Time { return l.clock.Now().UTC() }
@@ -189,23 +196,28 @@ func normalizeSettings(s *leapmuxv1.TradingLabSettings) error {
 
 // Settings returns the user's settings.
 func (l *Lab) Settings(ctx context.Context, userID string) (*leapmuxv1.TradingLabSettings, error) {
-	s, _, err := getSettings(ctx, l.store.db, userID)
+	s, err := getSettings(ctx, l.store.db, userID)
 	if err != nil {
 		return nil, err
 	}
 	return s, l.fillConnector(ctx, l.store.db, userID, s)
 }
 
-// fillConnector sets the settings' connector fields, which are never stored
-// with them.
+// fillConnector sets the settings' derived fields, which are never stored
+// with them: the connector's and the broker sign-in's.
 func (l *Lab) fillConnector(ctx context.Context, q querier, userID string, s *leapmuxv1.TradingLabSettings) error {
 	hash, err := getConnectorHash(ctx, q, userID)
+	if err != nil {
+		return err
+	}
 	s.HasConnectorPassphrase, s.ConnectorUrl = hash != "", l.connectorURL
+	s.BrokerSignIn, err = brokerSignInStatus(ctx, q, userID)
 	return err
 }
 
-// SaveSettings validates and stores settings, and sets the passphrase.
-// Switching to LIVE needs a passphrase and a broker verified as live-ready.
+// SaveSettings validates and stores settings, and sets the connector
+// passphrase. Switching to LIVE needs a broker verified as live-ready; the
+// service lets only the person's browser session ask for it.
 func (l *Lab) SaveSettings(ctx context.Context, userID string, req *leapmuxv1.SaveTradingLabSettingsRequest) (*leapmuxv1.TradingLabSettings, error) {
 	s := proto.Clone(req.GetSettings()).(*leapmuxv1.TradingLabSettings)
 	if s == nil {
@@ -216,24 +228,7 @@ func (l *Lab) SaveSettings(ctx context.Context, userID string, req *leapmuxv1.Sa
 	}
 	var out *leapmuxv1.TradingLabSettings
 	err := l.store.inTx(ctx, func(q querier) error {
-		_, hash, err := getSettings(ctx, q, userID)
-		if err != nil {
-			return err
-		}
-		if req.GetNewConfirmationPassphrase() != "" {
-			if hash != "" {
-				if err := checkPassphrase(hash, req.GetCurrentConfirmationPassphrase()); err != nil {
-					return deniedf("changing the passphrase needs the current one")
-				}
-			}
-			if hash, err = hashPassphrase(req.GetNewConfirmationPassphrase()); err != nil {
-				return invalidf("%v", err)
-			}
-		}
 		if s.GetMode() == leapmuxv1.TradingLabMode_TRADING_LAB_MODE_LIVE {
-			if hash == "" {
-				return conflictf("live mode needs a confirmation passphrase")
-			}
 			check, err := getBrokerCheck(ctx, q, userID)
 			if err != nil {
 				return err
@@ -243,13 +238,12 @@ func (l *Lab) SaveSettings(ctx context.Context, userID string, req *leapmuxv1.Sa
 			}
 		}
 		s.UpdatedAtMs = l.now().UnixMilli()
-		s.HasConfirmationPassphrase = hash != ""
-		s.HasConnectorPassphrase, s.ConnectorUrl = false, ""
-		if err := putSettings(ctx, q, userID, s, hash); err != nil {
+		s.HasConnectorPassphrase, s.ConnectorUrl, s.BrokerSignIn = false, "", nil
+		if err := putSettings(ctx, q, userID, s); err != nil {
 			return err
 		}
 		if pass := req.GetNewConnectorPassphrase(); pass != "" {
-			if err := setConnectorPassphrase(ctx, q, userID, pass, hash, s.GetUpdatedAtMs()); err != nil {
+			if err := setConnectorPassphrase(ctx, q, userID, pass, s.GetUpdatedAtMs()); err != nil {
 				return err
 			}
 		} else if req.GetSignOutConnector() {
@@ -270,7 +264,7 @@ func (l *Lab) VerifyBroker(ctx context.Context, userID string) (*leapmuxv1.Tradi
 		return nil, err
 	}
 	var st *leapmuxv1.TradingBrokerStatus
-	sess, err := l.connect(ctx, s.GetRobinhood())
+	sess, err := l.connect(ctx, userID, s.GetRobinhood())
 	if err != nil {
 		st = &leapmuxv1.TradingBrokerStatus{
 			Configured: s.GetRobinhood().GetUrl() != "" || s.GetRobinhood().GetCommand() != "",
@@ -288,10 +282,10 @@ func (l *Lab) VerifyBroker(ctx context.Context, userID string) (*leapmuxv1.Tradi
 
 // marketData opens the configured market data source. The returned closer
 // ends any broker session it opened.
-func (l *Lab) marketData(ctx context.Context, s *leapmuxv1.TradingLabSettings) (MarketData, func(), error) {
+func (l *Lab) marketData(ctx context.Context, userID string, s *leapmuxv1.TradingLabSettings) (MarketData, func(), error) {
 	switch s.GetMarketData() {
 	case leapmuxv1.TradingMarketDataSource_TRADING_MARKET_DATA_SOURCE_ROBINHOOD:
-		sess, err := l.connect(ctx, s.GetRobinhood())
+		sess, err := l.connect(ctx, userID, s.GetRobinhood())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -339,7 +333,7 @@ func (l *Lab) snapshotExecutor(ctx context.Context, req workflow.ExecutorRequest
 	if len(symbols) == 0 {
 		return nil, &workflow.PermanentError{Err: errors.New("no underlyings: set the lab's watchlist or the step's symbols")}
 	}
-	md, closeMD, err := l.marketData(ctx, s)
+	md, closeMD, err := l.marketData(ctx, req.UserID, s)
 	if err != nil {
 		return nil, &workflow.PermanentError{Err: fmt.Errorf("market data: %w", err)}
 	}
@@ -782,7 +776,7 @@ func (l *Lab) MarkBooks(ctx context.Context, userID string) (*leapmuxv1.MarkTrad
 	}
 	resp := &leapmuxv1.MarkTradingBooksResponse{}
 	if len(shadow) > 0 {
-		md, closeMD, err := l.marketData(ctx, s)
+		md, closeMD, err := l.marketData(ctx, userID, s)
 		if err != nil {
 			return nil, conflictf("market data: %v", err)
 		}
@@ -793,7 +787,7 @@ func (l *Lab) MarkBooks(ctx context.Context, userID string) (*leapmuxv1.MarkTrad
 		}
 	}
 	if len(live) > 0 && s.GetMode() == leapmuxv1.TradingLabMode_TRADING_LAB_MODE_LIVE {
-		if sess, err := l.connect(ctx, s.GetRobinhood()); err != nil {
+		if sess, err := l.connect(ctx, userID, s.GetRobinhood()); err != nil {
 			resp.Warnings = append(resp.Warnings, "live positions were not marked: "+err.Error())
 		} else {
 			err = l.markWith(ctx, userID, &LiveMarket{Broker: sess.Reader(), Now: l.now}, live, s, resp)

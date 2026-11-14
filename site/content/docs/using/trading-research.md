@@ -70,12 +70,17 @@ For real market data without trading, set the market data source to **Robinhood 
 
 ## Connecting Robinhood
 
-The Robinhood connection your ChatGPT account uses is **not** available to LeapMux. Configure an MCP server that this computer can reach:
+The Robinhood connection inside ChatGPT belongs to ChatGPT and cannot be shared. LeapMux signs in to the same server, Robinhood's MCP server for agents (`https://agent.robinhood.com/mcp/trading`), with a sign-in of its own:
 
-- the server's URL, or the command that starts it; and
-- the name of the environment variable, or the file, that holds its token on this computer.
+1. In **Trading research → Settings → Robinhood**, choose **Sign in**. The server URL fills in.
+2. Choose **Sign in to Robinhood**. Robinhood's sign-in page opens in a new tab; sign in there and approve LeapMux. Robinhood sends you back to the computer's connector address, so the lab must run on a computer that serves the connector (see [Reading the lab from Claude or ChatGPT](#reading-the-lab-from-claude-or-chatgpt)).
+3. Back in LeapMux, the settings show **Signed in**. Choose **Save and verify broker**.
 
-The token is never stored by LeapMux or sent to an agent.
+The worker keeps the sign-in's tokens, sealed for its own Windows user (DPAPI) on Windows, and refreshes them. No research agent ever sees them. **Sign out** forgets them.
+
+Robinhood's agent server trades in the account you connected to it, which Robinhood may keep separate from your main account.
+
+A server that takes a fixed token instead can still be configured under **Token on this computer**: its URL or start command, and the environment variable or file that holds the token.
 
 **Save and verify broker** connects to the server and reports:
 
@@ -88,19 +93,19 @@ A read operation that maps to a tool that looks like it places or changes orders
 
 ## Placing a real order
 
-1. Switch to **Live** mode. This needs a confirmation passphrase (stored only as a hash) and a broker verified as ready.
+1. Switch to **Live** mode. This needs a broker verified as ready.
 2. In a research run, choose **Add to approved queue** on an eligible idea. Approval places nothing.
 3. Under **Queue and orders**, choose **Prepare order**. The gateway runs these checks, then shows the exact order, its maximum loss, fees and the broker's alerts:
    - It re-reads your account's options permissions and buying power.
    - It refreshes the quote and checks that the contract is tradable and unexpired.
    - It applies your risk budget.
    - It runs the broker's preview.
-4. Tick the acknowledgement, type your passphrase and choose **Place this order** before the confirmation window closes. The gateway submits that order once, with an idempotency key.
+4. Choose **Place this order…**, check the order in the prompt, and choose **Approve and place** before the confirmation window closes. The gateway submits that order once, with an idempotency key.
 5. **Reconcile with broker** records fills in the Live book. If a submission's answer was lost, reconciliation finds the order by its key and never resends it.
 
-Closing a live position works the same way. The other route is an **execution policy**, which you approve with your passphrase. It may only close one live position: up to a stated quantity, at or above a stated price, until it expires. It is used once.
+Closing a live position works the same way. The other route is an **execution policy**, which you approve the same way. It may only close one live position: up to a stated quantity, at or above a stated price, until it expires. It is used once.
 
-An agent cannot set the passphrase, switch to live mode, confirm an order or approve a policy. A research agent cannot reach the lab at all.
+The worker accepts an approval only from your own browser session. An agent, an API token, an app or the read-only connector holds your identity too, but none of them is a browser session, so none can approve an order or a policy, switch to live mode or sign in to the broker. A research agent cannot reach the lab at all.
 
 ## Reading the lab from Claude or ChatGPT
 
@@ -112,7 +117,7 @@ To set it up:
 
 1. Start the Worker with `trading_connector_listen` (a local address) and `trading_connector_url` (the public `https` URL). See [Worker configuration](/docs/admin/configuration/).
 2. Publish the local address at that URL with a reverse proxy, including the two `/.well-known/` paths the configuration describes.
-3. In **Trading research > Settings**, set a connector passphrase. It must differ from the confirmation passphrase, so the passphrase that confirms orders is never typed into a sign-in page.
+3. In **Trading research > Settings**, set a connector passphrase of at least 10 characters. It only signs apps in to read the lab; it never approves an order.
 4. Add the URL as a custom connector: in Claude under **Settings > Connectors**, in ChatGPT under **Settings > Apps & Connectors** (developer mode), or as an MCP server in Codex. The app opens a sign-in page that asks for the connector passphrase.
 
 Sign-in uses OAuth 2.1 with PKCE, and codes go only to Claude's or ChatGPT's own callback or to a loopback address. Five wrong passphrases in 15 minutes lock sign-in for 15 minutes. An access token lasts an hour and a refresh token 30 days. Setting a new connector passphrase, or **Sign out connected apps**, ends every session.

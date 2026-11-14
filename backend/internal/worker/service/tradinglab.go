@@ -14,14 +14,19 @@ import (
 // Trading lab methods (proto/leapmux/v1/trading_lab.proto) follow the
 // workflow methods' scopes: reads under agent:read, changes under
 // agent:write, owner-only. A research agent never reaches them, because its
-// socket is confined to the workflow participant methods. Confirming a live
-// order, approving an execution policy, setting either passphrase and switching
-// to live mode also refuse a call through any local control socket, and the
-// first two require the user's confirmation passphrase, because an
-// unconfined agent holds the owner's grant.
+// socket is confined to the workflow participant methods. Approving a live
+// order or an execution policy, switching to live mode, setting the connector
+// passphrase and signing in to the broker are the person's own acts: an
+// unconfined agent, an API token or an app holds the owner's identity too, so
+// they need byPerson, a call from the person's browser session.
 func registerTradingLabHandlers(r registrar, svc *Service) {
 	const read, write = leapmuxv1.Scope_SCOPE_AGENT_READ, leapmuxv1.Scope_SCOPE_AGENT_WRITE
 	lab := svc.TradingLab
+	// byPerson: the Hub said a browser session opened the channel, and the
+	// call did not come through a local control socket.
+	byPerson := func(ctx context.Context, caller channel.Caller) bool {
+		return caller.BrowserSession && !channel.ViaAgentSocket(ctx)
+	}
 
 	registerOwnerGuarded(r, "GetTradingLabSettings", read, dispatchPlain,
 		func(ctx context.Context, caller channel.Caller, _ *leapmuxv1.GetTradingLabSettingsRequest, sender channel.ResponseWriter) {
@@ -30,9 +35,9 @@ func registerTradingLabHandlers(r registrar, svc *Service) {
 		})
 	registerOwnerGuarded(r, "SaveTradingLabSettings", write, dispatchPlain,
 		func(ctx context.Context, caller channel.Caller, req *leapmuxv1.SaveTradingLabSettingsRequest, sender channel.ResponseWriter) {
-			if channel.ViaAgentSocket(ctx) && (req.GetNewConfirmationPassphrase() != "" || req.GetNewConnectorPassphrase() != "" ||
+			if !byPerson(ctx, caller) && (req.GetNewConnectorPassphrase() != "" ||
 				req.GetSettings().GetMode() == leapmuxv1.TradingLabMode_TRADING_LAB_MODE_LIVE) {
-				sendPermissionDenied(sender, "an agent cannot set a passphrase or switch the lab to live trading")
+				sendPermissionDenied(sender, "only you, in your browser, can set the connector passphrase or keep the lab in live trading")
 				return
 			}
 			s, err := lab.SaveSettings(ctx, caller.UserID.String(), req)
@@ -75,7 +80,7 @@ func registerTradingLabHandlers(r registrar, svc *Service) {
 		})
 	registerOwnerGuarded(r, "ConfirmTradingOrder", write, dispatchPlain,
 		func(ctx context.Context, caller channel.Caller, req *leapmuxv1.ConfirmTradingOrderRequest, sender channel.ResponseWriter) {
-			o, err := lab.Confirm(ctx, caller.UserID.String(), req, channel.ViaAgentSocket(ctx))
+			o, err := lab.Confirm(ctx, caller.UserID.String(), req, byPerson(ctx, caller))
 			replyLab(sender, &leapmuxv1.ConfirmTradingOrderResponse{Order: o}, err)
 		})
 	registerOwnerGuarded(r, "CancelTradingOrder", write, dispatchPlain,
@@ -90,8 +95,22 @@ func registerTradingLabHandlers(r registrar, svc *Service) {
 		})
 	registerOwnerGuarded(r, "SaveTradingExecutionPolicy", write, dispatchPlain,
 		func(ctx context.Context, caller channel.Caller, req *leapmuxv1.SaveTradingExecutionPolicyRequest, sender channel.ResponseWriter) {
-			p, err := lab.SavePolicy(ctx, caller.UserID.String(), req, channel.ViaAgentSocket(ctx))
+			p, err := lab.SavePolicy(ctx, caller.UserID.String(), req, byPerson(ctx, caller))
 			replyLab(sender, &leapmuxv1.SaveTradingExecutionPolicyResponse{Policy: p}, err)
+		})
+	registerOwnerGuarded(r, "StartTradingBrokerSignIn", write, dispatchPlain,
+		func(ctx context.Context, caller channel.Caller, _ *leapmuxv1.StartTradingBrokerSignInRequest, sender channel.ResponseWriter) {
+			if !byPerson(ctx, caller) {
+				sendPermissionDenied(sender, "only you, in your browser, can sign in to the broker")
+				return
+			}
+			u, err := lab.StartBrokerSignIn(ctx, caller.UserID.String())
+			replyLab(sender, &leapmuxv1.StartTradingBrokerSignInResponse{AuthorizeUrl: u}, err)
+		})
+	registerOwnerGuarded(r, "SignOutTradingBroker", write, dispatchPlain,
+		func(ctx context.Context, caller channel.Caller, _ *leapmuxv1.SignOutTradingBrokerRequest, sender channel.ResponseWriter) {
+			s, err := lab.SignOutBroker(ctx, caller.UserID.String())
+			replyLab(sender, &leapmuxv1.SignOutTradingBrokerResponse{Settings: s}, err)
 		})
 	registerOwnerGuarded(r, "RevokeTradingExecutionPolicy", write, dispatchPlain,
 		func(ctx context.Context, caller channel.Caller, req *leapmuxv1.RevokeTradingExecutionPolicyRequest, sender channel.ResponseWriter) {

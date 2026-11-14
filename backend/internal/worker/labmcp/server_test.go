@@ -24,11 +24,10 @@ import (
 )
 
 const (
-	owner       = "user-owner"
-	connPass    = "phone sign-in passphrase"
-	confirmPass = "order confirmation passphrase"
-	callback    = "https://claude.ai/api/mcp/auth_callback"
-	verifier    = "a-verifier-that-is-long-enough-for-pkce-0123456789abcdef"
+	owner    = "user-owner"
+	connPass = "phone sign-in passphrase"
+	callback = "https://claude.ai/api/mcp/auth_callback"
+	verifier = "a-verifier-that-is-long-enough-for-pkce-0123456789abcdef"
 )
 
 type fakeRuns struct {
@@ -58,7 +57,7 @@ func newHarness(t *testing.T) *harness {
 	clock := testutil.NewQuartzMock(t)
 	lab := tradinglab.New(tradinglab.Config{DB: db, Clock: clock, NewID: func() string { return "id" }})
 	_, err = lab.SaveSettings(t.Context(), owner, &leapmuxv1.SaveTradingLabSettingsRequest{
-		Settings: tradinglab.DefaultSettings(), NewConfirmationPassphrase: confirmPass, NewConnectorPassphrase: connPass,
+		Settings: tradinglab.DefaultSettings(), NewConnectorPassphrase: connPass,
 	})
 	require.NoError(t, err)
 	h := &harness{t: t, ctx: t.Context(), lab: lab, owner: owner}
@@ -266,8 +265,7 @@ func TestServerRefusesWrongPassphrasesAndLocksAfterFive(t *testing.T) {
 	assert.Contains(t, string(b), "Connector passphrase")
 	assert.Equal(t, "DENY", resp.Header.Get("X-Frame-Options"))
 
-	// The order confirmation passphrase is not the connector passphrase.
-	for _, wrong := range []string{confirmPass, "guess 1", "guess 2", "guess 3", "guess 4"} {
+	for _, wrong := range []string{"guess 0", "guess 1", "guess 2", "guess 3", "guess 4"} {
 		v := h.authValues(clientID)
 		v.Set("passphrase", wrong)
 		resp, _ := h.form("/lab-mcp/authorize", v)

@@ -30,6 +30,11 @@ type Caller struct {
 	// Scopes is what the credential that opened this channel was granted, as
 	// the Hub announced it at the handshake.
 	Scopes authscope.ScopeSet
+	// BrowserSession is set when the Hub said a person's browser session
+	// opened the channel (ChannelOpenRequest.browser_session). Only such a
+	// caller may approve an act that must be the person's own; a local
+	// control socket, an app or an agent's delegation never is one.
+	BrowserSession bool
 }
 
 // NewCaller pairs an identity with a grant.

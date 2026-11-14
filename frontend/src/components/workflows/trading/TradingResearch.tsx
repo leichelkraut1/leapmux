@@ -56,7 +56,7 @@ export function TradingResearch(props: TradingResearchProps) {
         </div>
       </div>
       <Alert>
-        Research, scoring and the shadow portfolios never trade. A real order happens only when you confirm that exact order with your passphrase, or through an execution policy you approved for one position.
+        Research, scoring and the shadow portfolios never trade. A real order happens only when you approve that exact order here in your browser, or through an execution policy you approved for one position.
       </Alert>
       <Show when={computer() && !computer()?.online}>
         <Alert variant="warning">This computer is offline, so its lab cannot be read.</Alert>

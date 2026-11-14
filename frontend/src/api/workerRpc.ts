@@ -86,6 +86,8 @@ import type {
   RevokeTradingExecutionPolicyResponse,
   SaveTradingExecutionPolicyResponse,
   SaveTradingLabSettingsResponse,
+  SignOutTradingBrokerResponse,
+  StartTradingBrokerSignInResponse,
   VerifyTradingBrokerResponse,
 } from '~/generated/proto/leapmux/v1/trading_lab_pb'
 import type {
@@ -276,6 +278,10 @@ import {
   SaveTradingExecutionPolicyResponseSchema,
   SaveTradingLabSettingsRequestSchema,
   SaveTradingLabSettingsResponseSchema,
+  SignOutTradingBrokerRequestSchema,
+  SignOutTradingBrokerResponseSchema,
+  StartTradingBrokerSignInRequestSchema,
+  StartTradingBrokerSignInResponseSchema,
   VerifyTradingBrokerRequestSchema,
   VerifyTradingBrokerResponseSchema,
 } from '~/generated/proto/leapmux/v1/trading_lab_pb'
@@ -1014,6 +1020,14 @@ export function reconcileTradingOrders(workerId: string, req: MessageInitShape<t
 
 export function saveTradingExecutionPolicy(workerId: string, req: MessageInitShape<typeof SaveTradingExecutionPolicyRequestSchema>): Promise<SaveTradingExecutionPolicyResponse> {
   return callWorker(workerId, 'SaveTradingExecutionPolicy', SaveTradingExecutionPolicyRequestSchema, SaveTradingExecutionPolicyResponseSchema, req)
+}
+
+export function startTradingBrokerSignIn(workerId: string, req: MessageInitShape<typeof StartTradingBrokerSignInRequestSchema>): Promise<StartTradingBrokerSignInResponse> {
+  return callWorker(workerId, 'StartTradingBrokerSignIn', StartTradingBrokerSignInRequestSchema, StartTradingBrokerSignInResponseSchema, req)
+}
+
+export function signOutTradingBroker(workerId: string, req: MessageInitShape<typeof SignOutTradingBrokerRequestSchema>): Promise<SignOutTradingBrokerResponse> {
+  return callWorker(workerId, 'SignOutTradingBroker', SignOutTradingBrokerRequestSchema, SignOutTradingBrokerResponseSchema, req)
 }
 
 export function revokeTradingExecutionPolicy(workerId: string, req: MessageInitShape<typeof RevokeTradingExecutionPolicyRequestSchema>): Promise<RevokeTradingExecutionPolicyResponse> {

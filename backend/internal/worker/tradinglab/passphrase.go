@@ -11,11 +11,9 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// The confirmation passphrase is what a person types to confirm a live order
-// or approve an execution policy. The worker cannot tell a person in the
-// browser from an agent using the owner's control credential, so the
-// passphrase is the proof of a human that no agent holds. Only its argon2id
-// hash is stored.
+// The connector passphrase signs Claude, ChatGPT or Codex in to the lab's
+// read-only connector. Only its argon2id hash is stored. (Approving a live
+// order needs no passphrase: only the person's own browser session may.)
 
 const (
 	argonTime    = 3
@@ -25,12 +23,12 @@ const (
 	minPassLen   = 10
 )
 
-// ErrPassphrase is a missing or wrong confirmation passphrase.
-var ErrPassphrase = errors.New("the confirmation passphrase is wrong")
+// ErrPassphrase is a missing or wrong connector passphrase.
+var ErrPassphrase = errors.New("the passphrase is wrong")
 
 func hashPassphrase(pass string) (string, error) {
 	if len(pass) < minPassLen {
-		return "", fmt.Errorf("the confirmation passphrase needs at least %d characters", minPassLen)
+		return "", fmt.Errorf("the passphrase needs at least %d characters", minPassLen)
 	}
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
@@ -43,7 +41,7 @@ func hashPassphrase(pass string) (string, error) {
 
 func checkPassphrase(stored, pass string) error {
 	if stored == "" {
-		return errors.New("no confirmation passphrase is set; set one in the lab settings first")
+		return errors.New("no passphrase is set; set one in the lab settings first")
 	}
 	parts := strings.Split(stored, "$")
 	if len(parts) != 5 || parts[0] != "argon2id" {

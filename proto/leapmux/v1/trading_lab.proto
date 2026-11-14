@@ -11,9 +11,10 @@ package leapmux.v1;
 // RPCs over the E2EE channel, owner-only.
 //
 // Nothing here is reachable by a research agent: research roles are confined
-// to the workflow participant methods. ConfirmTradingOrder additionally
-// refuses a call through an agent's control socket and requires the user's
-// confirmation passphrase.
+// to the workflow participant methods. ConfirmTradingOrder, approving an
+// execution policy and switching to live mode additionally need the person's
+// own browser session (ChannelOpenRequest.browser_session): a control
+// socket, an API token, an app or an agent's delegation is refused.
 
 enum TradingLabMode {
   TRADING_LAB_MODE_UNSPECIFIED = 0;
@@ -114,8 +115,8 @@ message TradingMcpConfig {
   repeated string args = 3;
   // HTTP: the endpoint.
   string url = 4;
-  // Where the bearer token lives: an environment variable of the worker, or
-  // a file on it. The token itself is never stored or sent here.
+  // TOKEN: where the bearer token lives, an environment variable of the
+  // worker or a file on it. The token itself is never stored or sent here.
   string token_env = 5;
   string token_file = 6;
   // A logical operation (see TradingBrokerStatus) mapped to the server's
@@ -123,6 +124,28 @@ message TradingMcpConfig {
   map<string, string> tool_names = 7;
   // The brokerage account orders go to. Empty uses the only one.
   string account_id = 8;
+  TradingBrokerAuth auth = 9;
+}
+
+// How the lab authenticates to the broker's MCP server.
+enum TradingBrokerAuth {
+  // A token from token_env or token_file (also what an unset value means).
+  TRADING_BROKER_AUTH_UNSPECIFIED = 0;
+  TRADING_BROKER_AUTH_TOKEN = 1;
+  // An OAuth sign-in the person completes in the browser
+  // (StartTradingBrokerSignIn). The worker keeps the tokens, sealed for its
+  // OS user, and refreshes them.
+  TRADING_BROKER_AUTH_SIGN_IN = 2;
+}
+
+// The broker sign-in as the worker holds it. Derived, never stored with the
+// settings.
+message TradingBrokerSignIn {
+  bool signed_in = 1;
+  string server_url = 2;
+  int64 signed_in_at_ms = 3;
+  // When the current access token expires; it is refreshed before then.
+  int64 access_expires_at_ms = 4;
 }
 
 message TradingRiskBudget {
@@ -171,14 +194,15 @@ message TradingLabSettings {
   repeated string watchlist = 7;
   // A snapshot older than this is refused for research.
   uint32 max_snapshot_age_seconds = 8;
-  // Set when a confirmation passphrase exists. Write-only otherwise.
-  bool has_confirmation_passphrase = 9;
+  // 9 held a confirmation passphrase flag; deployed workers store this
+  // message, so the number stays unused.
   int64 updated_at_ms = 10;
   // Set when a connector passphrase exists. Write-only otherwise.
   bool has_connector_passphrase = 11;
   // The read-only Claude connector's public URL when this worker serves it
   // (the worker's trading_connector_listen); empty when it does not.
   string connector_url = 12;
+  TradingBrokerSignIn broker_sign_in = 13;
 }
 
 message GetTradingLabSettingsRequest {}
@@ -186,13 +210,11 @@ message GetTradingLabSettingsResponse { TradingLabSettings settings = 1; }
 
 message SaveTradingLabSettingsRequest {
   TradingLabSettings settings = 1;
-  // Set to change the confirmation passphrase; the current one must be
-  // given when one exists. Stored only as an argon2id hash.
-  string new_confirmation_passphrase = 2;
-  string current_confirmation_passphrase = 3;
-  // Set to change the passphrase that signs in to the read-only Claude
-  // connector. It must differ from the confirmation passphrase, is stored
-  // only as an argon2id hash, and signs out every connector session.
+  // 2 and 3 held the confirmation passphrase; deployed workers still read
+  // them, so the numbers stay unused.
+  // Set to change the passphrase that signs in to the read-only connector.
+  // It is stored only as an argon2id hash, and signs out every connector
+  // session.
   string new_connector_passphrase = 4;
   // Signs out every connector session without changing the passphrase.
   bool sign_out_connector = 5;
@@ -410,9 +432,9 @@ message TradingOrder {
 }
 
 // A precisely scoped standing authorization: the only way an order is
-// submitted without a confirmation of that exact order. A person approves it,
-// with its passphrase, for one position, one side, a quantity and price limit
-// and an expiry.
+// submitted without a confirmation of that exact order. A person approves it
+// in their browser, for one position, one side, a quantity and price limit and
+// an expiry.
 message TradingExecutionPolicy {
   string id = 1;
   string position_id = 2;
@@ -463,9 +485,9 @@ message PrepareTradingOrderResponse { TradingOrder order = 1; }
 
 message ConfirmTradingOrderRequest {
   string order_id = 1;
-  // Must equal the prepared order's fingerprint.
+  // Must equal the prepared order's fingerprint: the exact order the person
+  // approved.
   string fingerprint = 2;
-  string passphrase = 3;
 }
 message ConfirmTradingOrderResponse { TradingOrder order = 1; }
 
@@ -477,7 +499,6 @@ message ReconcileTradingOrdersResponse { repeated TradingOrder orders = 1; }
 
 message SaveTradingExecutionPolicyRequest {
   TradingExecutionPolicy policy = 1;
-  string passphrase = 2;
 }
 message SaveTradingExecutionPolicyResponse { TradingExecutionPolicy policy = 1; }
 
@@ -502,3 +523,14 @@ enum TradingConnectorTokenKind {
   TRADING_CONNECTOR_TOKEN_KIND_ACCESS = 2;
   TRADING_CONNECTOR_TOKEN_KIND_REFRESH = 3;
 }
+
+// StartTradingBrokerSignIn begins the broker's OAuth sign-in: the worker
+// registers itself with the server if needed and returns the page the person
+// opens to sign in. The server sends them back to the worker's trading
+// connector URL, which finishes it; so it needs trading_connector_url.
+message StartTradingBrokerSignInRequest {}
+message StartTradingBrokerSignInResponse { string authorize_url = 1; }
+
+// SignOutTradingBroker forgets the broker sign-in's tokens.
+message SignOutTradingBrokerRequest {}
+message SignOutTradingBrokerResponse { TradingLabSettings settings = 1; }

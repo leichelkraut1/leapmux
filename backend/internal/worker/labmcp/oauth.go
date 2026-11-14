@@ -157,7 +157,7 @@ input[type=password]{box-sizing:border-box;width:100%;padding:10px 12px;font:inh
 button{margin-top:16px;width:100%;padding:10px;font:inherit;font-weight:600;border:0;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer}
 .err{color:var(--bad);font-weight:600}
 </style></head><body><main><div class="card">
-{{if .Fatal}}<h1>Can't sign in</h1><p class="err">{{.Fatal}}</p>{{else}}
+{{if .Fatal}}<h1>Can't sign in</h1><p class="err">{{.Fatal}}</p>{{else if .Done}}<h1>Signed in</h1><p>{{.Done}}</p>{{else}}
 <h1>Sign in to the trading lab</h1>
 <p><b>{{.Req.ClientName}}</b> wants read-only access to your LeapMux trading lab: runs, predictions, shadow portfolios and metrics. It cannot prepare, confirm or cancel an order. After sign-in you go back to <b>{{.Req.RedirectHost}}</b>.</p>
 {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
@@ -349,4 +349,23 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		"refresh_token": refresh,
 		"scope":         scope,
 	})
+}
+
+// --- Broker sign-in return ---
+
+// handleBrokerCallback is where the broker sends the browser back after the
+// person signs in to it from the lab settings (tradinglab.StartBrokerSignIn).
+// The state names a single-use, expiring sign-in; nothing else is trusted.
+func (s *Server) handleBrokerCallback(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if e := q.Get("error"); e != "" {
+		s.page(w, http.StatusBadRequest, map[string]any{"Fatal": "The broker did not sign you in (" + e + "). Start again from the lab settings."})
+		return
+	}
+	if err := s.cfg.Lab.CompleteBrokerSignIn(r.Context(), q.Get("state"), q.Get("code"), q.Get("iss")); err != nil {
+		s.log.Warn("broker sign-in not completed", "error", err)
+		s.page(w, http.StatusBadRequest, map[string]any{"Fatal": "The broker sign-in did not finish: " + err.Error()})
+		return
+	}
+	s.page(w, http.StatusOK, map[string]any{"Done": "You are signed in to the broker. Close this tab and go back to LeapMux."})
 }

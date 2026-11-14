@@ -2,6 +2,7 @@ import type { GetTradingDashboardResponse, TradingCandidate, TradingOrder, Tradi
 import { createEffect, createSignal, For, on, onCleanup, Show } from 'solid-js'
 import * as workerRpc from '~/api/workerRpc'
 import { Alert } from '~/components/common/Alert'
+import { ConfirmDialog } from '~/components/common/ConfirmDialog'
 import { RefreshButton } from '~/components/common/RefreshButton'
 import { showInfoToast } from '~/components/common/Toast'
 import {
@@ -22,8 +23,9 @@ import * as t from './Trading.css'
 /**
  * The approved trade queue, the execution gateway and every order. Preparing
  * runs the gateway's checks and the broker's preview and places nothing; the
- * ticket that follows shows the exact order, and only confirming it with the
- * passphrase before it expires submits it.
+ * ticket that follows shows the exact order, and only approving it in this
+ * browser before it expires submits it. The worker accepts that approval from
+ * your browser session alone, never from an agent or an app.
  */
 export function TradingOrders(props: { workerId: string }) {
   const [dash, setDash] = createSignal<GetTradingDashboardResponse>()
@@ -245,14 +247,14 @@ function ClosePositionRow(props: { position: TradingPosition, busy: boolean, onP
   )
 }
 
-/** The exact order, its checks and the broker's alerts, and the confirmation. */
+/** The exact order, its checks and the broker's alerts, and the approval. */
 function OrderTicket(props: { workerId: string, order: TradingOrder, onDone: (o?: TradingOrder) => void }) {
   const [now, setNow] = createSignal(Date.now())
   const timer = setInterval(() => setNow(Date.now()), 1000)
   onCleanup(() => clearInterval(timer))
-  const [passphrase, setPassphrase] = createSignal('')
-  const [acknowledged, setAcknowledged] = createSignal(false)
+  const [asking, setAsking] = createSignal(false)
   const action = createWorkflowAction()
+  const summary = () => `${sideLabel(props.order.side)} ${props.order.quantity} × ${props.order.occSymbol} at a limit of ${money(props.order.limitPrice)}`
   const left = () => secondsToConfirm(props.order, now())
 
   return (
@@ -287,15 +289,31 @@ function OrderTicket(props: { workerId: string, order: TradingOrder, onDone: (o?
         <summary>{`Checks run (${props.order.checks.length})`}</summary>
         <ul class={t.reasons}><For each={props.order.checks}>{c => <li>{c}</li>}</For></ul>
       </details>
-      <label class={styles.checkboxLabel}>
-        <input type="checkbox" checked={acknowledged()} onChange={e => setAcknowledged(e.currentTarget.checked)} data-testid="trading-order-ack" />
-        {`I reviewed this order (${shortHash(props.order.fingerprint)}) and want it placed with real money.`}
-      </label>
-      <label class={styles.field}>
-        Confirmation passphrase
-        <input type="password" autocomplete="off" value={passphrase()} onInput={e => setPassphrase(e.currentTarget.value)} data-testid="trading-order-passphrase" />
-      </label>
       <Show when={action.error()}>{message => <Alert variant="danger">{message()}</Alert>}</Show>
+      <Show when={asking()}>
+        <ConfirmDialog
+          title="Approve this order?"
+          confirmLabel="Approve and place"
+          busy={action.busy()}
+          onCancel={() => setAsking(false)}
+          onConfirm={() => void action.run(async () => {
+            const resp = await workerRpc.confirmTradingOrder(props.workerId, {
+              orderId: props.order.id,
+              fingerprint: props.order.fingerprint,
+            })
+            setAsking(false)
+            props.onDone(resp.order)
+          })}
+          data-testid="trading-approve-dialog"
+          confirmTestId="trading-approve-order"
+        >
+          <p><strong>{summary()}</strong></p>
+          <Show when={props.order.side === TradingOrderSide.BUY_TO_OPEN}>
+            <p>{`You can lose up to ${money(props.order.maxLoss)}, plus about ${money(props.order.estimatedFees)} in fees.`}</p>
+          </Show>
+          <p>{`This places a real order with your broker (order ${shortHash(props.order.fingerprint)}).`}</p>
+        </ConfirmDialog>
+      </Show>
       <div class={styles.actions}>
         <button type="button" class="outline" onClick={() => props.onDone()}>Not now</button>
         <button
@@ -312,19 +330,11 @@ function OrderTicket(props: { workerId: string, order: TradingOrder, onDone: (o?
         <button
           type="button"
           data-variant="danger"
-          disabled={action.busy() || !acknowledged() || !passphrase() || left() <= 0}
-          onClick={() => void action.run(async () => {
-            const resp = await workerRpc.confirmTradingOrder(props.workerId, {
-              orderId: props.order.id,
-              fingerprint: props.order.fingerprint,
-              passphrase: passphrase(),
-            })
-            setPassphrase('')
-            props.onDone(resp.order)
-          })}
+          disabled={action.busy() || left() <= 0}
+          onClick={() => setAsking(true)}
           data-testid="trading-confirm-order"
         >
-          Place this order
+          Place this order…
         </button>
       </div>
     </div>

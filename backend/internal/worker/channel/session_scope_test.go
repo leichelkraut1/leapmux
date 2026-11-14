@@ -76,3 +76,29 @@ func TestHandleOpen_ReadsScopeAllAsUnscoped(t *testing.T) {
 		})
 	}
 }
+
+// browser_session rides the handshake beside the grant and reaches every
+// handler as Caller.BrowserSession: the one fact that lets a person, and only
+// a person, approve a live order. An open that leaves it unset is not one.
+func TestHandleOpen_CarriesTheBrowserSessionToTheCaller(t *testing.T) {
+	t.Parallel()
+
+	for name, browser := range map[string]bool{"a browser session": true, "any other credential": false} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			mgr, ck, _ := setupTestManagerWith(t, 0, 0)
+			_, msg1, err := noiseutil.InitiatorHandshake1(ck.X25519Public, ck.MlkemPublicKeyBytes())
+			require.NoError(t, err)
+			resp := mgr.HandleOpen(&leapmuxv1.ChannelOpenRequest{
+				ChannelId: "ch-browser", UserId: "user-1", HandshakePayload: msg1,
+				GrantedScopes: []leapmuxv1.Scope{leapmuxv1.Scope_SCOPE_ALL}, BrowserSession: browser, MaxMessageSize: 1 << 24,
+			})
+			require.Empty(t, resp.GetError())
+			mgr.mu.Lock()
+			sess := mgr.sessions["ch-browser"]
+			mgr.mu.Unlock()
+			require.NotNil(t, sess)
+			assert.Equal(t, browser, sess.Caller().BrowserSession)
+		})
+	}
+}

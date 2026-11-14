@@ -124,6 +124,9 @@ type Config struct {
 	URL string
 	// BearerToken authorizes HTTP requests. It never appears in an error.
 	BearerToken string
+	// TokenSource, when set, supplies the bearer token for each HTTP request
+	// instead, so a token it refreshes takes effect on the next call.
+	TokenSource func(context.Context) (string, error)
 	HTTPClient  *http.Client
 	ClientName  string
 }
@@ -137,7 +140,7 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 		if hc == nil {
 			hc = http.DefaultClient
 		}
-		t = &httpTransport{url: cfg.URL, token: cfg.BearerToken, hc: hc}
+		t = &httpTransport{url: cfg.URL, token: cfg.BearerToken, tokens: cfg.TokenSource, hc: hc}
 	case cfg.Command != "":
 		st, err := startStdio(cfg.Command, cfg.Args, cfg.Env)
 		if err != nil {
@@ -234,6 +237,7 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 
 type httpTransport struct {
 	url, token string
+	tokens     func(context.Context) (string, error)
 	hc         *http.Client
 	mu         sync.Mutex
 	session    string
@@ -251,8 +255,14 @@ func (h *httpTransport) roundTrip(ctx context.Context, m *message) (*message, er
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("MCP-Protocol-Version", ProtocolVersion)
-	if h.token != "" {
-		req.Header.Set("Authorization", "Bearer "+h.token)
+	token := h.token
+	if h.tokens != nil {
+		if token, err = h.tokens(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	h.mu.Lock()
 	if h.session != "" {

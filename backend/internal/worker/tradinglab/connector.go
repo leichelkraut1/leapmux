@@ -5,12 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"sort"
-	"strings"
 )
 
-// The connector passphrase signs a person in to the lab's read-only Claude
-// connector (internal/worker/labmcp). It is not the confirmation passphrase:
-// that one confirms orders and is never typed into a web page.
+// The connector passphrase signs a person in to the lab's read-only
+// connector (internal/worker/labmcp) from Claude, ChatGPT or Codex. It
+// reads the lab; it never approves an order.
 
 func getConnectorHash(ctx context.Context, q querier, userID string) (string, error) {
 	var hash string
@@ -21,15 +20,12 @@ func getConnectorHash(ctx context.Context, q querier, userID string) (string, er
 	return hash, err
 }
 
-// setConnectorPassphrase stores a new connector passphrase, which must differ
-// from the confirmation passphrase, and signs out every connector session.
-func setConnectorPassphrase(ctx context.Context, q querier, userID, pass, confirmationHash string, nowMs int64) error {
-	if confirmationHash != "" && checkPassphrase(confirmationHash, pass) == nil {
-		return invalidf("the connector passphrase must differ from the confirmation passphrase")
-	}
+// setConnectorPassphrase stores a new connector passphrase and signs out
+// every connector session.
+func setConnectorPassphrase(ctx context.Context, q querier, userID, pass string, nowMs int64) error {
 	hash, err := hashPassphrase(pass)
 	if err != nil {
-		return invalidf("%s", strings.Replace(err.Error(), "confirmation", "connector", 1))
+		return invalidf("%v", err)
 	}
 	if _, err := q.ExecContext(ctx, `INSERT INTO trading_connector_auth (user_id, passphrase_hash, updated_at_ms) VALUES (?, ?, ?)
 		ON CONFLICT (user_id) DO UPDATE SET passphrase_hash = excluded.passphrase_hash, updated_at_ms = excluded.updated_at_ms`,

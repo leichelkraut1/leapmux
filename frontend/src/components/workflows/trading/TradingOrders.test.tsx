@@ -79,7 +79,7 @@ describe('TradingOrders', () => {
     expect(screen.getByText(/Paper mode/)).toBeInTheDocument()
   })
 
-  it('submits only the exact order a person acknowledged with the passphrase', async () => {
+  it('submits only the exact order a person approved in the prompt', async () => {
     rpc.getTradingDashboard.mockResolvedValue(dashboard(TradingLabMode.LIVE))
     render(() => <TradingOrders workerId="w1" />)
     fireEvent.click(await screen.findByTestId('trading-prepare-order'))
@@ -88,16 +88,18 @@ describe('TradingOrders', () => {
     expect(screen.getByText('Options can expire worthless.')).toBeInTheDocument()
     expect(screen.getByText('$125.06')).toBeInTheDocument()
 
-    const confirm = screen.getByTestId('trading-confirm-order')
-    expect(confirm).toBeDisabled()
-    fireEvent.click(screen.getByTestId('trading-order-ack'))
-    expect(confirm).toBeDisabled()
-    fireEvent.input(screen.getByTestId('trading-order-passphrase'), { target: { value: 'correct horse battery' } })
-    expect(confirm).toBeEnabled()
+    // Opening the prompt places nothing; cancelling it neither.
+    fireEvent.click(screen.getByTestId('trading-confirm-order'))
+    const dialog = await screen.findByTestId('trading-approve-dialog')
+    expect(dialog).toHaveTextContent(/Buy to open 1 × SYNA\s+261106C00100000 at a limit of \$1\.25/)
+    expect(dialog).toHaveTextContent('$125.06')
+    fireEvent.click(screen.getByText('Cancel'))
+    await waitFor(() => expect(screen.queryByTestId('trading-approve-dialog')).not.toBeInTheDocument())
     expect(rpc.confirmTradingOrder).not.toHaveBeenCalled()
 
-    fireEvent.click(confirm)
+    fireEvent.click(screen.getByTestId('trading-confirm-order'))
+    fireEvent.click(await screen.findByTestId('trading-approve-order'))
     await waitFor(() => expect(rpc.confirmTradingOrder).toHaveBeenCalledTimes(1))
-    expect(rpc.confirmTradingOrder).toHaveBeenCalledWith('w1', { orderId: 'order-1', fingerprint: 'f'.repeat(64), passphrase: 'correct horse battery' })
+    expect(rpc.confirmTradingOrder).toHaveBeenCalledWith('w1', { orderId: 'order-1', fingerprint: 'f'.repeat(64) })
   })
 })
