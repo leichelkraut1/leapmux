@@ -43,6 +43,7 @@ export function TradingSettings(props: { workerId: string }) {
   const [error, setError] = createSignal<string | null>(null)
   const [newPass, setNewPass] = createSignal('')
   const [currentPass, setCurrentPass] = createSignal('')
+  const [connectorPass, setConnectorPass] = createSignal('')
   const action = createWorkflowAction()
 
   const load = async () => {
@@ -77,10 +78,12 @@ export function TradingSettings(props: { workerId: string }) {
       settings: draft(),
       newConfirmationPassphrase: newPass(),
       currentConfirmationPassphrase: currentPass(),
+      newConnectorPassphrase: connectorPass(),
     })
     setDraft(resp.settings)
     setNewPass('')
     setCurrentPass('')
+    setConnectorPass('')
     showInfoToast('Saved the lab settings.')
   })
 
@@ -281,6 +284,51 @@ export function TradingSettings(props: { workerId: string }) {
                   <input type="password" autocomplete="new-password" value={newPass()} onInput={e => setNewPass(e.currentTarget.value)} data-testid="trading-new-passphrase" />
                 </label>
               </div>
+            </fieldset>
+
+            <fieldset class={styles.fieldset} data-testid="trading-connector">
+              <legend>Claude connector (read-only)</legend>
+              <Show
+                when={s().connectorUrl}
+                fallback={<p class={styles.hint}>This computer does not serve the connector. A worker started with trading_connector_listen and trading_connector_url lets Claude on your phone read the lab.</p>}
+              >
+                {url => (
+                  <>
+                    <p class={styles.hint}>
+                      Add this URL as a custom connector in Claude (Settings, Connectors). Claude can then read runs, predictions, the shadow books and metrics. It cannot prepare, confirm or cancel an order.
+                    </p>
+                    <div class={t.mono} data-testid="trading-connector-url">{url()}</div>
+                  </>
+                )}
+              </Show>
+              <p class={styles.hint}>
+                {s().hasConnectorPassphrase
+                  ? 'A connector passphrase is set. Claude asks for it when you connect. Setting a new one signs out every connected app.'
+                  : 'No connector passphrase is set, so no app can sign in. Use at least 10 characters, different from the confirmation passphrase.'}
+              </p>
+              <div class={styles.grid2}>
+                <label class={styles.field}>
+                  New connector passphrase
+                  <input type="password" autocomplete="new-password" value={connectorPass()} onInput={e => setConnectorPass(e.currentTarget.value)} data-testid="trading-connector-passphrase" />
+                </label>
+              </div>
+              <Show when={s().hasConnectorPassphrase}>
+                <div class={styles.actions}>
+                  <button
+                    type="button"
+                    class="outline"
+                    disabled={action.busy()}
+                    onClick={() => void action.run(async () => {
+                      const resp = await workerRpc.saveTradingLabSettings(props.workerId, { settings: draft(), signOutConnector: true })
+                      setDraft(resp.settings)
+                      showInfoToast('Signed out every connected app.')
+                    })}
+                    data-testid="trading-connector-sign-out"
+                  >
+                    Sign out connected apps
+                  </button>
+                </div>
+              </Show>
             </fieldset>
 
             <div class={styles.footer}>

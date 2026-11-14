@@ -110,6 +110,12 @@ type Config struct {
 	LogLevel         string        `koanf:"log_level" json:"log_level"`
 	EncryptionMode   string        `koanf:"encryption_mode" json:"encryption_mode"`
 	UseLoginShell    bool          `koanf:"use_login_shell" json:"use_login_shell"`
+	// TradingConnectorListen is the local address the trading lab's read-only
+	// Claude connector listens on (internal/worker/labmcp); empty, the
+	// default, serves none. TradingConnectorURL is where a reverse proxy
+	// publishes it, and both must be set together.
+	TradingConnectorListen string `koanf:"trading_connector_listen" json:"trading_connector_listen"`
+	TradingConnectorURL    string `koanf:"trading_connector_url" json:"trading_connector_url"`
 }
 
 // EncryptionModeProto returns the protobuf EncryptionMode value.
@@ -241,6 +247,8 @@ func Load(args []string) (*Config, bool, error) {
 	fs.String("log-level", defaultLogLevel, "log level (debug, info, warn, error)")
 	fs.String("encryption-mode", "post-quantum", "encryption mode (classic, post-quantum)")
 	fs.Bool("use-login-shell", true, "wrap claude invocation in user's login shell")
+	fs.String("trading-connector-listen", "", "local address for the trading lab's read-only Claude connector, such as 127.0.0.1:4731 (empty serves none)")
+	fs.String("trading-connector-url", "", "the trading connector's public https URL, as a reverse proxy publishes it")
 	showVersion := fs.Bool("version", false, "print version and exit")
 	usageCategories := map[string]string{
 		"config":                    "Common options",
@@ -252,6 +260,8 @@ func Load(args []string) (*Config, bool, error) {
 		"log-level":                 "Worker options",
 		"encryption-mode":           "Worker options",
 		"use-login-shell":           "Worker options",
+		"trading-connector-listen":  "Worker options",
+		"trading-connector-url":     "Worker options",
 		"max-incomplete-chunked":    "Timeout and limit options",
 		"max-message-size":          "Timeout and limit options",
 		"agent-startup-timeout":     "Timeout and limit options",
@@ -287,6 +297,8 @@ func Load(args []string) (*Config, bool, error) {
 		"log-level":                 "log_level",
 		"encryption-mode":           "encryption_mode",
 		"use-login-shell":           "use_login_shell",
+		"trading-connector-listen":  "trading_connector_listen",
+		"trading-connector-url":     "trading_connector_url",
 	}
 
 	defaults := map[string]interface{}{
@@ -308,6 +320,8 @@ func Load(args []string) (*Config, bool, error) {
 		"log_level":                 defaultLogLevel,
 		"encryption_mode":           "post-quantum",
 		"use_login_shell":           true,
+		"trading_connector_listen":  "",
+		"trading_connector_url":     "",
 	}
 
 	k := koanf.New(internalconfig.Delim)
@@ -358,6 +372,9 @@ func (c *Config) Validate() error {
 	}
 	if err := channelwire.ValidateConfiguredMaxMessageSize(c.MaxMessageSize); err != nil {
 		return err
+	}
+	if (c.TradingConnectorListen == "") != (c.TradingConnectorURL == "") {
+		return fmt.Errorf("set trading_connector_listen and trading_connector_url together")
 	}
 
 	return nil

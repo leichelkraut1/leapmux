@@ -63,6 +63,9 @@ type Config struct {
 	// Connect opens a broker session from the settings. Nil connects to the
 	// configured Robinhood MCP server.
 	Connect func(ctx context.Context, cfg *leapmuxv1.TradingMcpConfig) (BrokerSession, error)
+	// ConnectorURL is the read-only Claude connector's public URL when this
+	// worker serves it, shown in the settings.
+	ConnectorURL string
 }
 
 // Lab is the trading lab of one coordinator.
@@ -72,6 +75,8 @@ type Lab struct {
 	log     *slog.Logger
 	newID   func() string
 	connect func(ctx context.Context, cfg *leapmuxv1.TradingMcpConfig) (BrokerSession, error)
+	// connectorURL is Config.ConnectorURL.
+	connectorURL string
 	// gateMu serializes the gateway's state transitions, so a double click
 	// cannot interleave two confirmations of one order.
 	gateMu sync.Mutex
@@ -93,7 +98,7 @@ func New(cfg Config) *Lab {
 			return ConnectRobinhood(ctx, c, nil)
 		}
 	}
-	return &Lab{store: &store{db: cfg.DB}, clock: clock, log: log.With("component", "tradinglab"), newID: cfg.NewID, connect: connect}
+	return &Lab{store: &store{db: cfg.DB}, clock: clock, log: log.With("component", "tradinglab"), newID: cfg.NewID, connect: connect, connectorURL: cfg.ConnectorURL}
 }
 
 func (l *Lab) now() time.Time { return l.clock.Now().UTC() }
@@ -185,7 +190,18 @@ func normalizeSettings(s *leapmuxv1.TradingLabSettings) error {
 // Settings returns the user's settings.
 func (l *Lab) Settings(ctx context.Context, userID string) (*leapmuxv1.TradingLabSettings, error) {
 	s, _, err := getSettings(ctx, l.store.db, userID)
-	return s, err
+	if err != nil {
+		return nil, err
+	}
+	return s, l.fillConnector(ctx, l.store.db, userID, s)
+}
+
+// fillConnector sets the settings' connector fields, which are never stored
+// with them.
+func (l *Lab) fillConnector(ctx context.Context, q querier, userID string, s *leapmuxv1.TradingLabSettings) error {
+	hash, err := getConnectorHash(ctx, q, userID)
+	s.HasConnectorPassphrase, s.ConnectorUrl = hash != "", l.connectorURL
+	return err
 }
 
 // SaveSettings validates and stores settings, and sets the passphrase.
@@ -228,11 +244,21 @@ func (l *Lab) SaveSettings(ctx context.Context, userID string, req *leapmuxv1.Sa
 		}
 		s.UpdatedAtMs = l.now().UnixMilli()
 		s.HasConfirmationPassphrase = hash != ""
+		s.HasConnectorPassphrase, s.ConnectorUrl = false, ""
 		if err := putSettings(ctx, q, userID, s, hash); err != nil {
 			return err
 		}
+		if pass := req.GetNewConnectorPassphrase(); pass != "" {
+			if err := setConnectorPassphrase(ctx, q, userID, pass, hash, s.GetUpdatedAtMs()); err != nil {
+				return err
+			}
+		} else if req.GetSignOutConnector() {
+			if err := signOutConnector(ctx, q, userID); err != nil {
+				return err
+			}
+		}
 		out = s
-		return nil
+		return l.fillConnector(ctx, q, userID, s)
 	})
 	return out, err
 }

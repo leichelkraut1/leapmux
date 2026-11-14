@@ -3,6 +3,7 @@ package tradinglab
 import (
 	_ "embed"
 	"fmt"
+	"sync"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/worker/workflow"
@@ -47,3 +48,12 @@ func RegisterExample() {
 		Bundle: TemplateBundle,
 	})
 }
+
+// TemplateName is the bundled template's name, which its runs carry.
+var TemplateName = sync.OnceValue(func() string {
+	b, err := TemplateBundle()
+	if err != nil {
+		return ""
+	}
+	return b.GetTemplate().GetName()
+})

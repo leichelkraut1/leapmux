@@ -174,6 +174,11 @@ message TradingLabSettings {
   // Set when a confirmation passphrase exists. Write-only otherwise.
   bool has_confirmation_passphrase = 9;
   int64 updated_at_ms = 10;
+  // Set when a connector passphrase exists. Write-only otherwise.
+  bool has_connector_passphrase = 11;
+  // The read-only Claude connector's public URL when this worker serves it
+  // (the worker's trading_connector_listen); empty when it does not.
+  string connector_url = 12;
 }
 
 message GetTradingLabSettingsRequest {}
@@ -185,6 +190,12 @@ message SaveTradingLabSettingsRequest {
   // given when one exists. Stored only as an argon2id hash.
   string new_confirmation_passphrase = 2;
   string current_confirmation_passphrase = 3;
+  // Set to change the passphrase that signs in to the read-only Claude
+  // connector. It must differ from the confirmation passphrase, is stored
+  // only as an argon2id hash, and signs out every connector session.
+  string new_connector_passphrase = 4;
+  // Signs out every connector session without changing the passphrase.
+  bool sign_out_connector = 5;
 }
 message SaveTradingLabSettingsResponse { TradingLabSettings settings = 1; }
 
@@ -480,4 +491,14 @@ message InstallTradingSampleDataRequest {}
 message InstallTradingSampleDataResponse {
   TradingLabSettings settings = 1;
   repeated string files = 2;
+}
+
+// TradingConnectorTokenKind is what a row of trading_connector_tokens holds:
+// the read-only Claude connector's OAuth secrets (internal/worker/labmcp).
+// Storage only; no message carries it.
+enum TradingConnectorTokenKind {
+  TRADING_CONNECTOR_TOKEN_KIND_UNSPECIFIED = 0;
+  TRADING_CONNECTOR_TOKEN_KIND_CODE = 1;
+  TRADING_CONNECTOR_TOKEN_KIND_ACCESS = 2;
+  TRADING_CONNECTOR_TOKEN_KIND_REFRESH = 3;
 }

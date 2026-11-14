@@ -556,6 +556,11 @@ type Config struct {
 	AgentIdleRelease time.Duration
 	UseLoginShell    bool                      // Wrap claude invocation in user's login shell
 	WakeLock         *wakelock.ActivityTracker // Keep-awake tracker (nil = disabled)
+	// TradingConnectorListen is the local address of the trading lab's
+	// read-only Claude connector (see RunTradingConnector), published at
+	// TradingConnectorURL. Empty serves none.
+	TradingConnectorListen string
+	TradingConnectorURL    string
 	// MaxMessageSize is the worker's configured application payload budget
 	// (0 = contracts.MaxMessageSize). Raises agent stdout scanner ceiling
 	// and ReadFile's payload budget; other stream sends still reject at
@@ -620,7 +625,11 @@ func New(cfg Config) *Service {
 	}
 	// The seed is config data, so it is minted here -- the one place the raw
 	// string exists -- rather than inside the setter.
-	svc.TradingLab = tradinglab.New(tradinglab.Config{DB: cfg.DB, Clock: cfg.Clock, NewID: id.Generate})
+	connectorURL := ""
+	if cfg.TradingConnectorListen != "" {
+		connectorURL = cfg.TradingConnectorURL
+	}
+	svc.TradingLab = tradinglab.New(tradinglab.Config{DB: cfg.DB, Clock: cfg.Clock, NewID: id.Generate, ConnectorURL: connectorURL})
 	svc.TradingLab.Register(svc.Workflows)
 	tradinglab.RegisterExample()
 	if seed, ok := userid.New(cfg.SeedRegisteredBy); ok {

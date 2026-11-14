@@ -45,8 +45,12 @@ type RunConfig struct {
 	// AgentIdleRelease stops an idle agent's process after this long, keeping
 	// its tab and session (0 or less disables).
 	AgentIdleRelease time.Duration
-	EncryptionMode   leapmuxv1.EncryptionMode // Encryption mode (classic, post-quantum)
-	UseLoginShell    bool                     // Wrap claude invocation in user's login shell
+	// TradingConnectorListen and TradingConnectorURL serve the trading lab's
+	// read-only Claude connector (both empty serves none).
+	TradingConnectorListen string
+	TradingConnectorURL    string
+	EncryptionMode         leapmuxv1.EncryptionMode // Encryption mode (classic, post-quantum)
+	UseLoginShell          bool                     // Wrap claude invocation in user's login shell
 	// RegisteredBy seeds the worker's owner, which gates every machine-scoped RPC
 	// family (tunnels, file, git, sysinfo) -- see service.requireWorkerOwner. It is a
 	// DB-sourced seed for the in-process launchers (solo reads it from
@@ -155,6 +159,8 @@ func Run(ctx context.Context, cfg RunConfig) error {
 			// machine's core count.
 			AgentStartupConcurrency: cfg.AgentStartupConcurrency,
 			AgentIdleRelease:        cfg.AgentIdleRelease,
+			TradingConnectorListen:  cfg.TradingConnectorListen,
+			TradingConnectorURL:     cfg.TradingConnectorURL,
 			UseLoginShell:           cfg.UseLoginShell,
 			WakeLock:                wakeLockTracker,
 		})

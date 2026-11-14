@@ -86,8 +86,12 @@ type Params struct {
 	// its tab and session (service.Config.AgentIdleRelease). Zero or less
 	// disables it.
 	AgentIdleRelease time.Duration
-	UseLoginShell    bool
-	WakeLock         *wakelock.ActivityTracker
+	// TradingConnectorListen and TradingConnectorURL serve the trading lab's
+	// read-only Claude connector (service.Config.TradingConnectorListen).
+	TradingConnectorListen string
+	TradingConnectorURL    string
+	UseLoginShell          bool
+	WakeLock               *wakelock.ActivityTracker
 }
 
 // Wiring is the assembled worker. Callers own the lifecycle: nothing here
@@ -170,23 +174,25 @@ func Wire(p Params) *Wiring {
 	}
 
 	svc := service.New(service.Config{
-		Channels:            channelMgr,
-		Send:                p.Client.Send,
-		DB:                  p.DB,
-		Agents:              agents,
-		Terminals:           p.Client.TerminalManager(),
-		Clock:               p.Client.Clock(),
-		HomeDir:             p.HomeDir,
-		DataDir:             p.DataDir,
-		WorkerID:            p.WorkerID,
-		Name:                p.Name,
-		SeedRegisteredBy:    p.SeedRegisteredBy,
-		AgentStartupTimeout: p.AgentStartupTimeout,
-		APITimeout:          p.APITimeout,
-		AgentIdleRelease:    p.AgentIdleRelease,
-		UseLoginShell:       p.UseLoginShell,
-		WakeLock:            p.WakeLock,
-		MaxMessageSize:      p.MaxMessageSize,
+		Channels:               channelMgr,
+		Send:                   p.Client.Send,
+		DB:                     p.DB,
+		Agents:                 agents,
+		Terminals:              p.Client.TerminalManager(),
+		Clock:                  p.Client.Clock(),
+		HomeDir:                p.HomeDir,
+		DataDir:                p.DataDir,
+		WorkerID:               p.WorkerID,
+		Name:                   p.Name,
+		SeedRegisteredBy:       p.SeedRegisteredBy,
+		AgentStartupTimeout:    p.AgentStartupTimeout,
+		APITimeout:             p.APITimeout,
+		AgentIdleRelease:       p.AgentIdleRelease,
+		UseLoginShell:          p.UseLoginShell,
+		TradingConnectorListen: p.TradingConnectorListen,
+		TradingConnectorURL:    p.TradingConnectorURL,
+		WakeLock:               p.WakeLock,
+		MaxMessageSize:         p.MaxMessageSize,
 	})
 	svc.RestoreState()
 
@@ -239,6 +245,7 @@ func Wire(p Params) *Wiring {
 	svc.Workflows.SetPlatform(&controlipc.WorkflowPlatform{Factory: controlFactory, Owner: svc.RegisteredBy})
 	go svc.Workflows.Run(p.Ctx)
 	go svc.RunIdleRelease(p.Ctx)
+	go svc.RunTradingConnector(p.Ctx)
 
 	// Only now is the manager reachable from the connect loop.
 	p.Client.SetChannelMgr(channelMgr)

@@ -166,6 +166,8 @@ leapmux worker -hub https://hub.example.com
 | `-data-dir` | `.` (resolves to `~/.config/leapmux/worker`) | Data directory (holds `state.json`, `worker.db`) |
 | `-encryption-mode` | `post-quantum` | `classic` or `post-quantum` |
 | `-use-login-shell` | `true` | Wrap the agent invocation in the user's login shell |
+| `-trading-connector-listen` | empty | Local address of the trading lab's read-only Claude connector (empty serves none) |
+| `-trading-connector-url` | empty | The connector's public `https` URL, as a reverse proxy publishes it |
 | `-log-level` | `info` | `debug`, `info`, `warn`, `error` |
 
 **Timeout and limit options**

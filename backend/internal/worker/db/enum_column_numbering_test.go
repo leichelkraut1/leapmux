@@ -75,6 +75,7 @@ func integerEnumColumns() []integerEnumColumn {
 		{"trading_positions.state", "UPDATE trading_positions SET state = ?", "SELECT typeof(state), state FROM trading_positions", 1, int64(leapmuxv1.TradingPositionState_TRADING_POSITION_STATE_NOT_FILLED), nil},
 		{"trading_orders.state", "UPDATE trading_orders SET state = ?", "SELECT typeof(state), state FROM trading_orders", 1, int64(leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_FAILED), nil},
 		{"trading_orders.side", "UPDATE trading_orders SET side = ?", "SELECT typeof(side), side FROM trading_orders", 1, int64(leapmuxv1.TradingOrderSide_TRADING_ORDER_SIDE_SELL_TO_CLOSE), nil},
+		{"trading_connector_tokens.token_kind", "UPDATE trading_connector_tokens SET token_kind = ?", "SELECT typeof(token_kind), token_kind FROM trading_connector_tokens", 1, int64(leapmuxv1.TradingConnectorTokenKind_TRADING_CONNECTOR_TOKEN_KIND_REFRESH), nil},
 	}
 }
 
@@ -103,6 +104,7 @@ func integerEnumStore(t *testing.T) *sql.DB {
 		"INSERT INTO trading_candidates (id, user_id, run_id, source, recommendation_id, status, spec, created_at_ms, updated_at_ms) VALUES ('enum-cand', 'u', 'enum-run', 1, 'r1', 1, X'', 1, 1)",
 		"INSERT INTO trading_positions (id, user_id, book, state, spec, opened_at_ms, updated_at_ms) VALUES ('enum-pos', 'u', 1, 1, X'', 1, 1)",
 		"INSERT INTO trading_orders (id, user_id, state, side, client_order_id, spec, created_at_ms, updated_at_ms) VALUES ('enum-order', 'u', 1, 1, 'enum-ref', X'', 1, 1)",
+		"INSERT INTO trading_connector_tokens (hash, token_kind, client_id, user_id, expires_at_ms, created_at_ms) VALUES ('enum-token', 1, 'c', 'u', 1, 1)",
 	} {
 		_, err := store.ExecContext(t.Context(), statement)
 		require.NoError(t, err)
@@ -499,6 +501,11 @@ func TestEnumColumnChecksMatchTheirProtoRanges(t *testing.T) {
 			column: "trading_orders.side", check: "CHECK (side BETWEEN 1 AND 2)",
 			lastAccepted: int32(leapmuxv1.TradingOrderSide_TRADING_ORDER_SIDE_SELL_TO_CLOSE),
 			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TradingOrderSide_name),
+		},
+		{
+			column: "trading_connector_tokens.token_kind", check: "CHECK (token_kind BETWEEN 1 AND 3)",
+			lastAccepted: int32(leapmuxv1.TradingConnectorTokenKind_TRADING_CONNECTOR_TOKEN_KIND_REFRESH),
+			lastDeclared: lastDeclaredOrdinal(t, leapmuxv1.TradingConnectorTokenKind_name),
 		},
 		{
 			column: "control_deliveries.kind", check: "CHECK (kind BETWEEN 1 AND 2)",

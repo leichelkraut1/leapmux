@@ -15,7 +15,7 @@ import (
 // workflow methods' scopes: reads under agent:read, changes under
 // agent:write, owner-only. A research agent never reaches them, because its
 // socket is confined to the workflow participant methods. Confirming a live
-// order, approving an execution policy, setting the passphrase and switching
+// order, approving an execution policy, setting either passphrase and switching
 // to live mode also refuse a call through any local control socket, and the
 // first two require the user's confirmation passphrase, because an
 // unconfined agent holds the owner's grant.
@@ -30,9 +30,9 @@ func registerTradingLabHandlers(r registrar, svc *Service) {
 		})
 	registerOwnerGuarded(r, "SaveTradingLabSettings", write, dispatchPlain,
 		func(ctx context.Context, caller channel.Caller, req *leapmuxv1.SaveTradingLabSettingsRequest, sender channel.ResponseWriter) {
-			if channel.ViaAgentSocket(ctx) && (req.GetNewConfirmationPassphrase() != "" ||
+			if channel.ViaAgentSocket(ctx) && (req.GetNewConfirmationPassphrase() != "" || req.GetNewConnectorPassphrase() != "" ||
 				req.GetSettings().GetMode() == leapmuxv1.TradingLabMode_TRADING_LAB_MODE_LIVE) {
-				sendPermissionDenied(sender, "an agent cannot set the confirmation passphrase or switch the lab to live trading")
+				sendPermissionDenied(sender, "an agent cannot set a passphrase or switch the lab to live trading")
 				return
 			}
 			s, err := lab.SaveSettings(ctx, caller.UserID.String(), req)

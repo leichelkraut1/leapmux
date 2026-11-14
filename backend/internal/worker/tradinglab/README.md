@@ -103,6 +103,12 @@ internal/util/mcpclient/  a minimal MCP client (stdio and streamable HTTP)
   queue. It never approves one.
 - Paper mode is the default and needs no credentials. In paper mode the
   gateway refuses every live submission.
+- The read-only Claude connector (`internal/worker/labmcp`), served only when
+  the worker sets `trading_connector_listen`, calls the lab's read methods
+  and nothing else. It signs a person in with a connector passphrase of its
+  own, which must differ from the confirmation passphrase, so the passphrase
+  that confirms orders is never typed into a sign-in page. It never returns
+  the broker settings, the account number or an order's fingerprint.
 
 ### State and recovery
 
