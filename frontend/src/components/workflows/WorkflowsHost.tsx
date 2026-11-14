@@ -10,17 +10,14 @@ import type { TabSelectionStore } from '~/stores/tabSelection.store'
 import type { TabView } from '~/stores/tabView'
 import type { WorkflowComputer } from '~/stores/workflows'
 import { useSearchParams } from '@solidjs/router'
-import { createEffect, createMemo, on, onCleanup, onMount, Show, untrack } from 'solid-js'
-import * as workerRpc from '~/api/workerRpc'
+import { createEffect, createMemo, on, onCleanup, onMount, Show } from 'solid-js'
 import { showWarnToast } from '~/components/common/Toast'
 import { hasPlaceableTab, openTabInFocusedTile } from '~/components/shell/openTabInFocusedTile'
 import { TabType } from '~/generated/proto/leapmux/v1/workspace_pb'
-import { makeIdGenerator } from '~/lib/idGenerator'
-import { tradingResearchTabPayload } from '~/lib/tabPayload'
 import { openedAgentTabFields } from '~/stores/tab.helpers'
-import { emitRemoveTab } from '~/stores/tabOps'
 import { workerInfoStore } from '~/stores/workerInfo.store'
-import { defaultComputerId, formatRunParam, parseRunParam } from '~/stores/workflows'
+import { formatRunParam, parseRunParam } from '~/stores/workflows'
+import { openTradingResearchTab } from './trading/openTradingResearchTab'
 import { tradingTab } from './trading/tradingTab'
 import { WorkflowRunPanel } from './WorkflowRunPanel'
 import { WorkflowsDialog, workflowsTabFromParam } from './WorkflowsDialog'
@@ -70,40 +67,9 @@ export function WorkflowsHost(props: WorkflowsHostProps) {
   // computers and opens other labs' tabs through this.
   createEffect(() => tradingTab.setComputers(computers()))
 
-  const generateTradingTabId = makeIdGenerator('trading')
-  /** Focus the lab computer's Trading research tab, or open one in the active workspace. */
-  const openTradingTab = (labWorkerId?: string) => {
-    const workerId = labWorkerId || defaultComputerId(untrack(computers))
-    if (!workerId) {
-      showWarnToast('Cannot open Trading research', new Error('No computer is connected to hold the lab.'))
-      return
-    }
-    // With no computer named, any lab's open tab is the one to return to.
-    const existing = props.view.all().find(t => t.type === TabType.TRADING_RESEARCH && (!labWorkerId || t.workerId === workerId))
-    if (existing) {
-      props.selectWorkspace(existing.workspaceId)
-      props.selectTab(existing)
-      return
-    }
-    const workspaceId = props.activeWorkspaceId()
-    if (!workspaceId || !props.isWorkspaceMutatable(workspaceId)) {
-      showWarnToast('Cannot open Trading research', new Error('Open a workspace that is not archived first: the tab goes into the active workspace.'))
-      return
-    }
-    const tabId = generateTradingTabId()
-    const placed = openTabInFocusedTile(props, { type: TabType.TRADING_RESEARCH, id: tabId, workerId }, { hydrated: true })
-    // A refused placement added no tab, so no worker row may be registered for it.
-    if (!placed) {
-      showWarnToast('Cannot open Trading research', new Error('The workspace is not ready for a new tab yet.'))
-      return
-    }
-    workerRpc.registerTabPayload(workerId, { tabId, payload: tradingResearchTabPayload() }).catch((err) => {
-      emitRemoveTab(TabType.TRADING_RESEARCH, tabId)
-      showWarnToast('Cannot open Trading research', err)
-    })
-  }
+  const openTrading = (labWorkerId?: string) => void openTradingResearchTab({ ...props, computers: computers() }, labWorkerId)
   onMount(() => {
-    tradingTab.setOpener(openTradingTab)
+    tradingTab.setOpener(openTrading)
     onCleanup(() => tradingTab.setOpener(undefined))
   })
 
@@ -115,7 +81,7 @@ export function WorkflowsHost(props: WorkflowsHostProps) {
     if (!raw && !legacy)
       return
     setSearchParams({ trading: undefined, ...(legacy ? { workflows: undefined } : {}) }, { replace: true })
-    openTradingTab(raw && raw !== 'open' ? raw : undefined)
+    openTrading(raw && raw !== 'open' ? raw : undefined)
   }))
 
   const dialogOpen = () => searchParams.workflows !== undefined && searchParams.workflows !== ''
