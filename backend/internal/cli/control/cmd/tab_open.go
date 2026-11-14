@@ -70,6 +70,9 @@ func RunTabOpen(rawCtx any, args []string) error {
 	if tt == leapmuxv1.TabType_TAB_TYPE_IMAGE {
 		return control.EmitError("invalid_request", "--type=image is opened by clicking an image in a transcript, not from the CLI")
 	}
+	if tt == leapmuxv1.TabType_TAB_TYPE_TRADING_RESEARCH {
+		return control.EmitError("invalid_request", "--type=trading-research is opened from the LeapMux menu, not from the CLI")
+	}
 	if tt == leapmuxv1.TabType_TAB_TYPE_FILE && filePath == "" {
 		return control.EmitError("invalid_request", "--path is required for --type=file")
 	}

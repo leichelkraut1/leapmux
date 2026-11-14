@@ -793,6 +793,8 @@ export function tabDisplayLabel(tab: Tab): string {
     return 'Image'
   if (tab.type === TabType.NATIVE_CONVERSATION)
     return tab.displayName || 'Outside chat'
+  if (tab.type === TabType.TRADING_RESEARCH)
+    return 'Trading research'
   return tab.type === TabType.AGENT ? 'Agent' : 'Terminal'
 }
 

@@ -10,7 +10,6 @@ import { PillGroup } from '~/components/common/PillGroup'
 import { RefreshButton } from '~/components/common/RefreshButton'
 import { defaultComputerId, newTemplateDraft, templateDraft, workflowErrorMessage } from '~/stores/workflows'
 import { ComputerPicker } from './ComputerPicker'
-import { TradingResearch } from './trading/TradingResearch'
 import { WorkflowLaunchForm } from './WorkflowLaunchForm'
 import { WorkflowProfiles } from './WorkflowProfiles'
 import { WorkflowRunsList } from './WorkflowRunsList'
@@ -18,19 +17,18 @@ import * as styles from './Workflows.css'
 import { WorkflowTemplateEditor } from './WorkflowTemplateEditor'
 import { WorkflowTemplates } from './WorkflowTemplates'
 
-export type WorkflowsTab = 'runs' | 'templates' | 'profiles' | 'trading'
+export type WorkflowsTab = 'runs' | 'templates' | 'profiles'
 
 const TABS = [
   { key: 'runs', label: 'Runs' },
   { key: 'templates', label: 'Templates' },
   { key: 'profiles', label: 'Profiles' },
-  { key: 'trading', label: 'Trading research' },
 ] as const
 
 /** The `?workflows=` value as a tab; anything else opens Runs. */
 export function workflowsTabFromParam(value: string | string[] | undefined): WorkflowsTab {
   const raw = Array.isArray(value) ? value[0] : value
-  return raw === 'templates' || raw === 'profiles' || raw === 'trading' ? raw : 'runs'
+  return raw === 'templates' || raw === 'profiles' ? raw : 'runs'
 }
 
 type TemplatesView
@@ -119,7 +117,7 @@ export function WorkflowsDialog(props: WorkflowsDialogProps) {
             selectedKey={props.tab}
             onSelect={props.onTabChange}
           />
-          <Show when={props.tab !== 'runs' && props.tab !== 'trading'}>
+          <Show when={props.tab !== 'runs'}>
             <div class={styles.toolbarField}>
               <span>Library computer</span>
               <div class={styles.inline}>
@@ -143,11 +141,7 @@ export function WorkflowsDialog(props: WorkflowsDialogProps) {
             <WorkflowRunsList computers={props.computers} onOpenRun={props.onOpenRun} />
           </Show>
 
-          <Show when={props.tab === 'trading'}>
-            <TradingResearch computers={props.computers} />
-          </Show>
-
-          <Show when={props.tab !== 'runs' && props.tab !== 'trading'}>
+          <Show when={props.tab !== 'runs'}>
             <Show when={libraryComputer() && !libraryComputer()?.online}>
               <Alert variant="warning">This computer is offline, so its library cannot be read or changed.</Alert>
             </Show>

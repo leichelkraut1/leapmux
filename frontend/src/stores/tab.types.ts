@@ -178,10 +178,18 @@ export interface NativeConversationTab extends BaseTab {
 }
 
 /**
+ * The Trading research view of the lab on the tab's worker. The worker id IS
+ * the lab computer; the payload carries nothing else.
+ */
+export interface TradingResearchTab extends BaseTab {
+  type: TabType.TRADING_RESEARCH
+}
+
+/**
  * Discriminated union of every tab kind. Narrow with `switch (tab.type)`
  * or the per-kind guards below.
  */
-export type Tab = AgentTab | TerminalTab | FileTab | ImageTab | NativeConversationTab
+export type Tab = AgentTab | TerminalTab | FileTab | ImageTab | NativeConversationTab | TradingResearchTab
 
 export function isAgentTab(t: Tab): t is AgentTab {
   return t.type === TabType.AGENT
@@ -224,6 +232,7 @@ export function isNativeConversationTab(t: Tab): t is NativeConversationTab {
  */
 export function isPayloadBackedTabType(type: TabType): boolean {
   return type === TabType.FILE || type === TabType.IMAGE || type === TabType.NATIVE_CONVERSATION
+    || type === TabType.TRADING_RESEARCH
 }
 
 /** The tab field that links a tab to its repo-keyed git store entry. */

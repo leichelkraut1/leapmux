@@ -21,6 +21,12 @@ const SECTIONS = [
 
 export interface TradingResearchProps {
   computers: readonly WorkflowComputer[]
+  /**
+   * The lab computer, when a tab is bound to one. Picking another computer
+   * then calls onLabChange instead of switching in place.
+   */
+  labWorkerId?: string
+  onLabChange?: (workerId: string) => void
 }
 
 /**
@@ -31,13 +37,24 @@ export interface TradingResearchProps {
  * ordinary workflow surfaces (Templates and Runs).
  */
 export function TradingResearch(props: TradingResearchProps) {
-  const [labWorkerId, setLabWorkerId] = createSignal('')
+  const [chosen, setChosen] = createSignal('')
   const [section, setSection] = createSignal<TradingSection>('runs')
   createEffect(() => {
+    if (props.labWorkerId)
+      return
     const ids = props.computers.map(c => c.id)
-    if (!labWorkerId() || !ids.includes(labWorkerId()))
-      setLabWorkerId(defaultComputerId(props.computers))
+    if (!chosen() || !ids.includes(chosen()))
+      setChosen(defaultComputerId(props.computers))
   })
+  const labWorkerId = () => props.labWorkerId || chosen()
+  const setLabWorkerId = (id: string) => {
+    if (props.labWorkerId && props.onLabChange) {
+      if (id !== props.labWorkerId)
+        props.onLabChange(id)
+      return
+    }
+    setChosen(id)
+  }
   const computer = () => props.computers.find(c => c.id === labWorkerId())
 
   return (

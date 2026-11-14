@@ -714,7 +714,7 @@ func (t *tabGitContext) commitDir() string {
 }
 
 func (svc *Service) inspectLastTabClose(ctx context.Context, tabType leapmuxv1.TabType, tabID, userID string) (*leapmuxv1.InspectLastTabCloseResponse, error) {
-	if tabType == leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION {
+	if isLinkTab(tabType) {
 		// Removing a link cannot authorize checkout deletion or imply anything
 		// about the source conversation's activity.
 		return &leapmuxv1.InspectLastTabCloseResponse{Target: leapmuxv1.LastTabCloseTarget_LAST_TAB_CLOSE_TARGET_NONE}, nil
@@ -1965,7 +1965,7 @@ func (svc *Service) readTabWorkingDir(ctx context.Context, tabType leapmuxv1.Tab
 			return "", err
 		}
 		return terminalRow.WorkingDir, nil
-	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
+	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION, leapmuxv1.TabType_TAB_TYPE_TRADING_RESEARCH:
 		payload, err := svc.TabPayloads.Get(ctx, userID, tabID)
 		if err != nil {
 			return "", fmt.Errorf("resolve tab payload working dir: %w", err)

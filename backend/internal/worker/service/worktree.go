@@ -1222,7 +1222,7 @@ func (svc *Service) rollbackCreatedBranch(r rollbackBranch) {
 // WORKTREE_ACTION_REMOVE degrades to KEEP with nothing reported.
 func worktreeTabUserID(tabType leapmuxv1.TabType, userID string) string {
 	switch tabType {
-	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
+	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION, leapmuxv1.TabType_TAB_TYPE_TRADING_RESEARCH:
 		return userID
 	case leapmuxv1.TabType_TAB_TYPE_AGENT,
 		leapmuxv1.TabType_TAB_TYPE_TERMINAL,

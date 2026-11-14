@@ -1,4 +1,4 @@
-import type { AgentTab, FileTab, ImageTab, NativeConversationTab, Tab, TerminalTab } from './tab.types'
+import type { AgentTab, FileTab, ImageTab, NativeConversationTab, Tab, TerminalTab, TradingResearchTab } from './tab.types'
 import type { TabMetadataStore } from './tabMetadata.store'
 import type { TabRecord, UserCrdtState } from '~/generated/proto/leapmux/v1/user_crdt_pb'
 import type { Projection, RenderedTab } from '~/lib/crdt'
@@ -429,6 +429,8 @@ export function createTabView(opts: CreateTabViewOpts) {
           sessionId: m.sessionId,
           displayName: m.displayName,
         } satisfies Complete<NativeConversationTab>
+      case TabType.TRADING_RESEARCH:
+        return { ...base, type: TabType.TRADING_RESEARCH } satisfies Complete<TradingResearchTab>
       default:
         return {
           ...base,
@@ -644,6 +646,10 @@ export function createTabView(opts: CreateTabViewOpts) {
     getNativeConversationTab(id: string): NativeConversationTab | undefined {
       const t = byKey().get(tabKey({ type: TabType.NATIVE_CONVERSATION, id }))
       return t && t.type === TabType.NATIVE_CONVERSATION ? t : undefined
+    },
+    getTradingResearchTab(id: string): TradingResearchTab | undefined {
+      const t = byKey().get(tabKey({ type: TabType.TRADING_RESEARCH, id }))
+      return t && t.type === TabType.TRADING_RESEARCH ? t : undefined
     },
     /** Every tab across every workspace — for worker-scoped sweeps. */
     all(): Tab[] {

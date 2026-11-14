@@ -62,7 +62,7 @@ All three simulated books follow the same rules:
 
 A new lab is paper-only and needs no credentials.
 
-1. **Workflows → Trading research → Settings → Use synthetic sample data** writes an invented market recording and selects it. The symbols SYNA and SYNB are made up, and the prices come from Black-Scholes.
+1. Open **Trading research** from the user menu. It opens as a tab in the active workspace, showing the lab of one computer; picking another computer in it opens that computer's tab. Then **Settings → Use synthetic sample data** writes an invented market recording and selects it. The symbols SYNA and SYNB are made up, and the prices come from Black-Scholes.
 2. **Templates → Add example: Blind trading research**, then **Launch**. Choose the coordinating computer and the computers for the four roles.
 3. Follow the run under **Trading research → Research runs**, then **Mark books** under **Portfolios**.
 

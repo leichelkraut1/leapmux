@@ -24,6 +24,10 @@
     "TAB_TYPE_NATIVE_CONVERSATION": {
       "wireToken": "native-conversation",
       "parseAliases": []
+    },
+    "TAB_TYPE_TRADING_RESEARCH": {
+      "wireToken": "trading-research",
+      "parseAliases": []
     }
   }
 }

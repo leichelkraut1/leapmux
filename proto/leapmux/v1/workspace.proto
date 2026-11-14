@@ -18,6 +18,10 @@ enum TabType {
   // A private reference to an existing native chat. Linking it never creates,
   // resumes, moves, or takes ownership of the conversation.
   TAB_TYPE_NATIVE_CONVERSATION = 5;
+  // The Trading research view of the lab on the tab's worker. A link like a
+  // native conversation tab: it owns no directory and no process. See
+  // TradingResearchTabPayload.
+  TAB_TYPE_TRADING_RESEARCH = 6;
 }
 
 // WorkspaceArchiveState identifies whether a workspace accepts mutations and

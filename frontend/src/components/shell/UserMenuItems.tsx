@@ -61,6 +61,9 @@ export const UserMenuItems: Component = () => {
       <button role="menuitem" onClick={() => setSearchParams({ workflows: 'runs' })}>
         Workflows
       </button>
+      <button role="menuitem" onClick={() => setSearchParams({ trading: 'open' })}>
+        Trading research
+      </button>
       <AppAboutMenuItem />
       <button role="menuitem" onClick={() => openPreferences()}>
         <DropdownMenuItemContent label="Preferences..." {...(preferencesHint !== undefined ? { detail: preferencesHint } : {})} />

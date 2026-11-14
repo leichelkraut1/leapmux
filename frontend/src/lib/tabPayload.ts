@@ -35,6 +35,7 @@ export type TabPayloadView
       sessionId: string
       displayName: string
     }
+    | { kind: 'tradingResearch', workingDir: string }
 
 /**
  * Decode a wire payload. Returns null for an absent payload and for one whose
@@ -68,6 +69,8 @@ export function tabPayloadView(payload: TabPayload | undefined): TabPayloadView 
       displayName: kind.value.displayName,
     }
   }
+  if (kind.case === 'tradingResearch')
+    return { kind: 'tradingResearch', workingDir }
   return null
 }
 
@@ -118,4 +121,9 @@ export function nativeConversationTabPayload(conversation: {
       },
     },
   }
+}
+
+/** Build the Trading research case: the tab's worker is the lab it shows. */
+export function tradingResearchTabPayload(): MessageInitShape<typeof TabPayloadSchema> {
+  return { kind: { case: 'tradingResearch', value: {} } }
 }

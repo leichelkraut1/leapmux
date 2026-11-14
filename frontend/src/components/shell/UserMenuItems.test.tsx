@@ -83,6 +83,12 @@ describe('UserMenuItems', () => {
     expect(setSearchParams).toHaveBeenCalledWith({ workflows: 'runs' })
   })
 
+  it('opens trading research as a tab, not inside the workflows dialog', () => {
+    render(() => <UserMenuItems />)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Trading research' }))
+    expect(setSearchParams).toHaveBeenCalledWith({ trading: 'open' })
+  })
+
   it('always offers About and Preferences', () => {
     render(() => <UserMenuItems />)
     expect(screen.getByRole('menuitem', { name: /About/ })).toBeInTheDocument()

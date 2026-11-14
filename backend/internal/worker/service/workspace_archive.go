@@ -301,7 +301,7 @@ func archiveTabIDs(tabs []*leapmuxv1.TabRef) (archiveTabSet, error) {
 				terminalSeen[tab.GetTabId()] = struct{}{}
 				set.terminals = append(set.terminals, tab.GetTabId())
 			}
-		case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
+		case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION, leapmuxv1.TabType_TAB_TYPE_TRADING_RESEARCH:
 			// Payload-backed tabs own no process, so they take no teardown --
 			// but they DO take the flag, because they are references for the
 			// quake reference count and an archived tab is not a live one.
@@ -337,7 +337,7 @@ func archivableTabType(tabType leapmuxv1.TabType) bool {
 		leapmuxv1.TabType_TAB_TYPE_TERMINAL,
 		leapmuxv1.TabType_TAB_TYPE_FILE,
 		leapmuxv1.TabType_TAB_TYPE_IMAGE,
-		leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
+		leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION, leapmuxv1.TabType_TAB_TYPE_TRADING_RESEARCH:
 		return true
 	case leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED:
 		return false

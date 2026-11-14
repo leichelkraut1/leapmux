@@ -92,3 +92,11 @@ export const reasons = style({
   paddingLeft: 'var(--space-4)',
   fontSize: 'var(--text-7)',
 })
+
+/** A Trading research tab's pane, which scrolls on its own. */
+export const tabPane = style({
+  height: '100%',
+  overflowY: 'auto',
+  padding: 'var(--space-4)',
+  boxSizing: 'border-box',
+})

@@ -105,7 +105,7 @@ func TestNativeConversationTabsUpgradePreservesPrivateRows(t *testing.T) {
 	assert.True(t, proto.Equal(payload, &decoded))
 	require.NoError(t, conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM tab_locations WHERE tab_type = 5`).Scan(&n))
 	assert.Zero(t, n, "native placement never claims physical lifecycle ownership")
-	_, err = conn.ExecContext(ctx, `INSERT INTO worker_tab_payloads (user_id, tab_id, tab_type, payload) VALUES ('owner-a', 'unsupported', 6, X'00')`)
+	_, err = conn.ExecContext(ctx, `INSERT INTO worker_tab_payloads (user_id, tab_id, tab_type, payload) VALUES ('owner-a', 'unsupported', 7, X'00')`)
 	require.Error(t, err)
 	_, err = conn.ExecContext(ctx, `INSERT INTO worker_tab_payloads (user_id, tab_id, tab_type, payload) VALUES ('', 'blank-owner', 5, X'00')`)
 	require.Error(t, err)

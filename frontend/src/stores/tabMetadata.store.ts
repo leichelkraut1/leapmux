@@ -256,6 +256,8 @@ export function tabPayloadMetadata(payload: TabPayloadView): TabMetadata {
     assignDefined(shared, 'filePath', payload.filePath || undefined)
     return shared
   }
+  if (payload.kind === 'tradingResearch')
+    return shared
   if (payload.kind === 'nativeConversation') {
     assignDefined(shared, 'sourceWorkerId', payload.sourceWorkerId || undefined)
     assignDefined(shared, 'agentProvider', payload.agentProvider || undefined)

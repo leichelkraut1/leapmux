@@ -71,7 +71,7 @@ func (s *TabPayloadStore) Register(ctx context.Context, p RegisterTabPayloadPara
 	// Its link neither blocks deletion nor claims ownership of either computer's
 	// checkout. Admission must therefore not acquire a directory reference.
 	admissionDir := workingDir
-	if stored.GetNativeConversation() != nil {
+	if stored.GetNativeConversation() != nil || stored.GetTradingResearch() != nil {
 		admissionDir = ""
 	}
 	release, err := s.lifecycle.admit(admissionDir, tabPayloadLinkDir(stored))
@@ -170,6 +170,8 @@ func tabPayloadType(payload *leapmuxv1.TabPayload) (leapmuxv1.TabType, error) {
 			return leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED, errors.New("native display_name is invalid")
 		}
 		return leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION, nil
+	case *leapmuxv1.TabPayload_TradingResearch:
+		return leapmuxv1.TabType_TAB_TYPE_TRADING_RESEARCH, nil
 	default:
 		return leapmuxv1.TabType_TAB_TYPE_UNSPECIFIED, errors.New("payload specifies no tab kind")
 	}
@@ -188,7 +190,7 @@ var nativeConversationWorkerID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 // in, so it ref-counts that, which is what keeps the last-tab-close prompt from
 // offering to delete a worktree that still has a visible tab on it.
 func tabPayloadLinkDir(payload *leapmuxv1.TabPayload) string {
-	if payload.GetNativeConversation() != nil {
+	if payload.GetNativeConversation() != nil || payload.GetTradingResearch() != nil {
 		return ""
 	}
 	if file := payload.GetFile(); file != nil {
@@ -472,3 +474,11 @@ var ErrTabPayloadNotFound = errors.New("tab_payload: not found")
 // as a bad request, because the caller has nothing to correct and a retry is
 // exactly what it should do.
 var ErrInvalidTabPayload = errors.New("tab_payload: invalid")
+
+// isLinkTab reports a tab kind that only links to something elsewhere: a
+// native conversation, or the trading lab of the tab's worker. Such a tab
+// owns no directory and no process, so closing it never touches a worktree
+// and admission takes no directory reference.
+func isLinkTab(tabType leapmuxv1.TabType) bool {
+	return tabType == leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION || tabType == leapmuxv1.TabType_TAB_TYPE_TRADING_RESEARCH
+}

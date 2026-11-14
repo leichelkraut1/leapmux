@@ -6,6 +6,7 @@ import FileText from 'lucide-solid/icons/file-text'
 import ImageIcon from 'lucide-solid/icons/image'
 import Link from 'lucide-solid/icons/link'
 import Terminal from 'lucide-solid/icons/terminal'
+import TrendingUp from 'lucide-solid/icons/trending-up'
 import { Match, Show, Switch } from 'solid-js'
 import { AgentProviderIcon } from '~/components/common/AgentProviderIcon'
 import { Icon } from '~/components/common/Icon'
@@ -85,6 +86,9 @@ export const TabTypeIcon: Component<TabTypeIconProps> = (props) => {
       </Match>
       <Match when={props.tab.type === TabType.TERMINAL}>
         <Icon icon={Terminal} size={tokenSize()} {...classProps()} />
+      </Match>
+      <Match when={props.tab.type === TabType.TRADING_RESEARCH}>
+        <Icon icon={TrendingUp} size={tokenSize()} {...classProps()} />
       </Match>
     </Switch>
   )

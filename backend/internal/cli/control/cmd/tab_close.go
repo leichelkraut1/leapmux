@@ -458,7 +458,7 @@ func dispatchWorkerClose(call workerCaller, got resolve.Resolved, tt leapmuxv1.T
 				WorktreeAction: action,
 			},
 			&leapmuxv1.CloseTerminalResponse{})
-	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
+	case leapmuxv1.TabType_TAB_TYPE_FILE, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION, leapmuxv1.TabType_TAB_TYPE_TRADING_RESEARCH:
 		// A payload-backed tab DOES have a worker-side row:
 		// worker_tab_payloads, plus the worktree_tabs link that ref-counts its
 		// worktree. Revoking is what drives the shared closeTabCommon flow --

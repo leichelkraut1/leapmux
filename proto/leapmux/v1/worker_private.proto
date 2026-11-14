@@ -132,8 +132,14 @@ message TabPayload {
     FileTabPayload  file  = 2;
     ImageTabPayload image = 3;
     NativeConversationTabPayload native_conversation = 4;
+    TradingResearchTabPayload trading_research = 5;
   }
 }
+
+// A Trading research tab shows the trading lab of the worker that holds it
+// (internal/worker/tradinglab), so it needs nothing more than its kind.
+// TabPayload.working_dir is unused for this kind: the tab owns no directory.
+message TradingResearchTabPayload {}
 
 // A link to the unchanged chat on its original computer, not a managed agent
 // or a transcript copy. The worker holding this payload is the destination

@@ -1332,7 +1332,7 @@ func registerAgentHandlers(d registrar, svc *Service) {
 			tabType = leapmuxv1.TabType_TAB_TYPE_FILE
 		}
 		action := r.GetWorktreeAction()
-		if tabType == leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION {
+		if isLinkTab(tabType) {
 			if !callerReadsTabType(caller, tabType) {
 				sendPermissionDenied(sender, "scope required for this tab kind")
 				return
@@ -4543,7 +4543,7 @@ func messageToProto(m *db.Message) (*leapmuxv1.AgentChatMessage, error) {
 // IMAGE payload reached a file:read-only caller in the first place.
 func tabTypeReadScope(tabType leapmuxv1.TabType) (leapmuxv1.Scope, bool) {
 	switch tabType {
-	case leapmuxv1.TabType_TAB_TYPE_AGENT, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION:
+	case leapmuxv1.TabType_TAB_TYPE_AGENT, leapmuxv1.TabType_TAB_TYPE_IMAGE, leapmuxv1.TabType_TAB_TYPE_NATIVE_CONVERSATION, leapmuxv1.TabType_TAB_TYPE_TRADING_RESEARCH:
 		return leapmuxv1.Scope_SCOPE_AGENT_READ, true
 	case leapmuxv1.TabType_TAB_TYPE_TERMINAL:
 		return leapmuxv1.Scope_SCOPE_TERMINAL_READ, true

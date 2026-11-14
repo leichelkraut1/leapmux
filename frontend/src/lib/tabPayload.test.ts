@@ -2,7 +2,7 @@ import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
 import { AgentProvider } from '~/generated/proto/leapmux/v1/agent_pb'
 import { TabPayloadSchema } from '~/generated/proto/leapmux/v1/worker_private_pb'
-import { fileTabPayload, imageTabPayload, nativeConversationTabPayload, tabPayloadView } from './tabPayload'
+import { fileTabPayload, imageTabPayload, nativeConversationTabPayload, tabPayloadView, tradingResearchTabPayload } from './tabPayload'
 
 describe('tabPayloadView', () => {
   it('decodes the file branch', () => {
@@ -43,6 +43,14 @@ describe('tabPayloadView', () => {
       sessionId: 'generated-native-session',
       displayName: 'Generated native chat',
       workingDir: '/destination/worktree',
+    })
+  })
+
+  it('round-trips the trading research branch, which carries only its kind', () => {
+    const payload = create(TabPayloadSchema, tradingResearchTabPayload())
+    expect(tabPayloadView(fromBinary(TabPayloadSchema, toBinary(TabPayloadSchema, payload)))).toEqual({
+      kind: 'tradingResearch',
+      workingDir: '',
     })
   })
 

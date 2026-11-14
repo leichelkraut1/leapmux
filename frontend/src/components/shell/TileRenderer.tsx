@@ -29,7 +29,7 @@ import type { createFloatingWindowStore } from '~/stores/floatingWindow.store'
 import type { createLayoutStore, SplitOrientation, TilePredicates } from '~/stores/layout.store'
 import type { LayoutOwner } from '~/stores/layoutOwner'
 import type { createRepoGitStore } from '~/stores/repoGit.store'
-import type { AgentTab, FileTab, ImageTab, NativeConversationTab, Tab, TerminalTab } from '~/stores/tab.types'
+import type { AgentTab, FileTab, ImageTab, NativeConversationTab, Tab, TerminalTab, TradingResearchTab as TradingResearchTabModel } from '~/stores/tab.types'
 import type { TabMetadataStore } from '~/stores/tabMetadata.store'
 import type { TabSelectionStore } from '~/stores/tabSelection.store'
 import type { TabView } from '~/stores/tabView'
@@ -47,6 +47,7 @@ import { ConfirmDialog } from '~/components/common/ConfirmDialog'
 import { NativeAgentConversationContent } from '~/components/dashboard/NativeAgentTranscriptViewer'
 import { FileViewer } from '~/components/fileviewer/FileViewer'
 import { pageScrollFocusedTerminal, TerminalView } from '~/components/terminal/TerminalView'
+import { TradingResearchTab } from '~/components/workflows/trading/TradingResearchTab'
 import { bindBranchActions, focusedBranchAction } from '~/components/workspace/branchActions'
 import { AgentStatus } from '~/generated/proto/leapmux/v1/agent_pb'
 import { GitFileStatusCode } from '~/generated/proto/leapmux/v1/common_pb'
@@ -816,6 +817,10 @@ export function createTileRenderer(opts: TileRendererOpts) {
       const t = tab()
       return t?.type === TabType.NATIVE_CONVERSATION ? t : null
     }
+    const tradingResearchTab = () => {
+      const t = tab()
+      return t?.type === TabType.TRADING_RESEARCH ? t : null
+    }
     // One pass over the tile's tabs produces buckets for the pane loops
     // below. The source `getTabsForTile` is itself memoised, so this memo only
     // re-runs when something in the tile actually changed.
@@ -825,6 +830,7 @@ export function createTileRenderer(opts: TileRendererOpts) {
       const image: ImageTab[] = []
       const nativeConversation: NativeConversationTab[] = []
       const terminal: TerminalTab[] = []
+      const tradingResearch: TradingResearchTabModel[] = []
       for (const t of view.forTile(tileId)) {
         if (t.type === TabType.AGENT)
           agent.push(t)
@@ -836,8 +842,10 @@ export function createTileRenderer(opts: TileRendererOpts) {
           terminal.push(t)
         else if (t.type === TabType.NATIVE_CONVERSATION)
           nativeConversation.push(t)
+        else if (t.type === TabType.TRADING_RESEARCH)
+          tradingResearch.push(t)
       }
-      return { agent, file, image, nativeConversation, terminal }
+      return { agent, file, image, nativeConversation, terminal, tradingResearch }
     })
     // The panes below key their `<For>`s on TAB IDs, not on the `Tab` objects.
     //
@@ -859,6 +867,7 @@ export function createTileRenderer(opts: TileRendererOpts) {
     const tileFileTabIds = createStableKeys(() => tabsByType().file, t => t.id)
     const tileImageTabIds = createStableKeys(() => tabsByType().image, t => t.id)
     const tileNativeConversationTabIds = createStableKeys(() => tabsByType().nativeConversation, t => t.id)
+    const tileTradingResearchTabIds = createStableKeys(() => tabsByType().tradingResearch, t => t.id)
     const tileTerminals = () => tabsByType().terminal
     const agentScrollStates = new Map<string, () => SavedViewportScroll | undefined>()
     const agentScrollToBottoms = new Map<string, () => void>()
@@ -1251,6 +1260,19 @@ export function createTileRenderer(opts: TileRendererOpts) {
                     {...optionalProp('title', it()?.title)}
                     messages={messageContext(it()?.workerId ?? '', it()?.imageAgentId ?? '')}
                   />
+                </Show>
+              </div>
+            )
+          }}
+        </For>
+
+        <For each={tileTradingResearchTabIds()}>
+          {(tradingTabId) => {
+            const tt = createMemo(() => view.getTradingResearchTab(tradingTabId))
+            return (
+              <div class={styles.tilePane} classList={{ [styles.tilePaneHidden]: tradingResearchTab()?.id !== tradingTabId }}>
+                <Show when={tt()?.workerId} keyed fallback={<div class={styles.placeholder}>Loading the trading lab…</div>}>
+                  {workerId => <TradingResearchTab workerId={workerId} />}
                 </Show>
               </div>
             )
