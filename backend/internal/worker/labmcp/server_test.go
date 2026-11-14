@@ -201,17 +201,23 @@ func TestServerPublishesDiscoveryMetadata(t *testing.T) {
 		require.NoError(t, json.Unmarshal(b, &as), p)
 		assert.Equal(t, "https://lab.example.com/lab-mcp/token", as["token_endpoint"], p)
 		assert.Equal(t, []any{"S256"}, as["code_challenge_methods_supported"], p)
+		assert.Equal(t, true, as["authorization_response_iss_parameter_supported"], p)
 	}
 }
 
 func TestServerRegistersOnlyClaudeAndLoopbackRedirects(t *testing.T) {
 	h := newHarness(t)
-	for _, ok := range []string{callback, "https://claude.com/api/mcp/auth_callback", "http://localhost:33418/callback", "http://127.0.0.1:5000/cb"} {
+	for _, ok := range []string{
+		callback, "https://claude.com/api/mcp/auth_callback", "http://localhost:33418/callback", "http://127.0.0.1:5000/cb",
+		"https://chatgpt.com/connector_platform_oauth_redirect", "https://chatgpt.com/connector/oauth/abc_123-XYZ",
+	} {
 		status, id := h.register(ok)
 		assert.Equal(t, http.StatusCreated, status, ok)
 		assert.NotEmpty(t, id, ok)
 	}
-	for _, bad := range []string{"https://evil.example.com/cb", "https://claude.ai/elsewhere", "http://claude.ai/api/mcp/auth_callback", "http://192.168.1.5/cb", "javascript:alert(1)"} {
+	for _, bad := range []string{"https://evil.example.com/cb", "https://claude.ai/elsewhere", "http://claude.ai/api/mcp/auth_callback", "http://192.168.1.5/cb", "javascript:alert(1)",
+		"https://chatgpt.com/elsewhere", "https://chatgpt.com/connector/oauth/a/b", "https://chatgpt.com/connector/oauth/x?next=https://evil.example.com",
+		"https://chatgpt.com.evil.example.com/connector_platform_oauth_redirect"} {
 		status, _ := h.register(bad)
 		assert.Equal(t, http.StatusBadRequest, status, bad)
 	}

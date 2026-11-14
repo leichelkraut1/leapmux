@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -18,15 +19,21 @@ import (
 // scope is the one scope the connector grants.
 const scope = "lab.read"
 
-// claudeCallbacks are the hosted Claude apps' OAuth callbacks. A loopback
-// redirect serves Claude Code and Claude Desktop.
-var claudeCallbacks = []string{
+// hostedCallbacks are the hosted apps' OAuth callbacks: Claude's, and the
+// one ChatGPT uses with a server that returns iss (RFC 9207). A loopback
+// redirect serves Claude Code, Claude Desktop and Codex.
+var hostedCallbacks = []string{
 	"https://claude.ai/api/mcp/auth_callback",
 	"https://claude.com/api/mcp/auth_callback",
+	"https://chatgpt.com/connector_platform_oauth_redirect",
 }
 
+// chatgptCallback is ChatGPT's per-connector callback, which it uses instead
+// for some connectors.
+var chatgptCallback = regexp.MustCompile(`^https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{1,128}$`)
+
 func allowedRedirect(raw string) bool {
-	if slices.Contains(claudeCallbacks, raw) {
+	if slices.Contains(hostedCallbacks, raw) || chatgptCallback.MatchString(raw) {
 		return true
 	}
 	u, err := url.Parse(raw)
@@ -71,6 +78,9 @@ func (s *Server) handleServerMetadata(w http.ResponseWriter, _ *http.Request) {
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": []string{"none"},
+		// Every redirect carries iss, which ChatGPT requires before it uses
+		// its stable callback.
+		"authorization_response_iss_parameter_supported": true,
 	})
 }
 
@@ -91,7 +101,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, u := range req.RedirectURIs {
 		if !allowedRedirect(u) {
-			oauthError(w, http.StatusBadRequest, "invalid_redirect_uri", "only Claude's callback or a loopback address may receive codes")
+			oauthError(w, http.StatusBadRequest, "invalid_redirect_uri", "only Claude's or ChatGPT's callback, or a loopback address, may receive codes")
 			return
 		}
 	}
@@ -167,7 +177,7 @@ button{margin-top:16px;width:100%;padding:10px;font:inherit;font-weight:600;bord
 
 func (s *Server) page(w http.ResponseWriter, status int, data map[string]any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://claude.ai https://claude.com http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://claude.ai https://claude.com https://chatgpt.com http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'")
 	w.WriteHeader(status)
 	_ = pageTmpl.Execute(w, data)
 }

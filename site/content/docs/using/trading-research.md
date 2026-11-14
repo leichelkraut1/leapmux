@@ -102,9 +102,9 @@ Closing a live position works the same way. The other route is an **execution po
 
 An agent cannot set the passphrase, switch to live mode, confirm an order or approve a policy. A research agent cannot reach the lab at all.
 
-## Reading the lab from Claude
+## Reading the lab from Claude or ChatGPT
 
-A Worker can serve a read-only connector, so Claude (on your phone, on claude.ai or in Claude Desktop) can answer questions about the lab: how each book is doing, what a run predicted, which ideas are queued. It reads the lab of the Worker that serves it, so serve it from the computer your research runs use.
+A Worker can serve a read-only connector, so Claude, ChatGPT or Codex (on your phone, on the web or on a computer) can answer questions about the lab: how each book is doing, what a run predicted, which ideas are queued. It reads the lab of the Worker that serves it, so serve it from the computer your research runs use.
 
 The connector has five tools: an overview of the lab and its books, the research runs, one run's snapshot, predictions, verdicts and candidates, the positions, and the orders. None of them prepares, confirms or cancels an order, decides a candidate or reaches the broker. They never return a broker credential, the account number or an order's confirmation fingerprint.
 
@@ -113,6 +113,6 @@ To set it up:
 1. Start the Worker with `trading_connector_listen` (a local address) and `trading_connector_url` (the public `https` URL). See [Worker configuration](/docs/admin/configuration/).
 2. Publish the local address at that URL with a reverse proxy, including the two `/.well-known/` paths the configuration describes.
 3. In **Trading research > Settings**, set a connector passphrase. It must differ from the confirmation passphrase, so the passphrase that confirms orders is never typed into a sign-in page.
-4. In Claude, add the URL as a custom connector (**Settings > Connectors**). Claude opens a sign-in page that asks for the connector passphrase.
+4. Add the URL as a custom connector: in Claude under **Settings > Connectors**, in ChatGPT under **Settings > Apps & Connectors** (developer mode), or as an MCP server in Codex. The app opens a sign-in page that asks for the connector passphrase.
 
-Sign-in uses OAuth 2.1 with PKCE, and codes go only to Claude's own callback or to a loopback address. Five wrong passphrases in 15 minutes lock sign-in for 15 minutes. An access token lasts an hour and a refresh token 30 days. Setting a new connector passphrase, or **Sign out connected apps**, ends every session.
+Sign-in uses OAuth 2.1 with PKCE, and codes go only to Claude's or ChatGPT's own callback or to a loopback address. Five wrong passphrases in 15 minutes lock sign-in for 15 minutes. An access token lasts an hour and a refresh token 30 days. Setting a new connector passphrase, or **Sign out connected apps**, ends every session.
