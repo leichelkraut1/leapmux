@@ -140,10 +140,13 @@ func DefaultSettings() *leapmuxv1.TradingLabSettings {
 			StartingCapital: 10000, AllocationPerIdea: 500, FeePerContract: 0.03, SlippagePerContract: 2,
 			MaxSpreadFraction: 0.25, MinOpenInterest: 100, MinVolume: 10, HorizonDays: []uint32{1, 3, 5},
 		},
-		Watchlist:             []string{"SPY", "QQQ"},
-		MaxSnapshotAgeSeconds: 900,
+		Watchlist:               []string{"SPY", "QQQ"},
+		ResearchQuoteAgeSeconds: 900,
 	}
 }
+
+// maxResearchQuoteAge is a long weekend and then some, in seconds.
+const maxResearchQuoteAge = 7 * 24 * 60 * 60
 
 func normalizeSettings(s *leapmuxv1.TradingLabSettings) error {
 	d := DefaultSettings()
@@ -162,8 +165,11 @@ func normalizeSettings(s *leapmuxv1.TradingLabSettings) error {
 	if s.GetSimulation() == nil {
 		s.Simulation = d.GetSimulation()
 	}
-	if s.GetMaxSnapshotAgeSeconds() == 0 {
-		s.MaxSnapshotAgeSeconds = d.GetMaxSnapshotAgeSeconds()
+	if s.GetResearchQuoteAgeSeconds() == 0 {
+		s.ResearchQuoteAgeSeconds = d.GetResearchQuoteAgeSeconds()
+	}
+	if s.GetResearchQuoteAgeSeconds() > maxResearchQuoteAge {
+		return invalidf("the oldest usable quote for research can be at most 7 days old")
 	}
 	var watch []string
 	for _, w := range s.GetWatchlist() {
@@ -378,10 +384,10 @@ func (l *Lab) snapshotExecutor(ctx context.Context, req workflow.ExecutorRequest
 	if md.Source() == leapmuxv1.TradingMarketDataSource_TRADING_MARKET_DATA_SOURCE_ROBINHOOD {
 		source = "robinhood"
 	}
+	quoteAge := time.Duration(s.GetResearchQuoteAgeSeconds()) * time.Second
 	snap, err := BuildSnapshot(frame, source, prov, SnapshotOptions{
 		Symbols: symbols, MaxDTE: maxDTE, StrikesPerSide: strikesPerSide,
-		MaxQuoteAge:    time.Duration(intParam(req.Step, "max_quote_age_seconds", 900)) * time.Second,
-		MaxSnapshotAge: time.Duration(s.GetMaxSnapshotAgeSeconds()) * time.Second, Now: now,
+		MaxQuoteAge: quoteAge, MaxSnapshotAge: quoteAge, Now: now,
 	})
 	if errors.Is(err, ErrStale) {
 		return nil, &workflow.PermanentError{Err: err}

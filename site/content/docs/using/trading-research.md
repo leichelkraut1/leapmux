@@ -21,6 +21,8 @@ Nothing in this process trades. A real order happens only when you confirm that 
 
 The market-data agent works through **research tools**: the lab forwards Robinhood's market-data tools (quotes, chains, contracts, option quotes, historicals, fundamentals, earnings, analyst ratings, search, scans) with its own sign-in, and leaves out every account, position, order, bank, alert and watchlist tool, so no instruction or injected text can reach one. The agent reads each tool's own description, so it keeps working when Robinhood changes them, and every call is logged with its task. It only chooses: the lab then quotes every selected underlying and contract itself, so no price in the snapshot comes from an agent. A catalyst stays only if the run called the tool it cites. With recorded market data the snapshot covers the watchlist and the selection is ignored.
 
+The snapshot drops any quote older than **Oldest usable quote for research** (Settings, 15 minutes by default). To plan Monday's trades on a Sunday, set it to 72 hours: the snapshot then uses Friday's closing quotes and warns the analysts that the market is closed and prices at the open will differ. A live order is unaffected; it still needs a fresh quote when you approve it.
+
 The run is **coordinated by the engine**: there is no Lead agent, because a Lead would see everything and could pass one analyst's hypothesis to the other. Each step starts when its inputs are frozen.
 
 ### Isolation

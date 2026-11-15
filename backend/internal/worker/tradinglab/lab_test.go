@@ -172,6 +172,32 @@ func TestSnapshotRefusesOldFutureOrEmptyData(t *testing.T) {
 	assert.ErrorIs(t, err, ErrStale, "no fresh underlying, no snapshot")
 }
 
+func TestSnapshotOnAWeekendUsesTheLastSessionsQuotes(t *testing.T) {
+	_, frames := sampleReplay(t)
+	f := *frames[0]
+	f.AsOf = f.AsOf.Add(44 * time.Hour)
+	opts := SnapshotOptions{Symbols: SampleSymbols, MaxDTE: 14, Now: f.AsOf, MaxQuoteAge: 15 * time.Minute, MaxSnapshotAge: 15 * time.Minute}
+	_, err := BuildSnapshot(&f, "robinhood", Provenance{}, opts)
+	assert.ErrorIs(t, err, ErrStale, "the default refuses Friday's quotes on Sunday")
+
+	opts.MaxQuoteAge, opts.MaxSnapshotAge = 72*time.Hour, 72*time.Hour
+	snap, err := BuildSnapshot(&f, "robinhood", Provenance{}, opts)
+	require.NoError(t, err)
+	assert.NotEmpty(t, snap.Options)
+	assert.Equal(t, 72*60*60, snap.Freshness.MaxQuoteAgeSeconds)
+	assert.True(t, slices.ContainsFunc(snap.Warnings, func(w string) bool { return strings.HasPrefix(w, "the market is closed") }), snap.Warnings)
+}
+
+func TestResearchQuoteAgeIsASettingCappedAtAWeek(t *testing.T) {
+	s := DefaultSettings()
+	require.NoError(t, normalizeSettings(s))
+	assert.EqualValues(t, 900, s.GetResearchQuoteAgeSeconds())
+	s.ResearchQuoteAgeSeconds = 72 * 60 * 60
+	require.NoError(t, normalizeSettings(s))
+	s.ResearchQuoteAgeSeconds = maxResearchQuoteAge + 1
+	assert.ErrorIs(t, normalizeSettings(s), ErrInvalid)
+}
+
 func TestCheckRecommendationFindsEveryInconsistency(t *testing.T) {
 	_, frames := sampleReplay(t)
 	snap, sum := snapshotOf(t, frames[0])

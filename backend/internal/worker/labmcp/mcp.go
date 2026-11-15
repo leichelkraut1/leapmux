@@ -306,7 +306,7 @@ func (s *Server) overview(ctx context.Context, owner string, _ map[string]any) (
 		"mode":                     strings.ToLower(strings.TrimPrefix(set.GetMode().String(), "TRADING_LAB_MODE_")),
 		"market_data":              strings.ToLower(strings.TrimPrefix(set.GetMarketData().String(), "TRADING_MARKET_DATA_SOURCE_")),
 		"watchlist":                set.GetWatchlist(),
-		"max_snapshot_age_seconds": set.GetMaxSnapshotAgeSeconds(),
+		"research_quote_age_seconds": set.GetResearchQuoteAgeSeconds(),
 		"risk_budget":              raw(set.GetRisk()),
 		"simulation":               raw(set.GetSimulation()),
 		"books":                    rawList(d.GetMetrics()),

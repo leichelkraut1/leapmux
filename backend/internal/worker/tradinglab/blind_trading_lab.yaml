@@ -178,7 +178,6 @@ template:
         selection_step: gather
         max_days_to_expiry: "14"
         strikes_per_side: "6"
-        max_quote_age_seconds: "900"
     - key: blind-research
       title: Blind research
       role_key: blind-analyst

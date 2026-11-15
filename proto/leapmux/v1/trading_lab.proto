@@ -192,8 +192,10 @@ message TradingLabSettings {
   TradingSimulationRules simulation = 6;
   // Underlyings the snapshot covers when a run names none.
   repeated string watchlist = 7;
-  // A snapshot older than this is refused for research.
-  uint32 max_snapshot_age_seconds = 8;
+  // A research snapshot drops a quote older than this. Raised past a weekend,
+  // research can run on the last session's closing quotes; a live order
+  // still needs a fresh quote (TradingRiskBudget.max_quote_age_seconds).
+  uint32 research_quote_age_seconds = 8;
   // 9 held a confirmation passphrase flag; deployed workers store this
   // message, so the number stays unused.
   int64 updated_at_ms = 10;

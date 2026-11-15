@@ -29,6 +29,10 @@ type SnapshotOptions struct {
 	Now time.Time
 }
 
+// lastSessionAge is how old the newest quote must be for a snapshot to say
+// it holds a closed market's last prices.
+const lastSessionAge = 15 * time.Minute
+
 // ErrStale is a frame too old, or too empty, to research.
 var ErrStale = errors.New("market data failed its freshness check")
 
@@ -99,6 +103,15 @@ func BuildSnapshot(f *Frame, source string, prov Provenance, o SnapshotOptions) 
 	}
 	if len(snap.Underlyings) == 0 {
 		return nil, fmt.Errorf("%w: no requested underlying has a fresh quote", ErrStale)
+	}
+	var newest time.Time
+	for _, u := range snap.Underlyings {
+		if u.QuoteTime.After(newest) {
+			newest = u.QuoteTime
+		}
+	}
+	if asOf.Sub(newest) > lastSessionAge {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf("the market is closed: the newest quote is from %s, so prices at the next open will differ", newest.Format(time.RFC3339)))
 	}
 
 	today := time.Date(asOf.Year(), asOf.Month(), asOf.Day(), 0, 0, 0, 0, time.UTC)

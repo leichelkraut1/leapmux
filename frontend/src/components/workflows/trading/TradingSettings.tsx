@@ -165,10 +165,19 @@ export function TradingSettings(props: { workerId: string }) {
                   <input value={s().watchlist.join(', ')} onChange={e => edit(x => (x.watchlist = e.currentTarget.value.split(',').map(w => w.trim()).filter(Boolean)))} />
                 </label>
                 <label class={styles.field}>
-                  Oldest usable snapshot (seconds)
-                  <input type="number" min="1" value={s().maxSnapshotAgeSeconds} onInput={e => edit(x => (x.maxSnapshotAgeSeconds = num(e.currentTarget.value)))} />
+                  Oldest usable quote for research (hours)
+                  <input
+                    type="number"
+                    min="0.25"
+                    max="168"
+                    step="0.25"
+                    value={s().researchQuoteAgeSeconds / 3600}
+                    onInput={e => edit(x => (x.researchQuoteAgeSeconds = Math.round(num(e.currentTarget.value) * 3600)))}
+                    data-testid="trading-research-quote-age"
+                  />
                 </label>
               </div>
+              <p class={styles.hint}>0.25 (15 minutes) while the market is open. To plan Monday on a Sunday, set 72 so research uses Friday's closing quotes; a live order still needs a quote from the last few seconds.</p>
               <div class={styles.actions}>
                 <button
                   type="button"
