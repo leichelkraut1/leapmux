@@ -542,6 +542,9 @@ var ownerGuardedProbes = func() []ownerGuardedProbe {
 		{"WorkflowAgentComplete", func() proto.Message {
 			return &leapmuxv1.WorkflowAgentCompleteRequest{Auth: workflowAuth, Summary: "done"}
 		}},
+		{"WorkflowAgentTools", func() proto.Message {
+			return &leapmuxv1.WorkflowAgentToolsRequest{Auth: workflowAuth, Tool: "get_equity_quotes", ArgumentsJson: "{}"}
+		}},
 		{"GetTradingLabSettings", func() proto.Message { return &leapmuxv1.GetTradingLabSettingsRequest{} }},
 		{"SaveTradingLabSettings", func() proto.Message {
 			return &leapmuxv1.SaveTradingLabSettingsRequest{Settings: &leapmuxv1.TradingLabSettings{Mode: leapmuxv1.TradingLabMode_TRADING_LAB_MODE_PAPER}}

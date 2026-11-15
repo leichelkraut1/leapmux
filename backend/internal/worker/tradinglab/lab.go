@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
+	"github.com/leapmux/leapmux/internal/util/mcpclient"
 	"github.com/leapmux/leapmux/internal/worker/workflow"
 )
 
@@ -51,6 +52,10 @@ type BrokerSession interface {
 	TradingBroker
 	Reader() ReadOnlyBroker
 	Status(ctx context.Context, now time.Time) *leapmuxv1.TradingBrokerStatus
+	// Tools and CallTool are the server as it is, for the research tools
+	// (MarketTools), which filter it.
+	Tools() []mcpclient.Tool
+	CallTool(ctx context.Context, name string, args map[string]any) (*mcpclient.CallResult, error)
 	Close() error
 }
 
@@ -78,6 +83,8 @@ type Lab struct {
 	connect func(ctx context.Context, userID string, cfg *leapmuxv1.TradingMcpConfig) (BrokerSession, error)
 	// signIns holds the broker sign-ins waiting for the browser to return.
 	signIns brokerSignIns
+	// market is the session the research tools share.
+	market marketSession
 	// connectorURL is Config.ConnectorURL.
 	connectorURL string
 	// gateMu serializes the gateway's state transitions, so a double click
@@ -339,16 +346,40 @@ func (l *Lab) snapshotExecutor(ctx context.Context, req workflow.ExecutorRequest
 	}
 	defer closeMD()
 	maxDTE := intParam(req.Step, "max_days_to_expiry", 14)
-	frame, prov, now, err := md.Capture(ctx, symbols, maxDTE)
-	if err != nil {
-		return nil, err
+	strikesPerSide := intParam(req.Step, "strikes_per_side", 6)
+	var frame *Frame
+	var prov Provenance
+	var now time.Time
+	selection, selErr := selectionFor(req)
+	if selErr != nil {
+		return nil, &workflow.PermanentError{Err: selErr}
+	}
+	if live, ok := md.(*LiveMarket); ok && selection != nil {
+		// The market-data step chose what to research; the lab quotes it all
+		// itself, so no price comes from an agent.
+		symbols = selection.Symbols
+		frame, prov, now, err = live.CaptureSelected(ctx, selection.Symbols, selection.contractIDs())
+		if err != nil {
+			return nil, err
+		}
+		calls, err := l.marketCallsForRun(ctx, req.Run.GetId())
+		if err != nil {
+			return nil, err
+		}
+		frame.Catalysts = append(frame.Catalysts, selection.catalysts(calls)...)
+		strikesPerSide = max(strikesPerSide, len(selection.Contracts))
+	} else {
+		frame, prov, now, err = md.Capture(ctx, symbols, maxDTE)
+		if err != nil {
+			return nil, err
+		}
 	}
 	source := "replay"
 	if md.Source() == leapmuxv1.TradingMarketDataSource_TRADING_MARKET_DATA_SOURCE_ROBINHOOD {
 		source = "robinhood"
 	}
 	snap, err := BuildSnapshot(frame, source, prov, SnapshotOptions{
-		Symbols: symbols, MaxDTE: maxDTE, StrikesPerSide: intParam(req.Step, "strikes_per_side", 6),
+		Symbols: symbols, MaxDTE: maxDTE, StrikesPerSide: strikesPerSide,
 		MaxQuoteAge:    time.Duration(intParam(req.Step, "max_quote_age_seconds", 900)) * time.Second,
 		MaxSnapshotAge: time.Duration(s.GetMaxSnapshotAgeSeconds()) * time.Second, Now: now,
 	})
@@ -379,6 +410,7 @@ func (l *Lab) snapshotExecutor(ctx context.Context, req workflow.ExecutorRequest
 
 // The template's step keys, overridable per record step.
 const (
+	defaultGatherStep     = "gather"
 	defaultSnapshotStep   = "snapshot"
 	defaultBlindStep      = "blind-research"
 	defaultContrarianStep = "contrarian-research"

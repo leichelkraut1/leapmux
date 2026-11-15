@@ -20,6 +20,8 @@ var (
 	EvaluationSchema string
 	//go:embed schemas/audit.schema.json
 	AuditSchema string
+	//go:embed schemas/market_selection.schema.json
+	MarketSelectionSchema string
 )
 
 // RubricVersion is the scoring rubric the evaluation schema pins.

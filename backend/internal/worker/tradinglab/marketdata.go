@@ -154,6 +154,26 @@ func (l *LiveMarket) Capture(ctx context.Context, symbols []string, maxDTE int) 
 	return f, Provenance{Provider: "robinhood-mcp", Server: l.Server, Tools: tools, CapturedAt: now}, now, nil
 }
 
+// CaptureSelected quotes the underlyings and contracts a market-data step
+// selected, all from the broker.
+func (l *LiveMarket) CaptureSelected(ctx context.Context, symbols, contractIDs []string) (*Frame, Provenance, time.Time, error) {
+	now := l.Now().UTC()
+	f := &Frame{AsOf: now}
+	quotes, err := l.Broker.Quotes(ctx, symbols)
+	if err != nil {
+		return nil, Provenance{}, now, fmt.Errorf("underlying quotes: %w", err)
+	}
+	f.Underlyings = quotes
+	if len(contractIDs) > 0 {
+		opts, err := l.Broker.OptionQuotesByID(ctx, contractIDs)
+		if err != nil {
+			return nil, Provenance{}, now, fmt.Errorf("selected contracts: %w", err)
+		}
+		f.Options = opts
+	}
+	return f, Provenance{Provider: "robinhood-mcp", Server: l.Server, Tools: []string{OpQuote, OpOptionInstruments, OpOptionQuotes}, CapturedAt: now}, now, nil
+}
+
 func (l *LiveMarket) FramesSince(ctx context.Context, since time.Time, contracts, symbols []string) ([]*Frame, error) {
 	now := l.Now().UTC()
 	if !now.After(since) {

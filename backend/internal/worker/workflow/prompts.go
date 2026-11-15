@@ -198,6 +198,13 @@ func taskDispatch(run *leapmuxv1.WorkflowRun, role *leapmuxv1.WorkflowRole, task
 		b.WriteString("\n\n")
 	}
 	b.WriteString(inputsText(inputs))
+	if tools := step.GetParams()["tools"]; tools != "" {
+		b.WriteString("## Tools\n\n")
+		b.WriteString("This step is granted the coordinator's `" + tools + "` tools. They are the only external tools you may use for it. List them with their descriptions and argument schemas, then call them:\n\n```\n")
+		b.WriteString("leapmux control workflow tools\n")
+		b.WriteString("leapmux control workflow tools --call <name> --args '<json object>'\n")
+		b.WriteString("```\n\nEvery call is logged with this task. Read each tool's description: it says what the tool needs and how to page through long results.\n\n")
+	}
 	schema := strings.TrimSpace(step.GetOutputSchema())
 	if schema != "" {
 		b.WriteString("## Required output\n\nWrite your result as one JSON document that satisfies this JSON Schema, save it to a file, and pass it with `--output-file`. The engine validates it and refuses a report that does not match")

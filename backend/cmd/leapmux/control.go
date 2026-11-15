@@ -108,6 +108,7 @@ var controlTree = cmdGroup{
 				{Name: "complete", Summary: "Lead: finish the run", Run: controlRun(cmdcontrol.RunWorkflowComplete)},
 				{Name: "report", Summary: "Report a task's structured result", Run: controlRun(cmdcontrol.RunWorkflowReport)},
 				{Name: "progress", Summary: "Record a progress note on a task", Run: controlRun(cmdcontrol.RunWorkflowProgress)},
+				{Name: "tools", Summary: "List the tools your step is granted, or call one (--call <name> --args <json|->)", Run: controlRun(cmdcontrol.RunWorkflowTools)},
 			},
 		},
 		{

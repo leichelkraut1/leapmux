@@ -396,9 +396,10 @@ func TestRobinhoodToolsAreClassifiedAndAuthenticationVerified(t *testing.T) {
 	assert.True(t, st.GetAuthenticated())
 	assert.True(t, st.GetLiveReady(), st.GetDetail())
 	assert.Equal(t, "****2345", st.GetAccountLabel(), "the account number is masked")
-	assert.ElementsMatch(t, []string{"preview_option_order", "place_option_order", "cancel_option_order"}, st.GetTradingTools())
+	assert.ElementsMatch(t, []string{"review_option_order", "place_option_order", "cancel_option_order"}, st.GetTradingTools())
 	assert.NotContains(t, st.GetReadOnlyTools(), "place_option_order")
-	assert.ElementsMatch(t, []string{"place_crypto_trade", "transfer_funds"}, st.GetUnclassifiedTools(), "tools the lab does not know are never used")
+	assert.ElementsMatch(t, []string{"place_crypto_trade", "transfer_funds", "place_equity_order", "add_to_watchlist", "get_bank_accounts"}, st.GetUnclassifiedTools(),
+		"tools the lab does not know are never used")
 
 	t.Setenv("TEST_RH_TOKEN", "stolen-or-expired")
 	st, err = h.lab.VerifyBroker(h.ctx, userID)

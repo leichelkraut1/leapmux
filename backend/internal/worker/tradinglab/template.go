@@ -18,6 +18,7 @@ var templateYAML string
 // stepSchemas are the output schemas the research steps are validated by,
 // filled into the template so its YAML need not repeat them.
 var stepSchemas = map[string]*string{
+	defaultGatherStep:     &MarketSelectionSchema,
 	defaultBlindStep:      &PredictionSchema,
 	defaultContrarianStep: &PredictionSchema,
 	defaultEvaluationStep: &EvaluationSchema,

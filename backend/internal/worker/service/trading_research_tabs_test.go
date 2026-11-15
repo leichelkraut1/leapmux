@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
+	"github.com/leapmux/leapmux/internal/worker/workflow"
 )
 
 func tradingResearchPayload() *leapmuxv1.TabPayload {
@@ -48,4 +49,15 @@ func TestTradingResearchTabIsALinkThatOwnsNoWorktree(t *testing.T) {
 	count, err := fx.svc.Queries.CountWorktreeTabs(ctx, fx.wtID)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, count, "only the real agent holds a worktree reference")
+}
+
+// A step not granted tools gets none: the market tools answer only a
+// participant whose current step names them.
+func TestWorkflowAgentToolsNeedAStepGrant(t *testing.T) {
+	t.Parallel()
+	fx := setupCloseTabFixture(t, leapmuxv1.TabType_TAB_TYPE_AGENT, "tools-grant")
+	_, err := fx.svc.workflowAgentTools(context.Background(), "user-1", &leapmuxv1.WorkflowAgentToolsRequest{
+		Auth: &leapmuxv1.WorkflowAgentAuth{RunId: "run-1", Token: "not-a-slot"},
+	})
+	assert.ErrorIs(t, err, workflow.ErrDenied, "an unknown credential reaches nothing")
 }

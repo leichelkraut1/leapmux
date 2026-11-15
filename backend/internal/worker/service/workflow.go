@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
 	"github.com/leapmux/leapmux/internal/worker/channel"
+	"github.com/leapmux/leapmux/internal/worker/tradinglab"
 	"github.com/leapmux/leapmux/internal/worker/workflow"
 )
 
@@ -165,6 +167,11 @@ func registerWorkflowHandlers(r registrar, svc *Service) {
 			a, err := engine.RequestApproval(ctx, caller.UserID.String(), req)
 			replyWorkflow(sender, &leapmuxv1.WorkflowAgentRequestApprovalResponse{Approval: a}, err)
 		})
+	registerOwnerGuarded(r, "WorkflowAgentTools", leapmuxv1.Scope_SCOPE_AGENT_READ, dispatchPlain,
+		func(ctx context.Context, caller channel.Caller, req *leapmuxv1.WorkflowAgentToolsRequest, sender channel.ResponseWriter) {
+			resp, err := svc.workflowAgentTools(ctx, caller.UserID.String(), req)
+			replyWorkflow(sender, resp, err)
+		})
 	registerOwnerGuarded(r, "WorkflowAgentComplete", leapmuxv1.Scope_SCOPE_AGENT_WRITE, dispatchPlain,
 		func(ctx context.Context, caller channel.Caller, req *leapmuxv1.WorkflowAgentCompleteRequest, sender channel.ResponseWriter) {
 			run, err := engine.Complete(ctx, caller.UserID.String(), req)
@@ -184,6 +191,7 @@ var WorkflowParticipantMethods = []string{
 	"WorkflowAgentReview",
 	"WorkflowAgentRequestApproval",
 	"WorkflowAgentComplete",
+	"WorkflowAgentTools",
 }
 
 // replyWorkflow answers with resp, or maps an engine error to its code.
@@ -278,3 +286,46 @@ var workerCapabilities = sync.OnceValue(func() []string {
 	slices.Sort(caps)
 	return slices.Compact(caps)
 })
+
+// workflowAgentTools serves the tools a participant's current step is
+// granted. The only grant is "market": the trading lab's read-only broker
+// tools, which the lab filters and logs per task.
+func (svc *Service) workflowAgentTools(ctx context.Context, userID string, req *leapmuxv1.WorkflowAgentToolsRequest) (*leapmuxv1.WorkflowAgentToolsResponse, error) {
+	runID, taskID, step, err := svc.Workflows.ParticipantTask(ctx, userID, req.GetAuth())
+	if err != nil {
+		return nil, err
+	}
+	if step.GetParams()[tradinglab.StepToolsParam] != tradinglab.ToolsMarket {
+		return nil, fmt.Errorf("%w: this step is granted no tools", workflow.ErrDenied)
+	}
+	if req.GetTool() == "" {
+		tools, err := svc.TradingLab.MarketTools(ctx, userID)
+		if err != nil {
+			return nil, labAsWorkflow(err)
+		}
+		resp := &leapmuxv1.WorkflowAgentToolsResponse{}
+		for _, t := range tools {
+			resp.Tools = append(resp.Tools, &leapmuxv1.WorkflowAgentTool{Name: t.Name, Description: t.Description, InputSchemaJson: t.InputSchema})
+		}
+		return resp, nil
+	}
+	result, isError, err := svc.TradingLab.MarketCall(ctx, userID, runID, taskID, req.GetTool(), req.GetArgumentsJson())
+	if err != nil {
+		return nil, labAsWorkflow(err)
+	}
+	return &leapmuxv1.WorkflowAgentToolsResponse{Result: result, IsError: isError}, nil
+}
+
+// labAsWorkflow maps a lab error onto the engine's error kinds, which
+// replyWorkflow answers with codes.
+func labAsWorkflow(err error) error {
+	switch {
+	case errors.Is(err, tradinglab.ErrInvalid):
+		return fmt.Errorf("%w: %w", workflow.ErrInvalid, err)
+	case errors.Is(err, tradinglab.ErrDenied):
+		return fmt.Errorf("%w: %w", workflow.ErrDenied, err)
+	case errors.Is(err, tradinglab.ErrConflict):
+		return fmt.Errorf("%w: %w", workflow.ErrConflict, err)
+	}
+	return err
+}

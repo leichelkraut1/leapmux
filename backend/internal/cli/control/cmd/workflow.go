@@ -343,3 +343,55 @@ func RunWorkflowComplete(rawCtx any, args []string) error {
 		return "WorkflowAgentComplete", &leapmuxv1.WorkflowAgentCompleteRequest{Auth: auth, Summary: text, Failed: failed}, &leapmuxv1.WorkflowAgentCompleteResponse{}, nil
 	})
 }
+
+// RunWorkflowTools lists the tools the current step is granted, or calls
+// one. A call prints the tool's result as the server returned it.
+func RunWorkflowTools(rawCtx any, args []string) error {
+	cmd := asCtx(rawCtx)
+	var hub, tool, arguments string
+	fs := flagSet(cmd, &hub)
+	fs.StringVar(&tool, "call", "", "the tool to call (omit to list the tools)")
+	fs.StringVar(&arguments, "args", "", "the tool's arguments as a JSON object, or - to read them from stdin")
+	if err := parseFlags(fs, args, cmd.Description()); err != nil {
+		return err
+	}
+	if tool == "" && arguments != "" {
+		return invalidRequest("--args needs --call")
+	}
+	if arguments == "-" {
+		raw, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return control.EmitErrorWith("read_failed", err)
+		}
+		arguments = string(raw)
+	}
+	env, err := loadWorkflowEnv()
+	if err != nil {
+		return err
+	}
+	c, err := control.NewClientFromEnv(hub)
+	if err != nil {
+		return control.EmitErrorWith("client_init_failed", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), workflowCallTimeout)
+	defer cancel()
+	out := &leapmuxv1.WorkflowAgentToolsResponse{}
+	in := &leapmuxv1.WorkflowAgentToolsRequest{Auth: env.auth, Tool: tool, ArgumentsJson: arguments}
+	if err := callInnerRPC(ctx, c, env.coordinator, "WorkflowAgentTools", in, out); err != nil {
+		return err
+	}
+	if tool == "" {
+		data, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(out)
+		if err != nil {
+			return control.EmitErrorWith("encode_failed", err)
+		}
+		return control.EmitData(json.RawMessage(data))
+	}
+	if out.GetIsError() {
+		return control.EmitError("tool_error", out.GetResult())
+	}
+	if json.Valid([]byte(out.GetResult())) {
+		return control.EmitData(json.RawMessage(out.GetResult()))
+	}
+	return control.EmitData(out.GetResult())
+}

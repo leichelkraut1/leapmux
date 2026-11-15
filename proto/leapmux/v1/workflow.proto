@@ -735,3 +735,25 @@ message WorkflowAgentCompleteRequest {
   bool failed = 3;
 }
 message WorkflowAgentCompleteResponse { WorkflowRun run = 1; }
+
+// WorkflowAgentTools lists or calls the tools the participant's current step
+// is granted (its `tools` param), held by the coordinator. A step granted
+// "market" reaches the trading lab's read-only broker tools: market data
+// only, never an account, position or order tool. Empty `tool` lists them.
+message WorkflowAgentToolsRequest {
+  WorkflowAgentAuth auth = 1;
+  string tool = 2;
+  // The tool's arguments, a JSON object.
+  string arguments_json = 3;
+}
+message WorkflowAgentToolsResponse {
+  repeated WorkflowAgentTool tools = 1;
+  // The tool's result as the broker returned it (usually JSON).
+  string result = 2;
+  bool is_error = 3;
+}
+message WorkflowAgentTool {
+  string name = 1;
+  string description = 2;
+  string input_schema_json = 3;
+}

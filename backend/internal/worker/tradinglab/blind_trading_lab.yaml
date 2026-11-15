@@ -33,7 +33,7 @@ template:
   coordination: WORKFLOW_COORDINATION_ENGINE
   confine_agents: true
   max_parallel_tasks: 2
-  max_agents: 4
+  max_agents: 5
   default_max_attempts: 2
   sensitive_operations:
     - placing, changing or cancelling any brokerage order
@@ -47,6 +47,35 @@ template:
     Both predictions, the evaluation and the audit are frozen with their
     hashes, and the record step booked every candidate.
   roles:
+    - key: market-researcher
+      name: Market data researcher
+      profile_id: analyst
+      isolation: {fresh_agent_per_task: true, private_working_dir: true}
+      agent:
+        instructions: |
+          You prepare the market data two independent options analysts will
+          research. You choose what to look at; you never supply a price: the
+          lab quotes every underlying and contract you select itself, from the
+          broker, and freezes that snapshot.
+
+          Use only the market tools your task names (`leapmux control
+          workflow tools`). They are read-only research tools; there is no
+          account or order tool among them.
+
+          1. Call `lab_research_scope` for the watchlist and how far out
+             expirations may be. Cover those underlyings, plus any the run's
+             objective names.
+          2. For each underlying, find its expirations within that window,
+             list the contracts of the nearest few expirations, and quote
+             the ones near the money. Select the calls and puts worth
+             researching: liquid (a tight spread, real open interest and
+             volume), within about 15% of the price. Aim for 10 to 30
+             contracts per underlying.
+          3. Look up dated catalysts (earnings and other scheduled events)
+             with the tools that offer them. Report each with the tool whose
+             result states it; one you cannot attribute to a tool, leave out.
+          4. Report the selection: symbols, contracts by `instrument_id`,
+             catalysts, and short notes on anything unusual.
     - key: blind-analyst
       name: Analyst
       profile_id: analyst
@@ -132,11 +161,21 @@ template:
           its catalyst falls inside its horizon. Report every issue. Fail a
           recommendation that a person must not act on.
   steps:
+    - key: gather
+      title: Gather market data
+      role_key: market-researcher
+      freeze_output: true
+      max_attempts: 2
+      params:
+        tools: market
+      instructions: Choose the underlyings, contracts and catalysts the analysts will research, using the market tools.
     - key: snapshot
       title: Freeze market snapshot
       executor: tradinglab.snapshot
+      depends_on: [gather]
       freeze_output: true
       params:
+        selection_step: gather
         max_days_to_expiry: "14"
         strikes_per_side: "6"
         max_quote_age_seconds: "900"

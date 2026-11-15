@@ -203,6 +203,18 @@ func TestBlindTradingLabRunsEndToEndInPaperMode(t *testing.T) {
 	}
 	step(engine)
 
+	// The market-data step comes first: it is told about its read-only tools
+	// and reports a selection, which carries no prices. With recorded data
+	// the snapshot covers the watchlist whatever the selection says.
+	gatherReq, gatherAuth, gatherText := platform.agent(t, runID, "market-researcher")
+	assert.True(t, gatherReq.GetWorkflow().GetConfine())
+	assert.Contains(t, gatherText, "leapmux control workflow tools --call")
+	assert.Contains(t, gatherText, "lab_research_scope")
+	require.Error(t, report(t, engine, gatherAuth, map[string]any{"symbols": []any{"SYNA"}, "contracts": []any{map[string]any{"instrument_id": "x", "bid": 1}}}),
+		"a selection carries no prices")
+	require.NoError(t, report(t, engine, gatherAuth, map[string]any{"symbols": []any{"SYNA", "SYNB"}, "contracts": []any{}}))
+	step(engine)
+
 	// Both analysts start together, each confined to its run in a private
 	// directory, and neither is told the other exists.
 	blindReq, blindAuth, blindText := platform.agent(t, runID, "blind-analyst")
@@ -265,7 +277,7 @@ func TestBlindTradingLabRunsEndToEndInPaperMode(t *testing.T) {
 	detail, err := engine.GetRun(ctx, user, runID)
 	require.NoError(t, err)
 	require.Equal(t, leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_COMPLETED, detail.GetRun().GetStatus(), detail.GetRun().GetStatusDetail())
-	assert.Len(t, detail.GetFrozenOutputs(), 6, "snapshot, two predictions, evaluation, audit and record")
+	assert.Len(t, detail.GetFrozenOutputs(), 7, "market selection, snapshot, two predictions, evaluation, audit and record")
 	bad, err := engine.VerifyFrozen(ctx, runID)
 	require.NoError(t, err)
 	assert.Empty(t, bad)

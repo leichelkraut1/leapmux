@@ -449,7 +449,7 @@ func (l *Lab) Reconcile(ctx context.Context, userID string) ([]*leapmuxv1.Tradin
 			if o.GetBrokerOrderId() != "" {
 				bo, err = sess.Order(ctx, o.GetBrokerOrderId())
 			} else {
-				bo, err = sess.FindOrder(ctx, o.GetClientOrderId())
+				bo, err = sess.FindOrder(ctx, orderRequest(o), time.UnixMilli(o.GetCreatedAtMs()).Add(-time.Minute))
 			}
 			if err != nil {
 				l.log.Warn("reconcile order", "order", o.GetId(), "error", err)

@@ -31,14 +31,53 @@ const (
 )
 
 type fakeRuns struct {
-	runs []*leapmuxv1.WorkflowRunSummary
+	runs    []*leapmuxv1.WorkflowRunSummary
+	created []*leapmuxv1.CreateWorkflowRunRequest
+	decided []*leapmuxv1.DecideWorkflowApprovalRequest
 }
 
 func (f *fakeRuns) ListRuns(context.Context, string) ([]*leapmuxv1.WorkflowRunSummary, error) {
 	return f.runs, nil
 }
 
+func (f *fakeRuns) GetRun(_ context.Context, _, runID string) (*leapmuxv1.WorkflowRunDetail, error) {
+	return &leapmuxv1.WorkflowRunDetail{
+		Run: &leapmuxv1.WorkflowRun{
+			Id: runID, Status: leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_WAITING, StatusDetail: "Waiting for approval",
+			Objective: "Monday scan", WorkingDir: "/lab", WorkspaceId: "ws-1",
+			Template: &leapmuxv1.WorkflowTemplate{Name: tradinglab.TemplateName(), Version: 1},
+		},
+		Roles: []*leapmuxv1.WorkflowRoleAssignment{{RoleKey: "blind-analyst", WorkerId: "lukesroom"}},
+		Tasks: []*leapmuxv1.WorkflowTask{{Title: "Freeze market snapshot", StepKey: "snapshot", Status: leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_BLOCKED}},
+		Approvals: []*leapmuxv1.WorkflowApproval{
+			{Id: "ap-1", Title: "One more attempt", Status: leapmuxv1.WorkflowApprovalStatus_WORKFLOW_APPROVAL_STATUS_PENDING},
+			{Id: "ap-0", Title: "Old", Status: leapmuxv1.WorkflowApprovalStatus_WORKFLOW_APPROVAL_STATUS_APPROVED},
+		},
+	}, nil
+}
+
+func (f *fakeRuns) Library(context.Context, string) (*leapmuxv1.ListWorkflowLibraryResponse, error) {
+	return &leapmuxv1.ListWorkflowLibraryResponse{
+		Templates: []*leapmuxv1.WorkflowTemplate{{Name: tradinglab.TemplateName(), Version: 2, Roles: []*leapmuxv1.WorkflowRole{{Key: "blind-analyst"}, {Key: "market-researcher"}}}},
+		Profiles:  []*leapmuxv1.AgentProfile{{Id: "analyst"}},
+	}, nil
+}
+
+func (f *fakeRuns) CreateRun(_ context.Context, _ string, req *leapmuxv1.CreateWorkflowRunRequest) (*leapmuxv1.CreateWorkflowRunResponse, error) {
+	f.created = append(f.created, req)
+	return &leapmuxv1.CreateWorkflowRunResponse{Run: &leapmuxv1.WorkflowRun{
+		Id: "run-new", Name: req.GetTemplate().GetName(), Status: leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_RUNNING,
+		Objective: req.GetObjective(), TemplateVersion: req.GetTemplate().GetVersion(),
+	}}, nil
+}
+
+func (f *fakeRuns) DecideApproval(_ context.Context, _ string, req *leapmuxv1.DecideWorkflowApprovalRequest) (*leapmuxv1.WorkflowRunDetail, error) {
+	f.decided = append(f.decided, req)
+	return &leapmuxv1.WorkflowRunDetail{Run: &leapmuxv1.WorkflowRun{Id: req.GetRunId(), Status: leapmuxv1.WorkflowRunStatus_WORKFLOW_RUN_STATUS_RUNNING}}, nil
+}
+
 type harness struct {
+	runs   *fakeRuns
 	t      *testing.T
 	ctx    context.Context
 	lab    *tradinglab.Lab
@@ -61,11 +100,11 @@ func newHarness(t *testing.T) *harness {
 	})
 	require.NoError(t, err)
 	h := &harness{t: t, ctx: t.Context(), lab: lab, owner: owner}
-	runs := &fakeRuns{runs: []*leapmuxv1.WorkflowRunSummary{
+	h.runs = &fakeRuns{runs: []*leapmuxv1.WorkflowRunSummary{
 		{Run: &leapmuxv1.WorkflowRun{Id: "run-lab", Name: "Monday scan", Template: &leapmuxv1.WorkflowTemplate{Name: tradinglab.TemplateName()}, CreatedAtMs: 2}},
 		{Run: &leapmuxv1.WorkflowRun{Id: "run-other", Name: "A code review", Template: &leapmuxv1.WorkflowTemplate{Name: "Code review"}, CreatedAtMs: 3}},
 	}}
-	h.srv, err = New(Config{DB: db, Lab: lab, Runs: runs, Owner: func() string { return h.owner }, PublicURL: "https://lab.example.com/lab-mcp", Clock: clock})
+	h.srv, err = New(Config{DB: db, Lab: lab, Runs: h.runs, Owner: func() string { return h.owner }, PublicURL: "https://lab.example.com/lab-mcp", Clock: clock})
 	require.NoError(t, err)
 	h.http = httptest.NewServer(h.srv.Handler())
 	t.Cleanup(h.http.Close)
@@ -312,10 +351,15 @@ func TestServerToolsOnlyRead(t *testing.T) {
 	var names []string
 	for _, raw := range res["tools"].([]any) {
 		tool := raw.(map[string]any)
-		names = append(names, tool["name"].(string))
-		assert.Equal(t, true, tool["annotations"].(map[string]any)["readOnlyHint"], tool["name"])
+		name := tool["name"].(string)
+		names = append(names, name)
+		acts := name == "start_research_run" || name == "decide_step_approval"
+		assert.Equal(t, !acts, tool["annotations"].(map[string]any)["readOnlyHint"], name)
 	}
-	assert.Equal(t, []string{"get_run", "lab_overview", "list_orders", "list_positions", "list_runs"}, names)
+	assert.Equal(t, []string{"decide_step_approval", "get_run", "get_run_progress", "lab_overview", "list_orders", "list_positions", "list_runs", "start_research_run"}, names)
+	for _, name := range names {
+		assert.NotContains(t, name, "order_", "no tool places, confirms or cancels an order")
+	}
 
 	isErr, out, _ := h.call(tk.Access, "lab_overview", nil)
 	require.False(t, isErr)
@@ -380,4 +424,38 @@ func TestServerRefusesAForeignOrigin(t *testing.T) {
 		"Authorization": "Bearer " + tk.Access, "Origin": "https://evil.example.com",
 	})
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestServerStartsAndAdvancesARunLikeTheLatest(t *testing.T) {
+	h := newHarness(t)
+	tk := h.tokensFor(h.signIn())
+
+	isErr, out, text := h.call(tk.Access, "start_research_run", map[string]any{"objective": "Focus on SYNA earnings"})
+	require.False(t, isErr, text)
+	assert.Equal(t, "run-new", out["run_id"])
+	require.Len(t, h.runs.created, 1)
+	req := h.runs.created[0]
+	assert.Equal(t, "Focus on SYNA earnings", req.GetObjective())
+	assert.Equal(t, "ws-1", req.GetWorkspaceId(), "the latest run's workspace")
+	assert.Equal(t, "/lab", req.GetWorkingDir())
+	assert.EqualValues(t, 2, req.GetTemplate().GetVersion(), "the library's current template")
+	require.Len(t, req.GetOverrides(), 1)
+	assert.Equal(t, "lukesroom", req.GetOverrides()[0].GetPlacement().GetWorkerId(), "each role on the computer it last ran on")
+
+	isErr, out, text = h.call(tk.Access, "get_run_progress", map[string]any{"run_id": "run-lab"})
+	require.False(t, isErr, text)
+	approvals := out["pending_approvals"].([]any)
+	require.Len(t, approvals, 1, "only pending approvals")
+	assert.Equal(t, "ap-1", approvals[0].(map[string]any)["approval_id"])
+
+	isErr, _, text = h.call(tk.Access, "decide_step_approval", map[string]any{"run_id": "run-other", "approval_id": "ap-1", "approve": true})
+	assert.True(t, isErr, "a run that is not a trading run is not reachable")
+	assert.Equal(t, "not found", text)
+	isErr, _, text = h.call(tk.Access, "decide_step_approval", map[string]any{"run_id": "run-lab", "approval_id": "ap-1"})
+	assert.True(t, isErr)
+	assert.Contains(t, text, "approve must be true or false")
+	isErr, _, text = h.call(tk.Access, "decide_step_approval", map[string]any{"run_id": "run-lab", "approval_id": "ap-1", "approve": true, "note": "go"})
+	require.False(t, isErr, text)
+	require.Len(t, h.runs.decided, 1)
+	assert.True(t, h.runs.decided[0].GetApprove())
 }

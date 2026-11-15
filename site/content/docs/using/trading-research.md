@@ -13,10 +13,13 @@ Nothing in this process trades. A real order happens only when you confirm that 
 
 | Step | Who | What it produces |
 |---|---|---|
+| Gather market data | an agent with the read-only research tools | A selection: the underlyings, the contracts (by Robinhood's instrument id) and the dated catalysts to research. It carries no prices. Frozen. |
 | Freeze market snapshot | the lab, on the coordinator | Quotes, option chains with bid/ask, IV, Greeks, open interest and volume, catalysts, provenance, freshness. Frozen with its hash. |
 | Blind research, Contrarian research (at the same time) | two agents | A prediction document per analyst: exact contracts, entry, maximum loss, catalyst, scenarios, probabilities, exits, invalidation. Frozen with its hash. |
 | Anonymous evaluation, Risk audit (at the same time) | two agents | Rubric scores, and audit findings for every recommendation. Frozen. |
 | Record candidates and shadow books | the lab | Every candidate (eligible, rejected or no trade) and the three shadow books. |
+
+The market-data agent works through **research tools**: the lab forwards Robinhood's market-data tools (quotes, chains, contracts, option quotes, historicals, fundamentals, earnings, analyst ratings, search, scans) with its own sign-in, and leaves out every account, position, order, bank, alert and watchlist tool, so no instruction or injected text can reach one. The agent reads each tool's own description, so it keeps working when Robinhood changes them, and every call is logged with its task. It only chooses: the lab then quotes every selected underlying and contract itself, so no price in the snapshot comes from an agent. A catalyst stays only if the run called the tool it cites. With recorded market data the snapshot covers the watchlist and the selection is ignored.
 
 The run is **coordinated by the engine**: there is no Lead agent, because a Lead would see everything and could pass one analyst's hypothesis to the other. Each step starts when its inputs are frozen.
 
@@ -110,9 +113,9 @@ The worker accepts an approval only from your own browser session. An agent, an 
 
 ## Reading the lab from Claude or ChatGPT
 
-A Worker can serve a read-only connector, so Claude, ChatGPT or Codex (on your phone, on the web or on a computer) can answer questions about the lab: how each book is doing, what a run predicted, which ideas are queued. It reads the lab of the Worker that serves it, so serve it from the computer your research runs use.
+A Worker can serve a connector, so Claude, ChatGPT or Codex (on your phone, on the web or on your desktop agent) can work with the lab: how each book is doing, what a run predicted, which ideas are queued, and running research. It works with the lab of the Worker that serves it, so serve it from the computer your research runs use.
 
-The connector has five tools: an overview of the lab and its books, the research runs, one run's snapshot, predictions, verdicts and candidates, the positions, and the orders. None of them prepares, confirms or cancels an order, decides a candidate or reaches the broker. They never return a broker credential, the account number or an order's confirmation fingerprint.
+The connector's read tools are an overview of the lab and its books, the research runs, one run's snapshot, predictions, verdicts and candidates, the positions, the orders, and a run's progress. Two tools act: **start_research_run** starts a run like the latest one (its workspace, project folder and computers, with the library's current template), and **decide_step_approval** answers a run step's approval, such as another attempt at a failed step. None of them prepares, confirms or cancels an order, decides a candidate or reaches the broker; a live order is approved only in your browser. They never return a broker credential, the account number or an order's confirmation fingerprint.
 
 To set it up:
 

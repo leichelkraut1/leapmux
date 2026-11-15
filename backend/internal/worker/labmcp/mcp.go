@@ -20,7 +20,7 @@ import (
 // protocolVersions are the MCP revisions the endpoint speaks, newest first.
 var protocolVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
 
-const instructions = `Read-only view of the user's LeapMux blind trading research lab: options research runs with frozen, hashed predictions from isolated blind and contrarian analysts, an evaluator's anonymized scores, a risk audit, and three shadow portfolios (blind, contrarian, blind-inverse) filled at bid/ask, plus any live book. Start with lab_overview. Times are Unix milliseconds. Nothing here can place, confirm or cancel an order: the user does that in LeapMux, approving each exact order in their own browser.`
+const instructions = `Read-only view of the user's LeapMux blind trading research lab: options research runs with frozen, hashed predictions from isolated blind and contrarian analysts, an evaluator's anonymized scores, a risk audit, and three shadow portfolios (blind, contrarian, blind-inverse) filled at bid/ask, plus any live book. Start with lab_overview. Times are Unix milliseconds. It can also start a research run like the latest one (start_research_run), follow it (get_run_progress) and answer its step approvals (decide_step_approval). Nothing here can place, confirm or cancel an order: the user does that in LeapMux, approving each exact order in their own browser.`
 
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -216,7 +216,10 @@ var tools = map[string]tool{
 	},
 }
 
-var toolList = func() []map[string]any {
+var toolList = sortedTools()
+
+// sortedTools lists the tools by name.
+func sortedTools() []map[string]any {
 	names := make([]string, 0, len(tools))
 	for n := range tools {
 		names = append(names, n)
@@ -227,7 +230,7 @@ var toolList = func() []map[string]any {
 		out[i] = tools[n].def
 	}
 	return out
-}()
+}
 
 var pj = protojson.MarshalOptions{UseProtoNames: true, UseEnumNumbers: false}
 

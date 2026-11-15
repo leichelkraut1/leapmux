@@ -1169,3 +1169,26 @@ func (e *Engine) Complete(ctx context.Context, userID string, req *leapmuxv1.Wor
 	})
 	return out, err
 }
+
+// ParticipantTask resolves a participant's credential to the task it is
+// working and that task's step: what a step-scoped grant such as the
+// trading lab's market tools is checked against. The task must be in flight.
+func (e *Engine) ParticipantTask(ctx context.Context, userID string, auth *leapmuxv1.WorkflowAgentAuth) (runID, taskID string, step *leapmuxv1.WorkflowStep, err error) {
+	err = e.store.inTx(ctx, func(q querier) error {
+		rs, slot, err := e.participant(ctx, q, userID, auth)
+		if err != nil {
+			return err
+		}
+		cur := rs.task(slot.GetCurrentTaskId())
+		if cur == nil || !taskInFlight(cur.GetStatus()) {
+			return conflictf("this agent has no task in progress")
+		}
+		step = stepOf(rs.run, cur.GetStepKey())
+		if step == nil {
+			return conflictf("this task belongs to no template step")
+		}
+		runID, taskID = rs.run.GetId(), cur.GetId()
+		return nil
+	})
+	return runID, taskID, step, err
+}

@@ -1,15 +1,20 @@
 package tradinglab
 
 import (
+	"cmp"
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"math"
 	"os"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	leapmuxv1 "github.com/leapmux/leapmux/generated/proto/leapmux/v1"
@@ -23,6 +28,11 @@ const (
 	OpQuote        = "quote"
 	OpOptionChain  = "option_chain"
 	OpOptionQuotes = "option_quotes"
+	// OpOptionInstruments lists contracts by underlying and expiration, where
+	// a server addresses contracts by id rather than by OCC symbol.
+	OpOptionInstruments = "option_instruments"
+	// OpBuyingPower reads the account's buying power.
+	OpBuyingPower  = "buying_power"
 	OpNews         = "news"
 	OpEvents       = "events"
 	OpAccount      = "account"
@@ -35,7 +45,7 @@ const (
 )
 
 // readOps are the only operations research and the snapshot may use.
-var readOps = []string{OpQuote, OpOptionChain, OpOptionQuotes, OpNews, OpEvents, OpAccount, OpPositions, OpOrders, OpOrderStatus}
+var readOps = []string{OpQuote, OpOptionChain, OpOptionInstruments, OpOptionQuotes, OpNews, OpEvents, OpAccount, OpBuyingPower, OpPositions, OpOrders, OpOrderStatus}
 
 // tradeOps are reachable only through TradingBroker, which only the gateway
 // holds.
@@ -43,23 +53,28 @@ var tradeOps = []string{OpPreviewOrder, OpPlaceOrder, OpCancelOrder}
 
 // requiredForResearch and requiredForLive are what each mode cannot do without.
 var (
-	requiredForResearch = []string{OpQuote, OpOptionChain}
-	requiredForLive     = []string{OpAccount, OpOptionQuotes, OpPreviewOrder, OpPlaceOrder, OpCancelOrder, OpOrderStatus}
+	requiredForResearch = []string{OpQuote, OpOptionChain, OpOptionInstruments, OpOptionQuotes}
+	requiredForLive     = []string{OpAccount, OpOptionQuotes, OpPreviewOrder, OpPlaceOrder, OpCancelOrder, OpOrderStatus, OpOrders}
 )
 
+// defaultToolNames are Robinhood's agent MCP server's tool names (read from
+// the live server on 2026-11-14). get_option_orders serves both a list and
+// one order.
 var defaultToolNames = map[string][]string{
-	OpQuote:        {"get_quotes", "get_stock_quotes", "stock_quotes", "get_quote", "quotes"},
-	OpOptionChain:  {"get_option_chain", "get_options_chain", "option_chain", "find_options", "list_option_instruments"},
-	OpOptionQuotes: {"get_option_quotes", "get_option_market_data", "option_market_data", "option_quotes"},
-	OpNews:         {"get_news", "news", "get_stock_news"},
-	OpEvents:       {"get_events", "get_earnings", "earnings", "corporate_events"},
-	OpAccount:      {"get_account", "get_accounts", "account", "get_account_profile"},
-	OpPositions:    {"get_positions", "get_option_positions", "positions"},
-	OpOrders:       {"get_orders", "get_option_orders", "list_orders"},
-	OpOrderStatus:  {"get_option_order", "get_order", "order_status"},
-	OpPreviewOrder: {"preview_option_order", "preview_order", "review_option_order"},
-	OpPlaceOrder:   {"place_option_order", "place_order", "submit_option_order"},
-	OpCancelOrder:  {"cancel_option_order", "cancel_order"},
+	OpQuote:             {"get_equity_quotes"},
+	OpOptionChain:       {"get_option_chains"},
+	OpOptionInstruments: {"get_option_instruments"},
+	OpOptionQuotes:      {"get_option_quotes"},
+	OpNews:              {},
+	OpEvents:            {"get_earnings_results"},
+	OpAccount:           {"get_accounts"},
+	OpBuyingPower:       {"get_portfolio"},
+	OpPositions:         {"get_option_positions"},
+	OpOrders:            {"get_option_orders"},
+	OpOrderStatus:       {"get_option_orders"},
+	OpPreviewOrder:      {"review_option_order"},
+	OpPlaceOrder:        {"place_option_order"},
+	OpCancelOrder:       {"cancel_option_order"},
 }
 
 // writeLike names a tool that changes something. A read operation mapped to
@@ -100,6 +115,13 @@ type Robinhood struct {
 	refused   []string
 	accountID string
 	server    string
+
+	mu sync.Mutex
+	// contracts are the contracts the session has seen, by OCC symbol: the
+	// server addresses a contract by its instrument id.
+	contracts map[string]contract
+	// account is the account number the trading tools address, once read.
+	account string
 }
 
 // ConnectRobinhood dials the configured server and classifies its tools.
@@ -170,6 +192,15 @@ func ConnectRobinhood(ctx context.Context, cfg *leapmuxv1.TradingMcpConfig, dial
 
 // Close ends the session.
 func (r *Robinhood) Close() error { return r.client.Close() }
+
+// Tools lists every tool the server offers, as it described them.
+func (r *Robinhood) Tools() []mcpclient.Tool { return r.all }
+
+// CallTool calls a tool by name. Only the lab's research tools path, which
+// filters by name, calls it with a name that is not one of the operations.
+func (r *Robinhood) CallTool(ctx context.Context, name string, args map[string]any) (*mcpclient.CallResult, error) {
+	return r.client.CallTool(ctx, name, args)
+}
 
 // Supports reports whether the server provides an operation.
 func (r *Robinhood) Supports(op string) bool { return r.tools[op] != "" }
@@ -273,22 +304,51 @@ func optionsLevelAllowsLong(level string) bool {
 	return err == nil && n >= 2
 }
 
-// --- Tolerant decoding: servers name fields differently. ---
+// --- Robinhood's replies ---
+//
+// Robinhood's agent MCP server (agent.robinhood.com/mcp/trading) answers
+// every tool with {"data": {...}, "guide": "..."}: quotes and option quotes
+// as data.results[].quote, chains as data.chains, contracts as
+// data.instruments (paged by data.next), accounts as data.accounts and
+// orders as data.orders. Contracts are addressed by instrument UUID, so the
+// adapter looks each OCC symbol up once and keeps its id. The field names
+// below are the ones its replies carry; the shapes were read from the live
+// server on 2026-11-14.
 
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
 
-// asList unwraps the common envelopes: a bare array, {"results": [...]},
-// {"data": [...]}, {"items": [...]}, or a single object.
+// payload unwraps the {"data": ...} envelope.
+func payload(v any) map[string]any {
+	m := asMap(v)
+	if d := asMap(m["data"]); d != nil {
+		return d
+	}
+	return m
+}
+
+func listOf(v any, key string) []map[string]any {
+	var out []map[string]any
+	for _, item := range asList(payload(v)[key]) {
+		if m := asMap(item); m != nil {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// quoteOf is a results[] entry's quote: {"quote": {...}, "close": {...}}.
+func quoteOf(m map[string]any) map[string]any {
+	if q := asMap(m["quote"]); q != nil {
+		return q
+	}
+	return m
+}
+
 func asList(v any) []any {
 	switch t := v.(type) {
 	case []any:
 		return t
 	case map[string]any:
-		for _, k := range []string{"results", "data", "items", "quotes", "options", "orders", "positions", "events", "news"} {
-			if inner, ok := t[k]; ok {
-				return asList(inner)
-			}
-		}
 		return []any{t}
 	default:
 		return nil
@@ -327,6 +387,40 @@ func num(m map[string]any, keys ...string) float64 {
 	return 0
 }
 
+// findNum is the first number under a key matching want, at any depth.
+func findNum(v any, want func(string) bool) (float64, bool) {
+	switch t := v.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			if want(k) {
+				if f := num(t, k); f != 0 {
+					return f, true
+				}
+				if inner, ok := findNum(t[k], func(string) bool { return true }); ok {
+					return inner, true
+				}
+			}
+		}
+		for _, k := range keys {
+			if f, ok := findNum(t[k], want); ok {
+				return f, true
+			}
+		}
+	case []any:
+		for _, item := range t {
+			if f, ok := findNum(item, want); ok {
+				return f, true
+			}
+		}
+	}
+	return 0, false
+}
+
 func when(m map[string]any, keys ...string) time.Time {
 	for _, k := range keys {
 		if s := str(m, k); s != "" {
@@ -340,6 +434,11 @@ func when(m map[string]any, keys ...string) time.Time {
 	return time.Time{}
 }
 
+func boolOf(m map[string]any, key string) bool {
+	b, _ := m[key].(bool)
+	return b
+}
+
 // --- Read operations ---
 
 // Account is what the gateway needs to know about the brokerage account.
@@ -349,32 +448,53 @@ type Account struct {
 	OptionsLevel string
 }
 
+// Account reads the account the lab trades in: the configured one, else the
+// one account Robinhood lets an agent trade (agentic_allowed). Its buying
+// power comes from the portfolio, since the account list does not carry a
+// reliable one.
 func (r *Robinhood) Account(ctx context.Context) (*Account, error) {
 	v, err := r.callJSON(ctx, OpAccount, map[string]any{})
 	if err != nil {
 		return nil, err
 	}
+	accounts := listOf(v, "accounts")
 	var chosen map[string]any
-	for _, item := range asList(v) {
-		m := asMap(item)
-		id := str(m, "account_number", "account_id", "id")
-		if r.accountID == "" || id == r.accountID {
+	for _, m := range accounts {
+		id := str(m, "account_number")
+		if r.accountID != "" && id == r.accountID || r.accountID == "" && boolOf(m, "agentic_allowed") {
 			chosen = m
 			break
 		}
 	}
 	if chosen == nil {
-		return nil, fmt.Errorf("account %s is not among the server's accounts", maskAccount(r.accountID))
+		if r.accountID != "" {
+			return nil, fmt.Errorf("account %s is not among the server's accounts", maskAccount(r.accountID))
+		}
+		return nil, errors.New("no account is enabled for agent trading; enable one in the Robinhood app")
 	}
-	a := &Account{
-		ID:           str(chosen, "account_number", "account_id", "id"),
-		BuyingPower:  num(chosen, "option_buying_power", "buying_power", "cash_available_for_options"),
-		OptionsLevel: str(chosen, "option_level", "options_level", "option_trading_level"),
-	}
+	a := &Account{ID: str(chosen, "account_number"), OptionsLevel: str(chosen, "option_level")}
 	if a.ID == "" {
-		return nil, errors.New("the account read returned no account id")
+		return nil, errors.New("the account read returned no account number")
 	}
+	if r.Supports(OpBuyingPower) {
+		if p, err := r.callJSON(ctx, OpBuyingPower, map[string]any{"account_number": a.ID}); err == nil {
+			a.BuyingPower, _ = findNum(payload(p), func(k string) bool { return strings.Contains(k, "buying_power") })
+		}
+	}
+	r.account = a.ID
 	return a, nil
+}
+
+// accountNumber is the account the trading tools address.
+func (r *Robinhood) accountNumber(ctx context.Context) (string, error) {
+	if r.account != "" {
+		return r.account, nil
+	}
+	a, err := r.Account(ctx)
+	if err != nil {
+		return "", err
+	}
+	return a.ID, nil
 }
 
 func (r *Robinhood) Quotes(ctx context.Context, symbols []string) ([]UnderlyingQuote, error) {
@@ -383,116 +503,296 @@ func (r *Robinhood) Quotes(ctx context.Context, symbols []string) ([]UnderlyingQ
 		return nil, err
 	}
 	var out []UnderlyingQuote
-	for _, item := range asList(v) {
-		m := asMap(item)
-		sym := strings.ToUpper(str(m, "symbol", "ticker"))
+	for _, item := range listOf(v, "results") {
+		m := quoteOf(item)
+		sym := strings.ToUpper(str(m, "symbol"))
 		if sym == "" {
 			continue
 		}
 		out = append(out, UnderlyingQuote{
-			Symbol: sym, Last: num(m, "last_trade_price", "last", "price", "last_extended_hours_trade_price"),
-			Bid: num(m, "bid_price", "bid"), Ask: num(m, "ask_price", "ask"), PrevClose: num(m, "previous_close", "prev_close"),
-			Volume: int64(num(m, "volume")), QuoteTime: when(m, "updated_at", "quote_time", "timestamp"),
+			Symbol: sym, Last: num(m, "last_trade_price", "last_non_reg_trade_price"),
+			Bid: num(m, "bid_price"), Ask: num(m, "ask_price"), PrevClose: num(m, "adjusted_previous_close", "previous_close"),
+			QuoteTime: latest(when(m, "venue_bid_time"), when(m, "venue_ask_time"), when(m, "venue_last_trade_time"), when(m, "venue_last_non_reg_trade_time"), when(m, "updated_at")),
 		})
 	}
 	return out, nil
 }
 
-func optionFrom(m map[string]any) (OptionQuote, bool) {
-	q := OptionQuote{
-		OCCSymbol: str(m, "occ_symbol", "option_symbol", "symbol"), Underlying: strings.ToUpper(str(m, "chain_symbol", "underlying", "underlying_symbol")),
-		Expiration: str(m, "expiration_date", "expiration"), Strike: num(m, "strike_price", "strike"), Right: strings.ToLower(str(m, "type", "right", "option_type")),
-		Bid: num(m, "bid_price", "bid"), Ask: num(m, "ask_price", "ask"), Last: num(m, "last_trade_price", "last"),
-		IV: num(m, "implied_volatility", "iv"), Delta: num(m, "delta"), Gamma: num(m, "gamma"), Theta: num(m, "theta"), Vega: num(m, "vega"),
-		OpenInterest: int64(num(m, "open_interest")), Volume: int64(num(m, "volume")), Multiplier: int(num(m, "multiplier", "trade_value_multiplier")),
-		QuoteTime: when(m, "updated_at", "quote_time", "timestamp"), Tradable: true,
-	}
-	if t := str(m, "tradability", "state"); t != "" && t != "tradable" && t != "active" {
-		q.Tradable = false
-	}
-	if occ, err := NormalizeOCC(q.OCCSymbol); err == nil {
-		q.OCCSymbol = occ
-	} else if occ, err := OCCSymbol(q.Underlying, q.Expiration, q.Right, q.Strike); err == nil {
-		q.OCCSymbol = occ
-	} else {
-		return q, false
-	}
-	if p, err := ParseOCC(q.OCCSymbol); err == nil {
-		q.Expiration, q.Right, q.Strike = p.Expiration, p.Right, p.Strike
-		if q.Underlying == "" {
-			q.Underlying = p.Root
+func latest(ts ...time.Time) time.Time {
+	var out time.Time
+	for _, t := range ts {
+		if t.After(out) {
+			out = t
 		}
 	}
-	return q, true
+	return out
 }
 
-func (r *Robinhood) OptionChain(ctx context.Context, symbol string, maxDTE int, asOf time.Time) ([]OptionQuote, error) {
-	args := map[string]any{"symbol": symbol}
-	if maxDTE > 0 {
-		args["expiration_date_max"] = asOf.AddDate(0, 0, maxDTE).Format(time.DateOnly)
+// contract is one listed option as get_option_instruments describes it.
+type contract struct {
+	id, occ, underlying, expiration, right string
+	strike                                 float64
+	multiplier                             int
+	tradable                               bool
+}
+
+func contractFrom(m map[string]any) (contract, bool) {
+	c := contract{
+		id: str(m, "id"), underlying: strings.ToUpper(str(m, "chain_symbol")), expiration: str(m, "expiration_date"),
+		right: strings.ToLower(str(m, "type")), strike: num(m, "strike_price"), multiplier: int(num(m, "trade_value_multiplier")),
+		tradable: str(m, "tradability") == "tradable" && str(m, "state") == "active",
 	}
-	v, err := r.callJSON(ctx, OpOptionChain, args)
+	occ, err := OCCSymbol(c.underlying, c.expiration, c.right, c.strike)
+	if err != nil || c.id == "" {
+		return c, false
+	}
+	c.occ = occ
+	if c.multiplier == 0 {
+		c.multiplier = 100
+	}
+	return c, true
+}
+
+// Limits on one chain capture: Robinhood pages contracts 100 at a time and
+// quotes them 20 at a time, so a snapshot keeps to the nearest expirations
+// and the strikes around the money.
+const (
+	chainMaxExpirations = 4
+	chainStrikesPerSide = 8 // per expiration and right, nearest the money
+	instrumentPages     = 10
+	quoteBatch          = 20
+)
+
+// instruments lists contracts for one expiration and right, every page.
+func (r *Robinhood) instruments(ctx context.Context, args map[string]any) ([]contract, error) {
+	var out []contract
+	for page := 0; page < instrumentPages; page++ {
+		v, err := r.callJSON(ctx, OpOptionInstruments, args)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range listOf(v, "instruments") {
+			if c, ok := contractFrom(m); ok {
+				out = append(out, c)
+				r.rememberContract(c)
+			}
+		}
+		next := str(payload(v), "next")
+		if next == "" {
+			break
+		}
+		args = maps.Clone(args)
+		args["cursor"] = next
+	}
+	return out, nil
+}
+
+func (r *Robinhood) rememberContract(c contract) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.contracts == nil {
+		r.contracts = map[string]contract{}
+	}
+	r.contracts[c.occ] = c
+}
+
+// contractFor finds an OCC symbol's contract, asking the server once.
+func (r *Robinhood) contractFor(ctx context.Context, occ string) (contract, error) {
+	r.mu.Lock()
+	c, ok := r.contracts[occ]
+	r.mu.Unlock()
+	if ok {
+		return c, nil
+	}
+	p, err := ParseOCC(occ)
 	if err != nil {
-		return nil, err
+		return contract{}, err
+	}
+	found, err := r.instruments(ctx, map[string]any{
+		"chain_symbol": p.Root, "expiration_dates": p.Expiration, "type": p.Right,
+		"strike_price": strconv.FormatFloat(p.Strike, 'f', 4, 64),
+	})
+	if err != nil {
+		return contract{}, err
+	}
+	for _, c := range found {
+		if c.occ == occ {
+			return c, nil
+		}
+	}
+	return contract{}, fmt.Errorf("the broker does not list %s", occ)
+}
+
+// quoteContracts quotes contracts by instrument id, 20 at a time.
+func (r *Robinhood) quoteContracts(ctx context.Context, cs []contract) ([]OptionQuote, error) {
+	byID := map[string]contract{}
+	ids := make([]string, 0, len(cs))
+	for _, c := range cs {
+		if _, dup := byID[c.id]; !dup {
+			byID[c.id] = c
+			ids = append(ids, c.id)
+		}
 	}
 	var out []OptionQuote
-	for _, item := range asList(v) {
-		if q, ok := optionFrom(asMap(item)); ok {
-			out = append(out, q)
+	for start := 0; start < len(ids); start += quoteBatch {
+		batch := ids[start:min(start+quoteBatch, len(ids))]
+		v, err := r.callJSON(ctx, OpOptionQuotes, map[string]any{"instrument_ids": batch})
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range listOf(v, "results") {
+			m := quoteOf(item)
+			c, ok := byID[str(m, "instrument_id")]
+			if !ok {
+				continue
+			}
+			out = append(out, OptionQuote{
+				OCCSymbol: c.occ, Underlying: c.underlying, Expiration: c.expiration, Strike: c.strike, Right: c.right, Multiplier: c.multiplier,
+				Bid: num(m, "bid_price"), Ask: num(m, "ask_price"), Last: num(m, "last_trade_price"),
+				IV: num(m, "implied_volatility"), Delta: num(m, "delta"), Gamma: num(m, "gamma"), Theta: num(m, "theta"), Vega: num(m, "vega"),
+				OpenInterest: int64(num(m, "open_interest")), Volume: int64(num(m, "volume")),
+				QuoteTime: when(m, "updated_at"), Tradable: c.tradable,
+			})
 		}
 	}
 	return out, nil
+}
+
+// OptionChain captures the contracts near the money for the nearest
+// expirations within maxDTE days: the chain's expirations, then each
+// expiration's calls and puts, then their quotes.
+func (r *Robinhood) OptionChain(ctx context.Context, symbol string, maxDTE int, asOf time.Time) ([]OptionQuote, error) {
+	symbol = strings.ToUpper(symbol)
+	v, err := r.callJSON(ctx, OpOptionChain, map[string]any{"underlying_symbol": symbol})
+	if err != nil {
+		return nil, err
+	}
+	today := asOf.Format(time.DateOnly)
+	last := asOf.AddDate(0, 0, max(maxDTE, 1)).Format(time.DateOnly)
+	var expirations []string
+	for _, ch := range listOf(v, "chains") {
+		if !strings.EqualFold(str(ch, "symbol"), symbol) {
+			continue
+		}
+		for _, e := range asList(ch["expiration_dates"]) {
+			if d, _ := e.(string); d >= today && d <= last && !slices.Contains(expirations, d) {
+				expirations = append(expirations, d)
+			}
+		}
+	}
+	slices.Sort(expirations)
+	if len(expirations) > chainMaxExpirations {
+		expirations = expirations[:chainMaxExpirations]
+	}
+	if len(expirations) == 0 {
+		return nil, nil
+	}
+	spot := 0.0
+	if qs, err := r.Quotes(ctx, []string{symbol}); err == nil && len(qs) > 0 {
+		spot = qs[0].Last
+		if qs[0].Bid > 0 && qs[0].Ask > 0 {
+			spot = (qs[0].Bid + qs[0].Ask) / 2
+		}
+	}
+	var picked []contract
+	for _, exp := range expirations {
+		for _, right := range []string{"call", "put"} {
+			cs, err := r.instruments(ctx, map[string]any{"chain_symbol": symbol, "expiration_dates": exp, "type": right, "state": "active"})
+			if err != nil {
+				return nil, err
+			}
+			picked = append(picked, nearestStrikes(cs, spot, chainStrikesPerSide)...)
+		}
+	}
+	return r.quoteContracts(ctx, picked)
+}
+
+// nearestStrikes keeps the n contracts on each side of spot.
+func nearestStrikes(cs []contract, spot float64, n int) []contract {
+	if spot <= 0 || len(cs) <= 2*n {
+		return cs
+	}
+	sorted := slices.Clone(cs)
+	slices.SortFunc(sorted, func(a, b contract) int {
+		return cmp.Compare(math.Abs(a.strike-spot), math.Abs(b.strike-spot))
+	})
+	return sorted[:2*n]
+}
+
+// OptionQuotesByID quotes contracts by the broker's instrument id, as the
+// market-data step selects them.
+func (r *Robinhood) OptionQuotesByID(ctx context.Context, ids []string) ([]OptionQuote, error) {
+	var cs []contract
+	for start := 0; start < len(ids); start += 50 {
+		batch := ids[start:min(start+50, len(ids))]
+		found, err := r.instruments(ctx, map[string]any{"ids": strings.Join(batch, ",")})
+		if err != nil {
+			return nil, err
+		}
+		cs = append(cs, found...)
+	}
+	return r.quoteContracts(ctx, cs)
 }
 
 func (r *Robinhood) OptionQuotes(ctx context.Context, occs []string) ([]OptionQuote, error) {
-	v, err := r.callJSON(ctx, OpOptionQuotes, map[string]any{"occ_symbols": occs})
-	if err != nil {
-		return nil, err
-	}
-	var out []OptionQuote
-	for _, item := range asList(v) {
-		if q, ok := optionFrom(asMap(item)); ok {
-			out = append(out, q)
+	var cs []contract
+	for _, occ := range occs {
+		norm, err := NormalizeOCC(occ)
+		if err != nil {
+			return nil, err
 		}
+		c, err := r.contractFor(ctx, norm)
+		if err != nil {
+			return nil, err
+		}
+		cs = append(cs, c)
 	}
-	return out, nil
+	return r.quoteContracts(ctx, cs)
 }
 
-// Catalysts gathers news and corporate events where the server offers them.
+// Catalysts gathers each underlying's upcoming earnings where the server
+// offers them; Robinhood's server has no news tool.
 func (r *Robinhood) Catalysts(ctx context.Context, symbols []string) ([]Catalyst, []string) {
 	var out []Catalyst
 	var warnings []string
-	for _, op := range []string{OpEvents, OpNews} {
-		if !r.Supports(op) {
-			warnings = append(warnings, "the broker's MCP server offers no "+op)
+	if !r.Supports(OpNews) {
+		warnings = append(warnings, "the broker's MCP server offers no news")
+	}
+	if !r.Supports(OpEvents) {
+		return out, append(warnings, "the broker's MCP server offers no events")
+	}
+	today := time.Now().UTC().Format(time.DateOnly)
+	for _, sym := range symbols {
+		v, err := r.callJSON(ctx, OpEvents, map[string]any{"symbol": sym})
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("events for %s failed: %v", sym, err))
 			continue
 		}
-		for _, sym := range symbols {
-			v, err := r.callJSON(ctx, op, map[string]any{"symbol": sym})
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s for %s failed: %v", op, sym, err))
+		d := payload(v)
+		var rows []map[string]any
+		for _, key := range []string{"results", "earnings", "events"} {
+			rows = append(rows, listOf(d, key)...)
+		}
+		for _, m := range rows {
+			report := asMap(m["report"])
+			date := str(report, "date")
+			if date == "" {
+				date = str(m, "report_date", "date")
+			}
+			if len(date) > 10 {
+				date = date[:10]
+			}
+			if date == "" || date < today {
 				continue
 			}
-			for _, item := range asList(v) {
-				m := asMap(item)
-				c := Catalyst{
-					Symbol: sym, Type: str(m, "type", "event_type", "category"), Date: str(m, "date", "event_date", "report_date"),
-					Title: str(m, "title", "headline", "summary", "name"), Source: str(m, "source", "provider"), URL: str(m, "url", "link"),
-					PublishedAt: when(m, "published_at", "published", "created_at"),
-				}
-				if c.Type == "" {
-					c.Type = "news"
-					if op == OpEvents {
-						c.Type = "corporate_event"
-					}
-				}
-				if len(c.Date) > 10 {
-					c.Date = c.Date[:10]
-				}
-				if c.Title != "" {
-					out = append(out, c)
-				}
+			title := "Earnings report"
+			if q, y := str(m, "quarter"), str(m, "year"); q != "" && y != "" {
+				title = fmt.Sprintf("Q%s %s earnings report", q, y)
 			}
+			if timing := str(report, "timing"); timing != "" {
+				title += " (" + timing + ")"
+			}
+			out = append(out, Catalyst{Symbol: sym, Type: "earnings", Date: date, Title: title, Source: "robinhood"})
 		}
 	}
 	return out, warnings
@@ -511,20 +811,44 @@ type OrderRequest struct {
 	ClientOrderID string
 }
 
-func (o OrderRequest) args() map[string]any {
+// refID turns the gateway's client order id into the UUID Robinhood's
+// ref_id idempotency key must be, the same one for every retry.
+func refID(clientOrderID string) string {
+	sum := sha1.Sum([]byte("leapmux-trading-order:" + clientOrderID))
+	sum[6] = sum[6]&0x0f | 0x50
+	sum[8] = sum[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+}
+
+// args are the review and place arguments: one leg, a limit price.
+func (r *Robinhood) orderArgs(ctx context.Context, o OrderRequest) (map[string]any, error) {
+	c, err := r.contractFor(ctx, o.OCCSymbol)
+	if err != nil {
+		return nil, err
+	}
 	side, effect := "buy", "open"
 	if o.Side == leapmuxv1.TradingOrderSide_TRADING_ORDER_SIDE_SELL_TO_CLOSE {
 		side, effect = "sell", "close"
 	}
+	account := o.AccountID
+	if account == "" {
+		if account, err = r.accountNumber(ctx); err != nil {
+			return nil, err
+		}
+	}
 	args := map[string]any{
-		"account_id": o.AccountID, "occ_symbol": o.OCCSymbol, "side": side, "position_effect": effect,
-		"quantity": o.Quantity, "type": "limit", "price": strconv.FormatFloat(o.LimitPrice, 'f', 2, 64),
-		"time_in_force": o.TimeInForce,
+		"account_number": account,
+		"legs":           []any{map[string]any{"option_id": c.id, "side": side, "position_effect": effect}},
+		"type":           "limit", "quantity": strconv.FormatUint(uint64(o.Quantity), 10),
+		"price": strconv.FormatFloat(o.LimitPrice, 'f', 2, 64),
+	}
+	if o.TimeInForce != "" {
+		args["time_in_force"] = o.TimeInForce
 	}
 	if o.ClientOrderID != "" {
-		args["ref_id"] = o.ClientOrderID
+		args["ref_id"] = refID(o.ClientOrderID)
 	}
-	return args
+	return args, nil
 }
 
 // Preview is the broker's review of an order before it is placed.
@@ -532,6 +856,9 @@ type Preview struct {
 	EstimatedFees float64
 	EstimatedCost float64
 	Alerts        []string
+	// ApprovalInApp is set when Robinhood will hold the order for the
+	// customer to approve in its app once it is placed.
+	ApprovalInApp bool
 }
 
 // BrokerOrder is an order as the broker reports it.
@@ -558,29 +885,41 @@ type BrokerFill struct {
 // failure whose outcome is unknown.
 var ErrRejected = errors.New("the broker rejected the order")
 
+// alertTexts collects the human-readable alerts a review carries.
+func alertTexts(v any) []string {
+	var out []string
+	for _, a := range asList(v) {
+		switch t := a.(type) {
+		case string:
+			out = append(out, t)
+		case map[string]any:
+			if s := str(t, "message", "description", "text", "title", "alert"); s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
 func (r *Robinhood) Preview(ctx context.Context, o OrderRequest) (*Preview, error) {
-	v, err := r.callJSON(ctx, OpPreviewOrder, o.args())
+	args, err := r.orderArgs(ctx, o)
 	if err != nil {
 		return nil, err
 	}
-	m := asMap(v)
-	p := &Preview{EstimatedFees: num(m, "estimated_fees", "fees", "regulatory_fees"), EstimatedCost: num(m, "estimated_cost", "estimated_total", "total_cost")}
-	for _, a := range asList(m["alerts"]) {
-		switch t := a.(type) {
-		case string:
-			p.Alerts = append(p.Alerts, t)
-		case map[string]any:
-			if s := str(t, "message", "text", "title"); s != "" {
-				p.Alerts = append(p.Alerts, s)
-			}
-		}
+	delete(args, "ref_id")
+	v, err := r.callJSON(ctx, OpPreviewOrder, args)
+	if err != nil {
+		return nil, err
 	}
-	for _, k := range []string{"warnings", "messages"} {
-		for _, a := range asList(m[k]) {
-			if s, ok := a.(string); ok {
-				p.Alerts = append(p.Alerts, s)
-			}
-		}
+	m := payload(v)
+	p := &Preview{ApprovalInApp: boolOf(m, "customer_approval_required")}
+	p.EstimatedFees, _ = findNum(m, func(k string) bool { return strings.Contains(k, "fee") })
+	p.EstimatedCost, _ = findNum(m, func(k string) bool { return k == "estimated_cost" || k == "estimated_total" || k == "total_cost" })
+	for _, k := range []string{"order_checks", "alerts", "warnings", "messages"} {
+		p.Alerts = append(p.Alerts, alertTexts(m[k])...)
+	}
+	if p.ApprovalInApp {
+		p.Alerts = append(p.Alerts, "Robinhood will ask you to approve this order in its app before it executes.")
 	}
 	return p, nil
 }
@@ -590,7 +929,11 @@ func (r *Robinhood) Place(ctx context.Context, o OrderRequest) (*BrokerOrder, er
 	if name == "" {
 		return nil, errors.New("the Robinhood MCP server has no tool to place orders")
 	}
-	res, err := r.client.CallTool(ctx, name, o.args())
+	args, err := r.orderArgs(ctx, o)
+	if err != nil {
+		return nil, err
+	}
+	res, err := r.client.CallTool(ctx, name, args)
 	if res != nil && res.IsError {
 		// The server answered and refused: a definite outcome.
 		return nil, fmt.Errorf("%w: %s", ErrRejected, strings.TrimSpace(res.Text()))
@@ -608,33 +951,78 @@ func (r *Robinhood) Place(ctx context.Context, o OrderRequest) (*BrokerOrder, er
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
-	return orderFrom(asMap(v)), nil
+	d := payload(v)
+	om := d
+	if inner := asMap(d["order"]); inner != nil {
+		om = inner
+	}
+	bo := orderFrom(om)
+	bo.ClientOrderID = o.ClientOrderID
+	if boolOf(d, "customer_approval_required") || boolOf(om, "customer_approval_required") {
+		bo.Detail = "waiting for your approval in the Robinhood app"
+	}
+	return bo, nil
 }
 
 func (r *Robinhood) Cancel(ctx context.Context, brokerOrderID string) error {
-	_, err := r.callJSON(ctx, OpCancelOrder, map[string]any{"order_id": brokerOrderID})
+	account, err := r.accountNumber(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = r.callJSON(ctx, OpCancelOrder, map[string]any{"account_number": account, "order_id": brokerOrderID})
 	return err
 }
 
 func (r *Robinhood) Order(ctx context.Context, brokerOrderID string) (*BrokerOrder, error) {
-	v, err := r.callJSON(ctx, OpOrderStatus, map[string]any{"order_id": brokerOrderID})
+	account, err := r.accountNumber(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return orderFrom(asMap(v)), nil
+	v, err := r.callJSON(ctx, OpOrderStatus, map[string]any{"account_number": account, "order_id": brokerOrderID})
+	if err != nil {
+		return nil, err
+	}
+	orders := listOf(v, "orders")
+	if len(orders) == 0 {
+		return nil, fmt.Errorf("the broker does not know order %s", brokerOrderID)
+	}
+	return orderFrom(orders[0]), nil
 }
 
-// FindOrder looks an order up by the idempotency key the gateway sent, to
-// learn the outcome of a submission whose answer was lost.
-func (r *Robinhood) FindOrder(ctx context.Context, clientOrderID string) (*BrokerOrder, error) {
-	v, err := r.callJSON(ctx, OpOrders, map[string]any{"ref_id": clientOrderID})
+// FindOrder looks for the order a submission whose answer was lost placed.
+// Robinhood files a placed order under its approval id rather than the
+// ref_id the gateway sent, so it matches the agent-initiated orders since
+// the order was prepared by contract, side, quantity and limit price.
+func (r *Robinhood) FindOrder(ctx context.Context, o OrderRequest, since time.Time) (*BrokerOrder, error) {
+	account, err := r.accountNumber(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range asList(v) {
-		o := orderFrom(asMap(item))
-		if o.ClientOrderID == clientOrderID {
-			return o, nil
+	c, err := r.contractFor(ctx, o.OCCSymbol)
+	if err != nil {
+		return nil, err
+	}
+	side := "buy"
+	if o.Side == leapmuxv1.TradingOrderSide_TRADING_ORDER_SIDE_SELL_TO_CLOSE {
+		side = "sell"
+	}
+	v, err := r.callJSON(ctx, OpOrders, map[string]any{
+		"account_number": account, "agent_initiated": true, "created_at_gte": since.UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range listOf(v, "orders") {
+		if uint32(num(m, "quantity")) != o.Quantity || math.Abs(num(m, "price")-o.LimitPrice) > 0.005 {
+			continue
+		}
+		for _, item := range asList(m["legs"]) {
+			leg := asMap(item)
+			if (str(leg, "option_id") == c.id || strings.Contains(str(leg, "option"), c.id)) && str(leg, "side") == side {
+				bo := orderFrom(m)
+				bo.ClientOrderID = o.ClientOrderID
+				return bo, nil
+			}
 		}
 	}
 	return nil, nil
@@ -642,23 +1030,28 @@ func (r *Robinhood) FindOrder(ctx context.Context, clientOrderID string) (*Broke
 
 func orderFrom(m map[string]any) *BrokerOrder {
 	o := &BrokerOrder{
-		ID: str(m, "id", "order_id"), ClientOrderID: str(m, "ref_id", "client_order_id"),
-		FilledQty: uint32(num(m, "processed_quantity", "filled_quantity", "cumulative_quantity")), AveragePrice: num(m, "average_price", "avg_fill_price", "price"),
-		Detail: str(m, "reject_reason", "cancel_reason", "detail"),
+		ID: str(m, "id", "order_id", "approval_id"), ClientOrderID: str(m, "ref_id"),
+		FilledQty:    uint32(num(m, "processed_quantity", "filled_quantity")),
+		AveragePrice: num(m, "average_price", "price"),
+		Detail:       str(m, "reject_reason", "cancel_reason", "detail"),
 	}
 	switch strings.ToLower(str(m, "state", "status")) {
 	case "filled":
 		o.State = leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_FILLED
 	case "partially_filled":
 		o.State = leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_PARTIALLY_FILLED
-	case "cancelled", "canceled":
+	case "cancelled", "canceled", "voided":
 		o.State = leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_CANCELLED
-	case "rejected", "failed":
+	case "rejected", "failed", "declined":
 		o.State = leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_REJECTED
 	default:
 		o.State = leapmuxv1.TradingOrderState_TRADING_ORDER_STATE_SUBMITTED
 	}
-	for i, e := range asList(m["executions"]) {
+	execs := asList(m["executions"])
+	for _, leg := range asList(m["legs"]) {
+		execs = append(execs, asList(asMap(leg)["executions"])...)
+	}
+	for i, e := range execs {
 		em := asMap(e)
 		key := str(em, "id", "execution_id")
 		if key == "" {
@@ -680,6 +1073,7 @@ type ReadOnlyBroker interface {
 	Quotes(ctx context.Context, symbols []string) ([]UnderlyingQuote, error)
 	OptionChain(ctx context.Context, symbol string, maxDTE int, asOf time.Time) ([]OptionQuote, error)
 	OptionQuotes(ctx context.Context, occs []string) ([]OptionQuote, error)
+	OptionQuotesByID(ctx context.Context, ids []string) ([]OptionQuote, error)
 	Catalysts(ctx context.Context, symbols []string) ([]Catalyst, []string)
 	Supports(op string) bool
 }
@@ -692,7 +1086,7 @@ type TradingBroker interface {
 	Place(ctx context.Context, o OrderRequest) (*BrokerOrder, error)
 	Cancel(ctx context.Context, brokerOrderID string) error
 	Order(ctx context.Context, brokerOrderID string) (*BrokerOrder, error)
-	FindOrder(ctx context.Context, clientOrderID string) (*BrokerOrder, error)
+	FindOrder(ctx context.Context, o OrderRequest, since time.Time) (*BrokerOrder, error)
 }
 
 // Reader returns the read-only view. The value it returns holds the session
@@ -712,6 +1106,9 @@ func (v readOnly) OptionChain(ctx context.Context, s string, d int, t time.Time)
 }
 func (v readOnly) OptionQuotes(ctx context.Context, o []string) ([]OptionQuote, error) {
 	return v.r.OptionQuotes(ctx, o)
+}
+func (v readOnly) OptionQuotesByID(ctx context.Context, ids []string) ([]OptionQuote, error) {
+	return v.r.OptionQuotesByID(ctx, ids)
 }
 func (v readOnly) Catalysts(ctx context.Context, s []string) ([]Catalyst, []string) {
 	return v.r.Catalysts(ctx, s)
