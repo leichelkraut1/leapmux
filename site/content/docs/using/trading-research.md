@@ -73,8 +73,9 @@ For real market data without trading, set the market data source to **Robinhood 
 The Robinhood connection inside ChatGPT belongs to ChatGPT and cannot be shared. LeapMux signs in to the same server, Robinhood's MCP server for agents (`https://agent.robinhood.com/mcp/trading`), with a sign-in of its own:
 
 1. In **Trading research → Settings → Robinhood**, choose **Sign in**. The server URL fills in.
-2. Choose **Sign in to Robinhood**. Robinhood's sign-in page opens in a new tab; sign in there and approve LeapMux. Robinhood sends you back to the computer's connector address, so the lab must run on a computer that serves the connector (see [Reading the lab from Claude or ChatGPT](#reading-the-lab-from-claude-or-chatgpt)).
-3. Back in LeapMux, the settings show **Signed in**. Choose **Save and verify broker**.
+2. Choose **Sign in to Robinhood**. Robinhood's sign-in page opens in a new tab; sign in there and approve LeapMux (Robinhood may ask you to confirm on your phone).
+3. Robinhood then sends that tab to a local address, `http://127.0.0.1:4731/broker/callback?code=...`, as it does for command-line apps. On the lab computer itself the sign-in finishes there. Anywhere else the page shows "Unable to connect": copy the whole address from the address bar, paste it into the box under the sign-in button and choose **Finish sign-in**. The address works once and only within ten minutes.
+4. The settings show **Signed in**. Choose **Save and verify broker**.
 
 The worker keeps the sign-in's tokens, sealed for its own Windows user (DPAPI) on Windows, and refreshes them. No research agent ever sees them. **Sign out** forgets them.
 

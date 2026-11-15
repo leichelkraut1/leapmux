@@ -567,6 +567,9 @@ var ownerGuardedProbes = func() []ownerGuardedProbe {
 		}},
 		{"StartTradingBrokerSignIn", func() proto.Message { return &leapmuxv1.StartTradingBrokerSignInRequest{} }},
 		{"SignOutTradingBroker", func() proto.Message { return &leapmuxv1.SignOutTradingBrokerRequest{} }},
+		{"CompleteTradingBrokerSignIn", func() proto.Message {
+			return &leapmuxv1.CompleteTradingBrokerSignInRequest{CallbackUrl: "http://127.0.0.1:4731/broker/callback?code=c&state=s"}
+		}},
 		{"RevokeTradingExecutionPolicy", func() proto.Message {
 			return &leapmuxv1.RevokeTradingExecutionPolicyRequest{PolicyId: "policy-1"}
 		}},

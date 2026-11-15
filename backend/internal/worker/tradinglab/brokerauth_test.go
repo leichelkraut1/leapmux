@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -117,7 +116,7 @@ func TestBrokerSignInRegistersAndAsksForTheConnectorCallback(t *testing.T) {
 	h, f := signInHarness(t)
 	q := start(t, h, f)
 	assert.Equal(t, "client-1", q.Get("client_id"))
-	assert.Equal(t, "https://lab.example.com/lab-mcp"+BrokerCallbackPath, q.Get("redirect_uri"))
+	assert.Equal(t, BrokerLoopbackRedirect, q.Get("redirect_uri"), "Robinhood finishes a sign-in only for a loopback return address")
 	assert.Equal(t, "S256", q.Get("code_challenge_method"))
 	assert.Equal(t, f.mcpURL(), q.Get("resource"))
 	assert.Equal(t, "internal", q.Get("scope"))
@@ -197,12 +196,24 @@ func TestBrokerSignInExpiresAndSignsOut(t *testing.T) {
 	assert.ErrorContains(t, err, "not signed in")
 }
 
-func TestBrokerSignInNeedsTheConnectorURL(t *testing.T) {
-	h, _ := signInHarness(t)
+func TestBrokerSignInFinishesFromThePastedReturnAddress(t *testing.T) {
+	h, f := signInHarness(t)
 	h.lab.connectorURL = ""
-	_, err := h.lab.StartBrokerSignIn(h.ctx, userID)
-	assert.ErrorIs(t, err, ErrConflict)
-	assert.True(t, strings.Contains(err.Error(), "trading_connector_url"))
+	q := start(t, h, f)
+	back := func(state, code string) string {
+		return BrokerLoopbackRedirect + "?" + url.Values{"code": {code}, "state": {state}, "iss": {f.mcpURL()}}.Encode()
+	}
+
+	assert.ErrorIs(t, h.lab.CompleteBrokerSignInFromURL(h.ctx, userID, "https://evil.example.com/broker/callback?code=code-1&state="+q.Get("state")), ErrInvalid)
+	assert.ErrorIs(t, h.lab.CompleteBrokerSignInFromURL(h.ctx, userID, "not a url"), ErrInvalid)
+	assert.ErrorIs(t, h.lab.CompleteBrokerSignInFromURL(h.ctx, "someone-else", back(q.Get("state"), "code-1")), ErrDenied)
+	assert.ErrorIs(t, h.lab.CompleteBrokerSignInFromURL(h.ctx, userID, BrokerLoopbackRedirect+"?error=access_denied&state="+q.Get("state")), ErrConflict)
+
+	require.NoError(t, h.lab.CompleteBrokerSignInFromURL(h.ctx, userID, "  "+back(q.Get("state"), "code-1")+"\n"))
+	s, err := h.lab.Settings(h.ctx, userID)
+	require.NoError(t, err)
+	assert.True(t, s.GetBrokerSignIn().GetSignedIn())
+	assert.ErrorIs(t, h.lab.CompleteBrokerSignInFromURL(h.ctx, userID, back(q.Get("state"), "code-1")), ErrDenied, "a return address works once")
 }
 
 func TestSealedSecretsRoundTrip(t *testing.T) {

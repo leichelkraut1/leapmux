@@ -74,6 +74,7 @@ import type {
 } from '~/generated/proto/leapmux/v1/terminal_pb'
 import type {
   CancelTradingOrderResponse,
+  CompleteTradingBrokerSignInResponse,
   ConfirmTradingOrderResponse,
   DecideTradingCandidateResponse,
   GetTradingDashboardResponse,
@@ -254,6 +255,8 @@ import {
 import {
   CancelTradingOrderRequestSchema,
   CancelTradingOrderResponseSchema,
+  CompleteTradingBrokerSignInRequestSchema,
+  CompleteTradingBrokerSignInResponseSchema,
   ConfirmTradingOrderRequestSchema,
   ConfirmTradingOrderResponseSchema,
   DecideTradingCandidateRequestSchema,
@@ -1024,6 +1027,10 @@ export function saveTradingExecutionPolicy(workerId: string, req: MessageInitSha
 
 export function startTradingBrokerSignIn(workerId: string, req: MessageInitShape<typeof StartTradingBrokerSignInRequestSchema>): Promise<StartTradingBrokerSignInResponse> {
   return callWorker(workerId, 'StartTradingBrokerSignIn', StartTradingBrokerSignInRequestSchema, StartTradingBrokerSignInResponseSchema, req)
+}
+
+export function completeTradingBrokerSignIn(workerId: string, req: MessageInitShape<typeof CompleteTradingBrokerSignInRequestSchema>): Promise<CompleteTradingBrokerSignInResponse> {
+  return callWorker(workerId, 'CompleteTradingBrokerSignIn', CompleteTradingBrokerSignInRequestSchema, CompleteTradingBrokerSignInResponseSchema, req)
 }
 
 export function signOutTradingBroker(workerId: string, req: MessageInitShape<typeof SignOutTradingBrokerRequestSchema>): Promise<SignOutTradingBrokerResponse> {

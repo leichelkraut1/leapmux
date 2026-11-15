@@ -101,6 +101,16 @@ export function TradingSettings(props: { workerId: string }) {
   })
 
   const [signInUrl, setSignInUrl] = createSignal<string>()
+  /** Set once a sign-in started, until the pasted return address finishes it. */
+  const [awaitingReturn, setAwaitingReturn] = createSignal(false)
+  const [returnUrl, setReturnUrl] = createSignal('')
+  const finishSignIn = () => void action.run(async () => {
+    const resp = await workerRpc.completeTradingBrokerSignIn(props.workerId, { callbackUrl: returnUrl() })
+    setDraft(resp.settings)
+    setReturnUrl('')
+    setAwaitingReturn(false)
+    showInfoToast('Signed in to Robinhood.')
+  })
   /**
    * Saves the settings, then opens the broker's sign-in page. The tab is
    * opened during the click, so a popup blocker lets it through, and pointed
@@ -113,6 +123,7 @@ export function TradingSettings(props: { workerId: string }) {
       try {
         await workerRpc.saveTradingLabSettings(props.workerId, { settings: draft() })
         const resp = await workerRpc.startTradingBrokerSignIn(props.workerId, {})
+        setAwaitingReturn(true)
         if (tab) {
           tab.opener = null
           tab.location.href = resp.authorizeUrl
@@ -249,9 +260,6 @@ export function TradingSettings(props: { workerId: string }) {
                       <span class={styles.secondary}>{`since ${new Date(Number(s().brokerSignIn?.signedInAtMs ?? 0)).toLocaleString()}`}</span>
                     </Show>
                   </div>
-                  <Show when={!s().connectorUrl}>
-                    <p class={styles.hint}>Signing in needs this computer's connector address (trading_connector_url), where Robinhood sends you back. Use the lab on the computer that serves the connector.</p>
-                  </Show>
                   <Show when={signInUrl()}>
                     {u => (
                       <p class={styles.hint}>
@@ -261,7 +269,7 @@ export function TradingSettings(props: { workerId: string }) {
                     )}
                   </Show>
                   <div class={styles.actions}>
-                    <button type="button" disabled={action.busy() || !s().connectorUrl} onClick={signIn} data-testid="trading-broker-sign-in-button">
+                    <button type="button" disabled={action.busy()} onClick={signIn} data-testid="trading-broker-sign-in-button">
                       {s().brokerSignIn?.signedIn ? 'Sign in again' : 'Sign in to Robinhood'}
                     </button>
                     <Show when={s().brokerSignIn?.signedIn}>
@@ -278,7 +286,29 @@ export function TradingSettings(props: { workerId: string }) {
                       </button>
                     </Show>
                   </div>
-                  <p class={styles.hint}>Robinhood opens in a new tab. After you sign in there, come back here, then verify the broker.</p>
+                  <Show
+                    when={awaitingReturn()}
+                    fallback={<p class={styles.hint}>Robinhood opens in a new tab, where you sign in and approve LeapMux.</p>}
+                  >
+                    <div class={styles.field} data-testid="trading-broker-return">
+                      <p class={styles.hint}>
+                        After you approve, Robinhood sends that tab to an address starting with http://127.0.0.1:4731, which shows "Unable to connect" unless you are on the lab computer. Copy that whole address from the address bar and paste it here.
+                      </p>
+                      <div class={styles.inline}>
+                        <input
+                          value={returnUrl()}
+                          onInput={e => setReturnUrl(e.currentTarget.value)}
+                          placeholder="http://127.0.0.1:4731/broker/callback?code=..."
+                          aria-label="Address Robinhood sent you back to"
+                          data-testid="trading-broker-return-url"
+                        />
+                        <button type="button" disabled={action.busy() || !returnUrl().trim()} onClick={finishSignIn} data-testid="trading-broker-finish">
+                          Finish sign-in
+                        </button>
+                      </div>
+                    </div>
+                  </Show>
+                  <p class={styles.hint}>Then choose Save and verify broker.</p>
                 </div>
               </Show>
               <div class={styles.actions}>

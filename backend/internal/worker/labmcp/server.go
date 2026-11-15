@@ -151,6 +151,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc(s.base+"/authorize", s.handleAuthorize)
 	mux.HandleFunc("POST "+s.base+"/token", s.handleToken)
 	mux.HandleFunc("GET "+s.base+tradinglab.BrokerCallbackPath, s.handleBrokerCallback)
+	// The loopback return address (tradinglab.BrokerLoopbackRedirect): a
+	// browser on the lab computer lands here directly.
+	if s.base != "" {
+		mux.HandleFunc("GET "+tradinglab.BrokerCallbackPath, s.handleBrokerCallback)
+	}
 	return http.MaxBytesHandler(securityHeaders(mux), maxBody)
 }
 

@@ -526,11 +526,17 @@ enum TradingConnectorTokenKind {
 
 // StartTradingBrokerSignIn begins the broker's OAuth sign-in: the worker
 // registers itself with the server if needed and returns the page the person
-// opens to sign in. The server sends them back to the worker's trading
-// connector URL, which finishes it; so it needs trading_connector_url.
+// opens to sign in. The server sends the browser back to a loopback address:
+// on the lab computer the trading connector finishes it; elsewhere the person
+// pastes that address into CompleteTradingBrokerSignIn.
 message StartTradingBrokerSignInRequest {}
 message StartTradingBrokerSignInResponse { string authorize_url = 1; }
 
 // SignOutTradingBroker forgets the broker sign-in's tokens.
 message SignOutTradingBrokerRequest {}
 message SignOutTradingBrokerResponse { TradingLabSettings settings = 1; }
+
+// CompleteTradingBrokerSignIn finishes a broker sign-in from the address the
+// browser was sent back to (http://127.0.0.1:4731/broker/callback?code=...).
+message CompleteTradingBrokerSignInRequest { string callback_url = 1; }
+message CompleteTradingBrokerSignInResponse { TradingLabSettings settings = 1; }

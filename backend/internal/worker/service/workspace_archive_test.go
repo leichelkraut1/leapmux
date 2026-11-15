@@ -748,7 +748,7 @@ func TestWorkspaceArchive_RefusesEveryWriteRPCOnAnArchivedTab(t *testing.T) {
 		"SaveTradingLabSettings", "VerifyTradingBroker", "InstallTradingSampleData", "DecideTradingCandidate",
 		"MarkTradingBooks", "PrepareTradingOrder", "ConfirmTradingOrder", "CancelTradingOrder",
 		"ReconcileTradingOrders", "SaveTradingExecutionPolicy", "RevokeTradingExecutionPolicy",
-		"StartTradingBrokerSignIn", "SignOutTradingBroker",
+		"StartTradingBrokerSignIn", "SignOutTradingBroker", "CompleteTradingBrokerSignIn",
 	} {
 		unguarded[method] = "addresses the trading lab, not one tab"
 	}

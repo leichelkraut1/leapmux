@@ -16,6 +16,7 @@ const rpc = vi.hoisted(() => ({
   getTradingDashboard: vi.fn(),
   saveTradingLabSettings: vi.fn(),
   startTradingBrokerSignIn: vi.fn(),
+  completeTradingBrokerSignIn: vi.fn(),
   signOutTradingBroker: vi.fn(),
   verifyTradingBroker: vi.fn(),
   installTradingSampleData: vi.fn(),
@@ -70,12 +71,25 @@ describe('TradingSettings', () => {
     open.mockRestore()
   })
 
-  it('needs the connector address to sign in, and offers sign-out once signed in', async () => {
+  it('finishes the sign-in from the pasted return address', async () => {
     rpc.getTradingLabSettings.mockResolvedValue({ settings: settings(false, '') })
+    rpc.completeTradingBrokerSignIn.mockResolvedValue({ settings: settings(true, '') })
+    const open = vi.spyOn(window, 'open').mockReturnValue({ opener: {}, location: { href: '' }, close: vi.fn() } as unknown as Window)
     render(() => <TradingSettings workerId="w1" />)
-    expect(await screen.findByTestId('trading-broker-sign-in-button')).toBeDisabled()
-    cleanup()
+    const button = await screen.findByTestId('trading-broker-sign-in-button')
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    const field = await screen.findByTestId('trading-broker-return-url')
+    expect(screen.getByTestId('trading-broker-finish')).toBeDisabled()
+    fireEvent.input(field, { target: { value: 'http://127.0.0.1:4731/broker/callback?code=c&state=s' } })
+    fireEvent.click(screen.getByTestId('trading-broker-finish'))
+    await waitFor(() => expect(rpc.completeTradingBrokerSignIn).toHaveBeenCalledWith('w1', { callbackUrl: 'http://127.0.0.1:4731/broker/callback?code=c&state=s' }))
+    expect(await screen.findByText('Signed in')).toBeInTheDocument()
+    expect(screen.queryByTestId('trading-broker-return-url')).not.toBeInTheDocument()
+    open.mockRestore()
+  })
 
+  it('offers sign-out once signed in', async () => {
     rpc.getTradingLabSettings.mockResolvedValue({ settings: settings(true) })
     rpc.signOutTradingBroker.mockResolvedValue({ settings: settings(false) })
     render(() => <TradingSettings workerId="w1" />)

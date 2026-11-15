@@ -24,10 +24,14 @@ import (
 // its own metadata describes it (RFC 9728 for the resource, RFC 8414 for the
 // authorization server, RFC 7591 to register). Robinhood's
 // agent.robinhood.com/mcp/trading publishes all three. The worker is a public
-// client: the person signs in in their browser, and the server sends them
-// back to <trading connector URL>/broker/callback, which labmcp hands to
-// CompleteBrokerSignIn. The tokens are sealed for the worker's OS user
-// (sealSecret) and never leave the worker; research agents never see them.
+// client, and like a command-line client it asks to be sent back to a
+// loopback address (BrokerLoopbackRedirect): Robinhood finishes a sign-in for
+// a loopback return address and refuses an internet one. On the lab computer
+// the trading connector listens there and finishes it; anywhere else the
+// browser lands on a page that does not load, and the person pastes its
+// address into the lab settings (CompleteBrokerSignInFromURL). The tokens are
+// sealed for the worker's OS user (sealSecret) and never leave the worker;
+// research agents never see them.
 
 const (
 	brokerSignInTTL = 10 * time.Minute
@@ -36,9 +40,13 @@ const (
 	brokerHTTPTimeout   = 20 * time.Second
 )
 
-// BrokerCallbackPath is where the broker sends the browser back, under the
-// trading connector URL.
+// BrokerCallbackPath is where the broker sends the browser back.
 const BrokerCallbackPath = "/broker/callback"
+
+// BrokerLoopbackRedirect is the return address every broker sign-in asks for:
+// the trading connector's default local port, so a browser on the lab
+// computer completes the sign-in by itself.
+const BrokerLoopbackRedirect = "http://127.0.0.1:4731" + BrokerCallbackPath
 
 type brokerOAuth struct {
 	Issuer                string   `json:"issuer"`
@@ -270,9 +278,6 @@ func brokerSignInStatus(ctx context.Context, q querier, userID string) (*leapmux
 // broker configured in the settings. It registers the worker with the
 // broker the first time.
 func (l *Lab) StartBrokerSignIn(ctx context.Context, userID string) (string, error) {
-	if l.connectorURL == "" {
-		return "", conflictf("signing in needs this worker's trading connector URL, where the broker sends you back (trading_connector_url)")
-	}
 	s, err := getSettings(ctx, l.store.db, userID)
 	if err != nil {
 		return "", err
@@ -288,7 +293,7 @@ func (l *Lab) StartBrokerSignIn(ctx context.Context, userID string) (string, err
 	if err != nil {
 		return "", conflictf("%v", err)
 	}
-	redirect := strings.TrimRight(l.connectorURL, "/") + BrokerCallbackPath
+	redirect := BrokerLoopbackRedirect
 	row, err := getBrokerAuth(ctx, l.store.db, userID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return "", err
@@ -454,4 +459,26 @@ func (l *Lab) SignOutBroker(ctx context.Context, userID string) (*leapmuxv1.Trad
 		return nil, err
 	}
 	return l.Settings(ctx, userID)
+}
+
+// CompleteBrokerSignInFromURL finishes a sign-in from the address the
+// browser was sent back to, pasted by the person: the loopback return
+// address with the broker's code, state and issuer. The sign-in must be the
+// user's own.
+func (l *Lab) CompleteBrokerSignInFromURL(ctx context.Context, userID, raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Path != BrokerCallbackPath || u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" {
+		return invalidf("paste the whole address your browser ended on; it starts with %s", BrokerLoopbackRedirect)
+	}
+	q := u.Query()
+	if e := q.Get("error"); e != "" {
+		return conflictf("the broker did not sign you in (%s)", e)
+	}
+	l.signIns.mu.Lock()
+	p := l.signIns.pending[q.Get("state")]
+	l.signIns.mu.Unlock()
+	if p != nil && p.userID != userID {
+		return deniedf("this sign-in belongs to another user")
+	}
+	return l.CompleteBrokerSignIn(ctx, q.Get("state"), q.Get("code"), q.Get("iss"))
 }

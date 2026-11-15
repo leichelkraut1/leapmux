@@ -107,6 +107,19 @@ func registerTradingLabHandlers(r registrar, svc *Service) {
 			u, err := lab.StartBrokerSignIn(ctx, caller.UserID.String())
 			replyLab(sender, &leapmuxv1.StartTradingBrokerSignInResponse{AuthorizeUrl: u}, err)
 		})
+	registerOwnerGuarded(r, "CompleteTradingBrokerSignIn", write, dispatchPlain,
+		func(ctx context.Context, caller channel.Caller, req *leapmuxv1.CompleteTradingBrokerSignInRequest, sender channel.ResponseWriter) {
+			if !byPerson(ctx, caller) {
+				sendPermissionDenied(sender, "only you, in your browser, can sign in to the broker")
+				return
+			}
+			if err := lab.CompleteBrokerSignInFromURL(ctx, caller.UserID.String(), req.GetCallbackUrl()); err != nil {
+				replyLab(sender, nil, err)
+				return
+			}
+			s, err := lab.Settings(ctx, caller.UserID.String())
+			replyLab(sender, &leapmuxv1.CompleteTradingBrokerSignInResponse{Settings: s}, err)
+		})
 	registerOwnerGuarded(r, "SignOutTradingBroker", write, dispatchPlain,
 		func(ctx context.Context, caller channel.Caller, _ *leapmuxv1.SignOutTradingBrokerRequest, sender channel.ResponseWriter) {
 			s, err := lab.SignOutBroker(ctx, caller.UserID.String())
