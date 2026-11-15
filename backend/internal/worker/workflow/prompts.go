@@ -124,6 +124,7 @@ func leadBriefing(run *leapmuxv1.WorkflowRun, roles []*leapmuxv1.WorkflowRoleAss
 		b.WriteString("- Completing the run asks the user for final approval.\n")
 	}
 	b.WriteString("\n## Commands\n\nRun these in your shell. Each prints JSON. You receive updates as messages like this one.\n\n")
+	b.WriteString(cliNote)
 	b.WriteString("```\n")
 	b.WriteString("leapmux control workflow context                     # team, tasks, approvals\n")
 	b.WriteString("leapmux control workflow delegate --role <key> --title <t> --instructions <text|-> [--depends-on <task-id>] [--approval before-start|before-complete]\n")
@@ -136,6 +137,10 @@ func leadBriefing(run *leapmuxv1.WorkflowRun, roles []*leapmuxv1.WorkflowRoleAss
 	b.WriteString("Start by planning, then delegate the first task.\n")
 	return b.String()
 }
+
+// cliNote tells an agent where its computer's CLI is when `leapmux` is not on
+// PATH, or is an older copy that lacks a command.
+const cliNote = "`leapmux` below is this computer's LeapMux CLI. If `leapmux` is not on PATH, or answers that a command is unknown, run the executable named by the `LEAPMUX_CONTROL_CLI` environment variable instead, with the same arguments.\n\n"
 
 func rolesOf(assignments []*leapmuxv1.WorkflowRoleAssignment) []*leapmuxv1.WorkflowRole {
 	out := make([]*leapmuxv1.WorkflowRole, 0, len(assignments))
@@ -198,6 +203,7 @@ func taskDispatch(run *leapmuxv1.WorkflowRun, role *leapmuxv1.WorkflowRole, task
 		b.WriteString("\n\n")
 	}
 	b.WriteString(inputsText(inputs))
+	b.WriteString(cliNote)
 	if tools := step.GetParams()["tools"]; tools != "" {
 		b.WriteString("## Tools\n\n")
 		b.WriteString("This step is granted the coordinator's `" + tools + "` tools. They are the only external tools you may use for it. List them with their descriptions and argument schemas, then call them:\n\n```\n")

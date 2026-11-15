@@ -400,11 +400,26 @@ func tabTypeWireName(t leapmuxv1.TabType) string {
 //   - WORKING_DIR / AGENT_PROVIDER — set at spawn, immutable for the
 //     lifetime of the agent; saved here so the CLI doesn't have to
 //     round-trip the worker on every invocation.
+//   - CLI — this worker's own executable, the CLI that matches it. A
+//     `leapmux` on PATH may be missing or an older copy (a worker installed
+//     outside PATH), so the spawn can always name the right one.
 //
 // Workspace id and tile id are deliberately NOT injected — they're
 // derivable from TAB_ID via a single hub LocateTab call, and deriving
 // avoids both the staleness window (tab moves) and any way for a
 // misbehaving client to inject a lying value.
+// controlCLI is this process's executable, or "" when it cannot be found.
+var controlCLI = sync.OnceValue(func() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return exe
+})
+
 func EnvVars(socketURL, token string, info TokenInfo) []string {
 	envs := []string{
 		"LEAPMUX_CONTROL_SOCK=" + socketURL,
@@ -429,6 +444,9 @@ func EnvVars(socketURL, token string, info TokenInfo) []string {
 	}
 	if info.AgentProvider != "" {
 		envs = append(envs, "LEAPMUX_CONTROL_AGENT_PROVIDER="+info.AgentProvider)
+	}
+	if cli := controlCLI(); cli != "" {
+		envs = append(envs, "LEAPMUX_CONTROL_CLI="+cli)
 	}
 	if b := info.Workflow; b.GetRunId() != "" {
 		envs = append(envs,

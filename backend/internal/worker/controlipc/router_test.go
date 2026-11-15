@@ -3,6 +3,7 @@ package controlipc_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -970,6 +971,7 @@ func TestEnvVars_AgentSetsAllExpected(t *testing.T) {
 	for k, v := range want {
 		assert.Equal(t, v, got[k], "agent spawn must set %s=%s", k, v)
 	}
+	assert.True(t, filepath.IsAbs(got["LEAPMUX_CONTROL_CLI"]), "the spawn names this worker's own CLI: %q", got["LEAPMUX_CONTROL_CLI"])
 	// Workspace id, tile id, and the legacy unsuffixed / _AGENT / _TERMINAL
 	// names are intentionally NOT injected — workspace/tile can change
 	// after spawn (cross-workspace move, tile drag) and a stale env var
