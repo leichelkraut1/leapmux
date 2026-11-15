@@ -411,3 +411,38 @@ func TestCanonicalJSON(t *testing.T) {
 	_, _, err = workflow.CanonicalJSON(`{"a": 1} {"b": 2}`)
 	assert.ErrorIs(t, err, workflow.ErrInvalid)
 }
+
+// A blocked task the user moves to another computer gets a new agent there:
+// the old agent, which no task can go back to, is retired instead of holding
+// the role's only place.
+func TestReassigningABlockedFreshAgentTaskStartsANewAgentThere(t *testing.T) {
+	b := newBlindHarness(t)
+	b.platform.addWorker(macPC, "Mac", true, "os:darwin")
+	b.settle()
+	_, auth, _ := b.open("blind")
+	_, err := b.engine.Report(b.ctx, userID, &leapmuxv1.WorkflowAgentReportRequest{
+		Auth: auth, TaskId: b.task("Blind pick").GetId(),
+		Result: &leapmuxv1.WorkflowTaskResult{Outcome: leapmuxv1.WorkflowTaskOutcome_WORKFLOW_TASK_OUTCOME_BLOCKED, Summary: "This computer lacks a tool."},
+	})
+	require.NoError(t, err)
+	b.pass()
+	before := len(b.platform.openCalls())
+
+	_, err = b.engine.ControlTask(b.ctx, userID, &leapmuxv1.ControlWorkflowTaskRequest{
+		RunId: b.runID, TaskId: b.task("Blind pick").GetId(), Action: leapmuxv1.WorkflowTaskAction_WORKFLOW_TASK_ACTION_REASSIGN, WorkerId: macPC,
+	})
+	require.NoError(t, err)
+	b.pass()
+
+	calls := b.platform.openCalls()
+	require.Len(t, calls, before+1, "a new agent opens: %s", b.task("Blind pick").GetStatusDetail())
+	assert.Equal(t, macPC, calls[len(calls)-1].workerID)
+	assert.Equal(t, "blind", calls[len(calls)-1].req.GetWorkflow().GetRoleKey())
+	var closed int
+	for _, a := range b.detail().GetAgents() {
+		if a.GetRoleKey() == "blind" && a.GetStatus() == leapmuxv1.WorkflowAgentStatus_WORKFLOW_AGENT_STATUS_CLOSED {
+			closed++
+		}
+	}
+	assert.Equal(t, 1, closed, "the stranded agent is retired")
+}

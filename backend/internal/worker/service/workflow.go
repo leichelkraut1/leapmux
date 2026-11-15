@@ -265,10 +265,11 @@ func safePathSegment(s string) string {
 }
 
 // workerCapabilities is what this computer offers workflow placement: its OS
-// and architecture, the tools found on PATH, and whatever the operator lists
-// in LEAPMUX_WORKER_CAPABILITIES. Detected once per process.
+// and architecture, what this build can do for a step (WorkflowToolsCapability),
+// the tools found on PATH, and whatever the operator lists in
+// LEAPMUX_WORKER_CAPABILITIES. Detected once per process.
 var workerCapabilities = sync.OnceValue(func() []string {
-	caps := []string{"os:" + runtime.GOOS, "arch:" + runtime.GOARCH}
+	caps := []string{"os:" + runtime.GOOS, "arch:" + runtime.GOARCH, workflow.ToolsCapability}
 	tools := map[string]string{"git": "git", "docker": "docker", "node": "node", "go": "go", "python3": "python"}
 	if runtime.GOOS == "darwin" {
 		tools["xcodebuild"] = "xcode"

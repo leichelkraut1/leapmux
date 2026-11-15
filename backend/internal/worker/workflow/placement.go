@@ -26,6 +26,12 @@ func (c WorkerCandidate) label() string {
 	return c.ID
 }
 
+// ToolsCapability is advertised by a build whose CLI serves a step's granted
+// tools (`leapmux control workflow tools`). A role whose steps use tools
+// requires it, so its agent never lands on an older computer that would
+// leave the step unable to work.
+const ToolsCapability = "workflow-tools"
+
 func (c WorkerCandidate) has(capability string) bool {
 	return slices.Contains(c.Capabilities, capability)
 }

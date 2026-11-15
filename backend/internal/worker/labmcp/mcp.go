@@ -303,18 +303,18 @@ func (s *Server) overview(ctx context.Context, owner string, _ map[string]any) (
 	}
 	orders := newestOrders(d.GetOrders(), 10)
 	return map[string]any{
-		"mode":                     strings.ToLower(strings.TrimPrefix(set.GetMode().String(), "TRADING_LAB_MODE_")),
-		"market_data":              strings.ToLower(strings.TrimPrefix(set.GetMarketData().String(), "TRADING_MARKET_DATA_SOURCE_")),
-		"watchlist":                set.GetWatchlist(),
+		"mode":                       strings.ToLower(strings.TrimPrefix(set.GetMode().String(), "TRADING_LAB_MODE_")),
+		"market_data":                strings.ToLower(strings.TrimPrefix(set.GetMarketData().String(), "TRADING_MARKET_DATA_SOURCE_")),
+		"watchlist":                  set.GetWatchlist(),
 		"research_quote_age_seconds": set.GetResearchQuoteAgeSeconds(),
-		"risk_budget":              raw(set.GetRisk()),
-		"simulation":               raw(set.GetSimulation()),
-		"books":                    rawList(d.GetMetrics()),
-		"approved_queue":           rawList(d.GetQueue()),
-		"open_positions":           rawList(open),
-		"broker":                   raw(d.GetBroker()),
-		"active_policies":          rawList(policies),
-		"latest_orders":            rawList(orders),
+		"risk_budget":                raw(set.GetRisk()),
+		"simulation":                 raw(set.GetSimulation()),
+		"books":                      rawList(d.GetMetrics()),
+		"approved_queue":             rawList(d.GetQueue()),
+		"open_positions":             rawList(open),
+		"broker":                     raw(d.GetBroker()),
+		"active_policies":            rawList(policies),
+		"latest_orders":              rawList(orders),
 	}, nil
 }
 

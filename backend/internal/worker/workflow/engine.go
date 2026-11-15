@@ -515,6 +515,36 @@ func (e *Engine) closeFreshSlot(ctx context.Context, q querier, rs *runState, t 
 	return e.dropOutbox(ctx, q, rs, slot.GetSlotId(), "agent retired")
 }
 
+// retireStrandedSlots retires a fresh-per-task role's idle agents that no
+// open task can go back to, such as the agent of a task the user moved to
+// another computer. Such an agent never takes work again, so it must not
+// hold the role's place and keep the task from a new agent.
+func (e *Engine) retireStrandedSlots(ctx context.Context, q querier, rs *runState, roleKey string) error {
+	for _, s := range rs.slots {
+		if s.GetRoleKey() != roleKey || rs.isLead(s) || !slotHolds(s.GetStatus()) || s.GetCurrentTaskId() != "" {
+			continue
+		}
+		owned := false
+		for _, t := range rs.tasks {
+			if t.GetSlotId() == s.GetSlotId() && !taskFinal(t.GetStatus()) {
+				owned = true
+				break
+			}
+		}
+		if owned {
+			continue
+		}
+		s.Status, s.StatusDetail = leapmuxv1.WorkflowAgentStatus_WORKFLOW_AGENT_STATUS_CLOSED, "Retired: its task moved on; each task gets a fresh agent"
+		if err := e.saveSlot(ctx, q, s); err != nil {
+			return err
+		}
+		if err := e.dropOutbox(ctx, q, rs, s.GetSlotId(), "agent retired"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func taskWord(s leapmuxv1.WorkflowTaskStatus) string {
 	name := strings.TrimPrefix(s.String(), "WORKFLOW_TASK_STATUS_")
 	return strings.ToLower(strings.ReplaceAll(name, "_", " "))
@@ -920,6 +950,11 @@ func (e *Engine) pickSlot(ctx context.Context, q querier, rs *runState, t *leapm
 	for _, s := range rs.slots {
 		if free(s) {
 			return s, nil
+		}
+	}
+	if fresh {
+		if err := e.retireStrandedSlots(ctx, q, rs, t.GetRoleKey()); err != nil {
+			return nil, err
 		}
 	}
 	role := assignment.GetRole()

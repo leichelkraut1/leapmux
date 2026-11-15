@@ -19,6 +19,15 @@ profiles:
       effort: high
     placement:
       strategy: WORKER_PLACEMENT_STRATEGY_ANY_WORKER
+  - id: market
+    name: Market data researcher (Claude, high effort)
+    description: Selects market data through the lab's read-only research tools, on a computer whose LeapMux offers them.
+    agent_provider: AGENT_PROVIDER_CLAUDE_CODE
+    options:
+      effort: high
+    placement:
+      strategy: WORKER_PLACEMENT_STRATEGY_CAPABILITY
+      required_capabilities: [workflow-tools]
   - id: reviewer
     name: Options reviewer (Claude, high effort)
     description: Scores and audits frozen, anonymized recommendations.
@@ -49,7 +58,7 @@ template:
   roles:
     - key: market-researcher
       name: Market data researcher
-      profile_id: analyst
+      profile_id: market
       isolation: {fresh_agent_per_task: true, private_working_dir: true}
       agent:
         instructions: |

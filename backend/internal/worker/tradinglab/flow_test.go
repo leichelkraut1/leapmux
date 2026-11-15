@@ -34,7 +34,7 @@ type agents struct {
 }
 
 func (a *agents) Workers(context.Context) ([]workflow.WorkerCandidate, error) {
-	return []workflow.WorkerCandidate{{ID: "w1", Name: "Lab PC", Online: true}}, nil
+	return []workflow.WorkerCandidate{{ID: "w1", Name: "Lab PC", Online: true, Capabilities: []string{"os:linux", workflow.ToolsCapability}}}, nil
 }
 
 func (a *agents) OpenAgent(_ context.Context, _ string, req *leapmuxv1.OpenAgentRequest) (string, error) {
@@ -322,5 +322,29 @@ func TestBlindTradingLabRunsEndToEndInPaperMode(t *testing.T) {
 		}
 		assert.Equal(t, uint32(1), m.GetIdeas(), m.GetBook().String())
 		assert.NotEmpty(t, m.GetPnlAtHorizon(), "every book is marked at the same horizons")
+	}
+}
+
+// The market data researcher needs `leapmux control workflow tools`, so it
+// runs only on a computer whose build offers it; the other roles go anywhere.
+func TestTemplatePlacesTheMarketResearcherWhereToolsWork(t *testing.T) {
+	bundle, err := tradinglab.TemplateBundle()
+	require.NoError(t, err)
+	profiles := map[string]*leapmuxv1.AgentProfile{}
+	for _, p := range bundle.GetProfiles() {
+		profiles[p.GetId()] = p
+	}
+	for _, role := range bundle.GetTemplate().GetRoles() {
+		placement := profiles[role.GetProfileId()].GetPlacement()
+		uses := false
+		for _, step := range bundle.GetTemplate().GetSteps() {
+			uses = uses || step.GetRoleKey() == role.GetKey() && step.GetParams()[tradinglab.StepToolsParam] != ""
+		}
+		if uses {
+			assert.Equal(t, leapmuxv1.WorkerPlacementStrategy_WORKER_PLACEMENT_STRATEGY_CAPABILITY, placement.GetStrategy(), role.GetKey())
+			assert.Contains(t, placement.GetRequiredCapabilities(), workflow.ToolsCapability, role.GetKey())
+		} else {
+			assert.NotContains(t, placement.GetRequiredCapabilities(), workflow.ToolsCapability, role.GetKey())
+		}
 	}
 }

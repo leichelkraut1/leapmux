@@ -12,6 +12,7 @@ import (
 	"github.com/leapmux/leapmux/internal/util/userid"
 	"github.com/leapmux/leapmux/internal/worker/agent"
 	"github.com/leapmux/leapmux/internal/worker/channel"
+	"github.com/leapmux/leapmux/internal/worker/workflow"
 )
 
 // An agent is the owner's agent: it can drive the owner's workflows. (That
@@ -80,6 +81,7 @@ func TestWorkerCapabilitiesNameTheOS(t *testing.T) {
 		hasOS = hasOS || len(c) > 3 && c[:3] == "os:"
 	}
 	assert.True(t, hasOS)
+	assert.Contains(t, caps, workflow.ToolsCapability, "this build serves a step's tools")
 }
 
 // A binding-read failure must not be mistaken for a successful unbound read:
