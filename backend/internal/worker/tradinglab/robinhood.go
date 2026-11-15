@@ -509,8 +509,14 @@ func (r *Robinhood) Quotes(ctx context.Context, symbols []string) ([]UnderlyingQ
 		if sym == "" {
 			continue
 		}
+		// The newest trade is the last price: after the close that is an
+		// extended-hours trade, when there was one.
+		last := num(m, "last_trade_price", "last_non_reg_trade_price")
+		if p := num(m, "last_non_reg_trade_price"); p > 0 && when(m, "venue_last_non_reg_trade_time").After(when(m, "venue_last_trade_time")) {
+			last = p
+		}
 		out = append(out, UnderlyingQuote{
-			Symbol: sym, Last: num(m, "last_trade_price", "last_non_reg_trade_price"),
+			Symbol: sym, Last: last,
 			Bid: num(m, "bid_price"), Ask: num(m, "ask_price"), PrevClose: num(m, "adjusted_previous_close", "previous_close"),
 			QuoteTime: latest(when(m, "venue_bid_time"), when(m, "venue_ask_time"), when(m, "venue_last_trade_time"), when(m, "venue_last_non_reg_trade_time"), when(m, "updated_at")),
 		})

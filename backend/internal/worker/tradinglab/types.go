@@ -19,6 +19,9 @@ type UnderlyingQuote struct {
 	PrevClose float64   `json:"prev_close,omitempty"`
 	Volume    int64     `json:"volume,omitempty"`
 	QuoteTime time.Time `json:"quote_time"`
+	// LastSession marks a quote older than the live limit, kept because the
+	// market is closed: allowed, but not preferred.
+	LastSession bool `json:"last_session,omitempty"`
 }
 
 // OptionQuote is one listed contract with its quote, greeks and size.
@@ -42,6 +45,8 @@ type OptionQuote struct {
 	Volume       int64     `json:"volume"`
 	Tradable     bool      `json:"tradable"`
 	QuoteTime    time.Time `json:"quote_time"`
+	// LastSession: as UnderlyingQuote.LastSession.
+	LastSession bool `json:"last_session,omitempty"`
 }
 
 // Catalyst is a dated event or a news item about an underlying.
@@ -78,6 +83,11 @@ type Freshness struct {
 	MaxQuoteAgeSeconds int      `json:"max_quote_age_seconds"`
 	StaleQuotes        []string `json:"stale_quotes,omitempty"`
 	MissingQuotes      []string `json:"missing_quotes,omitempty"`
+	// MarketClosed: the snapshot was taken outside a regular session, so a
+	// quote from LastSession counts even when older than the live limit.
+	MarketClosed      bool     `json:"market_closed,omitempty"`
+	LastSession       *Session `json:"last_session,omitempty"`
+	LastSessionQuotes []string `json:"last_session_quotes,omitempty"`
 }
 
 // Snapshot is the immutable market input both analysts receive. Its hash is

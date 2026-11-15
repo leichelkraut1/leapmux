@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,4 +124,44 @@ func TestSnapshotFromASelectionTakesEveryPriceFromTheBroker(t *testing.T) {
 	assert.Contains(t, titles, "Q4 earnings")
 	assert.NotContains(t, titles, "An invented approval", "a catalyst whose tool was never called is dropped")
 	assert.Contains(t, h.broker.toolCalls(), "get_option_quotes")
+}
+
+// On a closed market the snapshot still asks Robinhood for every quote, and
+// keeps the last session's as allowed but not preferred.
+func TestSnapshotOnAClosedMarketStillQuotesFromTheBroker(t *testing.T) {
+	h := newLabHarness(t)
+	liveMarketData(t, h)
+	snap, _ := snapshotOf(t, h.frames[0])
+	sunday := nextSunday(h.frames[0].AsOf)
+	_, last := MarketSession(sunday)
+	var ids []any
+	for i := range snap.Options {
+		o := &snap.Options[i]
+		if exp, _ := time.Parse(time.DateOnly, o.Expiration); exp.After(sunday) && len(executionProblems(o, rules())) == 0 && len(ids) < 2 {
+			ids = append(ids, map[string]any{"instrument_id": instrumentID(o.OCCSymbol)})
+		}
+	}
+	require.NotEmpty(t, ids)
+	selection, err := json.Marshal(map[string]any{"symbols": []string{"SYNA", "SYNB"}, "contracts": ids})
+	require.NoError(t, err)
+	h.clock.Set(sunday)
+	h.broker.quoteTime = last.Close.Add(-time.Minute)
+	before := len(h.broker.toolCalls())
+
+	res, err := h.lab.snapshotExecutor(h.ctx, workflow.ExecutorRequest{
+		UserID: userID, Run: &leapmuxv1.WorkflowRun{Id: "run-1"}, Task: &leapmuxv1.WorkflowTask{Id: "task-snapshot"},
+		Step:   &leapmuxv1.WorkflowStep{Key: "snapshot", Params: map[string]string{"selection_step": "gather"}},
+		Frozen: []*leapmuxv1.WorkflowFrozenOutput{{StepKey: "gather", CanonicalJson: string(selection)}},
+	})
+	require.NoError(t, err)
+	got, err := DecodeSnapshot(res.StructuredOutput)
+	require.NoError(t, err)
+	assert.True(t, got.Freshness.MarketClosed)
+	assert.Len(t, got.Options, len(ids))
+	for _, o := range got.Options {
+		assert.True(t, o.LastSession, o.OCCSymbol)
+	}
+	calls := h.broker.toolCalls()[before:]
+	assert.Contains(t, calls, "get_equity_quotes", "underlyings are asked for even with the market closed")
+	assert.Contains(t, calls, "get_option_quotes", "contracts are asked for even with the market closed")
 }

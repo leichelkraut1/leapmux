@@ -145,8 +145,9 @@ func DefaultSettings() *leapmuxv1.TradingLabSettings {
 	}
 }
 
-// maxResearchQuoteAge is a long weekend and then some, in seconds.
-const maxResearchQuoteAge = 7 * 24 * 60 * 60
+// maxResearchQuoteAge is a day, in seconds. A closed market needs no more:
+// the closed-market rule keeps the last session's quotes.
+const maxResearchQuoteAge = 24 * 60 * 60
 
 func normalizeSettings(s *leapmuxv1.TradingLabSettings) error {
 	d := DefaultSettings()
@@ -169,7 +170,7 @@ func normalizeSettings(s *leapmuxv1.TradingLabSettings) error {
 		s.ResearchQuoteAgeSeconds = d.GetResearchQuoteAgeSeconds()
 	}
 	if s.GetResearchQuoteAgeSeconds() > maxResearchQuoteAge {
-		return invalidf("the oldest usable quote for research can be at most 7 days old")
+		return invalidf("the oldest usable quote while the market is open can be at most 24 hours old; when it is closed, the last session's quotes are used anyway")
 	}
 	var watch []string
 	for _, w := range s.GetWatchlist() {
@@ -388,6 +389,7 @@ func (l *Lab) snapshotExecutor(ctx context.Context, req workflow.ExecutorRequest
 	snap, err := BuildSnapshot(frame, source, prov, SnapshotOptions{
 		Symbols: symbols, MaxDTE: maxDTE, StrikesPerSide: strikesPerSide,
 		MaxQuoteAge: quoteAge, MaxSnapshotAge: quoteAge, Now: now,
+		ClosedMarketRule: md.Source() == leapmuxv1.TradingMarketDataSource_TRADING_MARKET_DATA_SOURCE_ROBINHOOD,
 	})
 	if errors.Is(err, ErrStale) {
 		return nil, &workflow.PermanentError{Err: err}

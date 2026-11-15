@@ -172,27 +172,74 @@ func TestSnapshotRefusesOldFutureOrEmptyData(t *testing.T) {
 	assert.ErrorIs(t, err, ErrStale, "no fresh underlying, no snapshot")
 }
 
-func TestSnapshotOnAWeekendUsesTheLastSessionsQuotes(t *testing.T) {
-	_, frames := sampleReplay(t)
-	f := *frames[0]
-	f.AsOf = f.AsOf.Add(44 * time.Hour)
-	opts := SnapshotOptions{Symbols: SampleSymbols, MaxDTE: 14, Now: f.AsOf, MaxQuoteAge: 15 * time.Minute, MaxSnapshotAge: 15 * time.Minute}
-	_, err := BuildSnapshot(&f, "robinhood", Provenance{}, opts)
-	assert.ErrorIs(t, err, ErrStale, "the default refuses Friday's quotes on Sunday")
-
-	opts.MaxQuoteAge, opts.MaxSnapshotAge = 72*time.Hour, 72*time.Hour
-	snap, err := BuildSnapshot(&f, "robinhood", Provenance{}, opts)
-	require.NoError(t, err)
-	assert.NotEmpty(t, snap.Options)
-	assert.Equal(t, 72*60*60, snap.Freshness.MaxQuoteAgeSeconds)
-	assert.True(t, slices.ContainsFunc(snap.Warnings, func(w string) bool { return strings.HasPrefix(w, "the market is closed") }), snap.Warnings)
+// nextSunday is noon New York time on the first Sunday after t.
+func nextSunday(t time.Time) time.Time {
+	d := t.In(newYork).AddDate(0, 0, 1)
+	for d.Weekday() != time.Sunday {
+		d = d.AddDate(0, 0, 1)
+	}
+	return time.Date(d.Year(), d.Month(), d.Day(), 12, 0, 0, 0, newYork).UTC()
 }
 
-func TestResearchQuoteAgeIsASettingCappedAtAWeek(t *testing.T) {
+func TestSnapshotOnAClosedMarketKeepsTheLastSessionsQuotesAsNotPreferred(t *testing.T) {
+	_, frames := sampleReplay(t)
+	f := *frames[0]
+	f.AsOf = nextSunday(frames[0].AsOf)
+	_, last := MarketSession(f.AsOf)
+	f.Underlyings = slices.Clone(f.Underlyings)
+	for i := range f.Underlyings {
+		f.Underlyings[i].QuoteTime = last.Close.Add(-time.Minute)
+	}
+	f.Options = slices.Clone(f.Options)
+	for i := range f.Options {
+		f.Options[i].QuoteTime = last.Close.Add(-time.Minute)
+	}
+	f.Options[0].QuoteTime = last.Open.Add(-time.Hour)
+	opts := SnapshotOptions{Symbols: SampleSymbols, MaxDTE: 14, Now: f.AsOf, MaxQuoteAge: 15 * time.Minute, MaxSnapshotAge: 15 * time.Minute}
+
+	_, err := BuildSnapshot(&f, "replay", Provenance{}, opts)
+	assert.ErrorIs(t, err, ErrStale, "a recording is judged by its own time alone")
+
+	opts.ClosedMarketRule = true
+	snap, err := BuildSnapshot(&f, "robinhood", Provenance{}, opts)
+	require.NoError(t, err)
+	assert.True(t, snap.Freshness.MarketClosed)
+	require.NotNil(t, snap.Freshness.LastSession)
+	assert.True(t, last.Close.Equal(snap.Freshness.LastSession.Close))
+	assert.Equal(t, 15*60, snap.Freshness.MaxQuoteAgeSeconds, "the live limit is unchanged")
+	require.NotEmpty(t, snap.Options)
+	for _, u := range snap.Underlyings {
+		assert.True(t, u.LastSession, u.Symbol)
+	}
+	for _, o := range snap.Options {
+		assert.True(t, o.LastSession, o.OCCSymbol)
+	}
+	occ0, _ := NormalizeOCC(f.Options[0].OCCSymbol)
+	assert.Nil(t, snap.Contract(occ0), "a quote from before the last session is still stale")
+	assert.Len(t, snap.Freshness.LastSessionQuotes, len(snap.Underlyings)+len(snap.Options))
+	assert.True(t, slices.ContainsFunc(snap.Warnings, func(w string) bool { return strings.Contains(w, "allowed but not preferred") }), snap.Warnings)
+
+	// A fresh quote on a closed market (an overnight trade) is not marked.
+	f.Underlyings[0].QuoteTime = f.AsOf.Add(-time.Minute)
+	snap, err = BuildSnapshot(&f, "robinhood", Provenance{}, opts)
+	require.NoError(t, err)
+	assert.False(t, snap.Underlying(f.Underlyings[0].Symbol).LastSession)
+
+	// While the market is open, an old quote is dropped as before.
+	open := last.Open.Add(24 * time.Hour)
+	for o, _ := MarketSession(open); !o; o, _ = MarketSession(open) {
+		open = open.Add(24 * time.Hour)
+	}
+	opts.Now, f.AsOf = open, open
+	_, err = BuildSnapshot(&f, "robinhood", Provenance{}, opts)
+	assert.ErrorIs(t, err, ErrStale)
+}
+
+func TestResearchQuoteAgeIsASettingCappedAtADay(t *testing.T) {
 	s := DefaultSettings()
 	require.NoError(t, normalizeSettings(s))
 	assert.EqualValues(t, 900, s.GetResearchQuoteAgeSeconds())
-	s.ResearchQuoteAgeSeconds = 72 * 60 * 60
+	s.ResearchQuoteAgeSeconds = 24 * 60 * 60
 	require.NoError(t, normalizeSettings(s))
 	s.ResearchQuoteAgeSeconds = maxResearchQuoteAge + 1
 	assert.ErrorIs(t, normalizeSettings(s), ErrInvalid)

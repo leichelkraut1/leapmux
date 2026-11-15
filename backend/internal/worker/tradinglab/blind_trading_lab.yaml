@@ -76,6 +76,12 @@ template:
              result states it; one you cannot attribute to a tool, leave out.
           4. Report the selection: symbols, contracts by `instrument_id`,
              catalysts, and short notes on anything unusual.
+
+          On a closed market (a weekend, a holiday, overnight) the tools
+          return the last session's quotes. Research with them anyway: they
+          are allowed, but not preferred, so between otherwise equal
+          contracts select the one with the newer quote, and say in your
+          notes that the market is closed.
     - key: blind-analyst
       name: Analyst
       profile_id: analyst
@@ -97,6 +103,11 @@ template:
             of profit and of the bid reaching 3x and 5x the entry, exits, and
             what would prove you wrong.
           - Copy the snapshot's sha256 into `snapshot_sha256`.
+          - When the snapshot's `freshness.market_closed` is true, a quote
+            marked `last_session` is from the last trading session: allowed,
+            but not preferred. Where a contract with a fresh quote fits as
+            well, choose it. An entry priced from a `last_session` quote is a
+            plan to re-check at the next open; say so in its exits.
           - Recommending no trade is a valid, recorded outcome.
     - key: contrarian-analyst
       name: Analyst
@@ -123,6 +134,11 @@ template:
             of profit and of the bid reaching 3x and 5x the entry, exits, and
             what would prove you wrong.
           - Copy the snapshot's sha256 into `snapshot_sha256`.
+          - When the snapshot's `freshness.market_closed` is true, a quote
+            marked `last_session` is from the last trading session: allowed,
+            but not preferred. Where a contract with a fresh quote fits as
+            well, choose it. An entry priced from a `last_session` quote is a
+            plan to re-check at the next open; say so in its exits.
           - Recommending no trade is a valid, recorded outcome.
     - key: evaluator
       name: Evaluator
@@ -143,6 +159,8 @@ template:
           - calibration: are its probabilities plausible given the market's
             own implied distribution?
           - executability: spread, open interest and volume for its size.
+            A `last_session` quote (the market was closed) is allowed but
+            weaker evidence of the entry than a fresh one.
 
           Apply the same standard to every submission. The lab computes the
           totals from your scores; do not state totals.
@@ -158,8 +176,11 @@ template:
           and matches the snapshot, that its entry is consistent with the
           quote, that liquidity (spread, open interest, volume) is adequate,
           that its stated maximum loss equals limit x 100 plus fees, and that
-          its catalyst falls inside its horizon. Report every issue. Fail a
-          recommendation that a person must not act on.
+          its catalyst falls inside its horizon. An entry priced from a
+          `last_session` quote (the market was closed) is allowed: report it
+          as needing a re-check at the open, not as a failure by itself.
+          Report every issue. Fail a recommendation that a person must not
+          act on.
   steps:
     - key: gather
       title: Gather market data

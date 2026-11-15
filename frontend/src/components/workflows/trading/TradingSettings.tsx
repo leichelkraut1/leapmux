@@ -165,19 +165,18 @@ export function TradingSettings(props: { workerId: string }) {
                   <input value={s().watchlist.join(', ')} onChange={e => edit(x => (x.watchlist = e.currentTarget.value.split(',').map(w => w.trim()).filter(Boolean)))} />
                 </label>
                 <label class={styles.field}>
-                  Oldest usable quote for research (hours)
+                  Oldest usable quote while the market is open (minutes)
                   <input
                     type="number"
-                    min="0.25"
-                    max="168"
-                    step="0.25"
-                    value={s().researchQuoteAgeSeconds / 3600}
-                    onInput={e => edit(x => (x.researchQuoteAgeSeconds = Math.round(num(e.currentTarget.value) * 3600)))}
+                    min="1"
+                    max="1440"
+                    value={s().researchQuoteAgeSeconds / 60}
+                    onInput={e => edit(x => (x.researchQuoteAgeSeconds = Math.round(num(e.currentTarget.value) * 60)))}
                     data-testid="trading-research-quote-age"
                   />
                 </label>
               </div>
-              <p class={styles.hint}>0.25 (15 minutes) while the market is open. To plan Monday on a Sunday, set 72 so research uses Friday's closing quotes; a live order still needs a quote from the last few seconds.</p>
+              <p class={styles.hint}>When the market is closed (weekends, holidays, overnight), research still asks Robinhood for every quote and keeps the last session's, marked as allowed but not preferred. A live order always needs a quote from the last few seconds.</p>
               <div class={styles.actions}>
                 <button
                   type="button"

@@ -24,14 +24,15 @@ type SnapshotOptions struct {
 	MaxQuoteAge time.Duration
 	// MaxSnapshotAge refuses a frame older than this at Now.
 	MaxSnapshotAge time.Duration
+	// ClosedMarketRule: outside a regular session, a quote from the latest
+	// session is kept even when older than MaxQuoteAge, marked LastSession
+	// (allowed, not preferred). For live data; a recording is judged by its
+	// own time alone.
+	ClosedMarketRule bool
 	// Now is the present the frame is judged against: the wall clock for a
 	// live provider, the recording's own time for a replay.
 	Now time.Time
 }
-
-// lastSessionAge is how old the newest quote must be for a snapshot to say
-// it holds a closed market's last prices.
-const lastSessionAge = 15 * time.Minute
 
 // ErrStale is a frame too old, or too empty, to research.
 var ErrStale = errors.New("market data failed its freshness check")
@@ -70,8 +71,21 @@ func BuildSnapshot(f *Frame, source string, prov Provenance, o SnapshotOptions) 
 		Underlyings: []UnderlyingQuote{}, Options: []OptionQuote{}, Catalysts: []Catalyst{}, Warnings: []string{},
 	}
 	snap.Provenance.Collector = collectorVersion
-	stale := func(t time.Time) bool {
-		return t.IsZero() || (o.MaxQuoteAge > 0 && asOf.Sub(t) > o.MaxQuoteAge)
+	var session Session
+	if o.ClosedMarketRule {
+		var open bool
+		if open, session = MarketSession(asOf); !open && !session.Open.IsZero() {
+			snap.Freshness.MarketClosed = true
+			snap.Freshness.LastSession = &Session{Open: session.Open.UTC(), Close: session.Close.UTC()}
+		}
+	}
+	// fresh is a quote within the live limit; lastSession one from the
+	// latest session while the market is closed.
+	fresh := func(t time.Time) bool {
+		return !t.IsZero() && (o.MaxQuoteAge <= 0 || asOf.Sub(t) <= o.MaxQuoteAge)
+	}
+	lastSession := func(t time.Time) bool {
+		return snap.Freshness.MarketClosed && !t.IsZero() && !t.Before(session.Open)
 	}
 
 	last := map[string]float64{}
@@ -85,7 +99,11 @@ func BuildSnapshot(f *Frame, source string, prov Provenance, o SnapshotOptions) 
 		case u.Last <= 0 && (u.Bid <= 0 || u.Ask <= 0):
 			snap.Freshness.MissingQuotes = append(snap.Freshness.MissingQuotes, u.Symbol)
 			continue
-		case stale(u.QuoteTime):
+		case fresh(u.QuoteTime):
+		case lastSession(u.QuoteTime):
+			u.LastSession = true
+			snap.Freshness.LastSessionQuotes = append(snap.Freshness.LastSessionQuotes, u.Symbol)
+		default:
 			snap.Freshness.StaleQuotes = append(snap.Freshness.StaleQuotes, u.Symbol)
 			continue
 		}
@@ -103,15 +121,6 @@ func BuildSnapshot(f *Frame, source string, prov Provenance, o SnapshotOptions) 
 	}
 	if len(snap.Underlyings) == 0 {
 		return nil, fmt.Errorf("%w: no requested underlying has a fresh quote", ErrStale)
-	}
-	var newest time.Time
-	for _, u := range snap.Underlyings {
-		if u.QuoteTime.After(newest) {
-			newest = u.QuoteTime
-		}
-	}
-	if asOf.Sub(newest) > lastSessionAge {
-		snap.Warnings = append(snap.Warnings, fmt.Sprintf("the market is closed: the newest quote is from %s, so prices at the next open will differ", newest.Format(time.RFC3339)))
 	}
 
 	today := time.Date(asOf.Year(), asOf.Month(), asOf.Day(), 0, 0, 0, 0, time.UTC)
@@ -152,7 +161,10 @@ func BuildSnapshot(f *Frame, source string, prov Provenance, o SnapshotOptions) 
 		case q.Ask > 0 && q.Bid > q.Ask:
 			snap.Warnings = append(snap.Warnings, fmt.Sprintf("dropped %s: its bid is above its ask", occ))
 			continue
-		case stale(q.QuoteTime):
+		case fresh(q.QuoteTime):
+		case lastSession(q.QuoteTime):
+			q.LastSession = true
+		default:
 			snap.Freshness.StaleQuotes = append(snap.Freshness.StaleQuotes, occ)
 			continue
 		}
@@ -176,6 +188,11 @@ func BuildSnapshot(f *Frame, source string, prov Provenance, o SnapshotOptions) 
 			keep = keep[:2*o.StrikesPerSide]
 		}
 		snap.Options = append(snap.Options, keep...)
+		for _, q := range keep {
+			if q.LastSession {
+				snap.Freshness.LastSessionQuotes = append(snap.Freshness.LastSessionQuotes, q.OCCSymbol)
+			}
+		}
 	}
 	slices.SortFunc(snap.Options, func(a, b OptionQuote) int {
 		if c := strings.Compare(a.Underlying, b.Underlying); c != 0 {
@@ -196,6 +213,12 @@ func BuildSnapshot(f *Frame, source string, prov Provenance, o SnapshotOptions) 
 	})
 	slices.Sort(snap.Freshness.StaleQuotes)
 	slices.Sort(snap.Freshness.MissingQuotes)
+	slices.Sort(snap.Freshness.LastSessionQuotes)
+	if s := snap.Freshness.LastSession; len(snap.Freshness.LastSessionQuotes) > 0 {
+		snap.Warnings = append(snap.Warnings, fmt.Sprintf(
+			"the market is closed: %d quote(s) marked last_session are from the session of %s (%s to %s New York time). They are allowed but not preferred: choose a contract with a fresh quote where one fits as well, and expect prices at the next open to differ",
+			len(snap.Freshness.LastSessionQuotes), s.Open.In(newYork).Format("Mon Jan 2"), s.Open.In(newYork).Format("15:04"), s.Close.In(newYork).Format("15:04")))
+	}
 	if len(snap.Options) == 0 {
 		return nil, fmt.Errorf("%w: no option contract with a fresh two-sided quote is within %d days", ErrStale, o.MaxDTE)
 	}
