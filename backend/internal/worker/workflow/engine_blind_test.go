@@ -446,3 +446,15 @@ func TestReassigningABlockedFreshAgentTaskStartsANewAgentThere(t *testing.T) {
 	}
 	assert.Equal(t, 1, closed, "the stranded agent is retired")
 }
+
+// A role placed on any computer starts on the coordinating one, not on
+// whichever computer sorts first.
+func TestAnyComputerRoleStartsOnTheCoordinator(t *testing.T) {
+	b := newBlindHarness(t)
+	b.platform.addWorker("w-attic", "Attic PC", true, "os:linux")
+	b.settle()
+	for _, c := range b.platform.openCalls() {
+		assert.Equal(t, coordinator, c.workerID, c.req.GetWorkflow().GetRoleKey())
+	}
+	assert.NotEmpty(t, b.platform.openCalls())
+}

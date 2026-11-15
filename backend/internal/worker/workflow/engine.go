@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -980,7 +981,11 @@ func (e *Engine) pickSlot(ctx context.Context, q querier, rs *runState, t *leapm
 	if t.GetWorkerId() != "" {
 		placement = &leapmuxv1.WorkerPlacement{Strategy: leapmuxv1.WorkerPlacementStrategy_WORKER_PLACEMENT_STRATEGY_SPECIFIC_WORKER, WorkerId: t.GetWorkerId()}
 	}
-	placed, err := Place(placement, workers, assignment.GetWorkerId())
+	// A role that has not run yet starts on the coordinating computer when it
+	// qualifies, so the run's work stays where its data and lab are unless a
+	// placement says otherwise.
+	prefer := cmp.Or(assignment.GetWorkerId(), e.workerID)
+	placed, err := Place(placement, workers, prefer)
 	if err != nil {
 		if err := e.setTaskStatus(ctx, q, rs, t, leapmuxv1.WorkflowTaskStatus_WORKFLOW_TASK_STATUS_BLOCKED, "engine", err.Error()); err != nil {
 			return nil, err
