@@ -254,6 +254,11 @@ func TestCheckRecommendationFindsEveryInconsistency(t *testing.T) {
 	good := goodRecommendation(snap, q)
 	assert.Empty(t, CheckRecommendation(snap, sum, p, &good, rules()))
 
+	atAsk := goodRecommendation(snap, q)
+	atAsk.Entry.LimitPrice = q.Ask
+	atAsk.Risk.MaxLossPerContract = q.Ask*100 + rules().GetFeePerContract()
+	assert.Empty(t, CheckRecommendation(snap, sum, p, &atAsk, rules()), "a limit at the ask is executable, as the analysts are told")
+
 	cases := map[string]func(r *Recommendation, p *Prediction){
 		"cites another snapshot":      func(_ *Recommendation, p *Prediction) { p.SnapshotSHA256 = strings.Repeat("0", 64) },
 		"a put called bullish":        func(r *Recommendation, _ *Prediction) { r.Strategy = "long_put" },
@@ -312,6 +317,12 @@ func TestShadowFillsAtTheAskPlusSlippageNeverTheMidpoint(t *testing.T) {
 	assert.Equal(t, uint32(math.Floor(r.GetAllocationPerIdea()/perContract)), pos.GetQuantity())
 	assert.InDelta(t, perContract*float64(pos.GetQuantity()), pos.GetCost(), 0.01)
 	assert.Less(t, pos.GetLastMark(), pos.GetCost(), "marked at the bid, a fresh position is already down the spread")
+
+	atAsk := OpenShadow(leapmuxv1.TradingBook_TRADING_BOOK_BLIND, snap, q.OCCSymbol, q.Ask, r)
+	require.Equal(t, leapmuxv1.TradingPositionState_TRADING_POSITION_STATE_OPEN, atAsk.GetState(), "a limit at the ask fills: %s", atAsk.GetNote())
+	assert.InDelta(t, q.Ask, atAsk.GetEntryPrice(), 1e-9, "a limit order never pays more than its limit")
+	below := OpenShadow(leapmuxv1.TradingBook_TRADING_BOOK_BLIND, snap, q.OCCSymbol, q.Ask-0.01, r)
+	assert.Equal(t, leapmuxv1.TradingPositionState_TRADING_POSITION_STATE_NOT_FILLED, below.GetState())
 
 	assert.Equal(t, leapmuxv1.TradingPositionState_TRADING_POSITION_STATE_NOT_FILLED,
 		OpenShadow(leapmuxv1.TradingBook_TRADING_BOOK_BLIND, snap, q.OCCSymbol, q.Bid, r).GetState(), "a limit below the ask does not fill")

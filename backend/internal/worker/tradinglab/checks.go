@@ -106,10 +106,11 @@ func CheckRecommendation(snap *Snapshot, snapSHA string, p *Prediction, r *Recom
 		fail("%s is not tradable", occ)
 	}
 	reasons = append(reasons, executionProblems(q, rules)...)
+	// A limit at the ask is marketable, as the analysts are told; slippage
+	// raises the shadow fill (up to the limit), not the bar to enter.
 	limit := r.Entry.LimitPrice
-	fill := q.Ask + slip(rules)
-	if limit+1e-9 < fill {
-		fail("the limit %.2f is below the executable price %.2f (ask %.2f plus slippage)", limit, fill, q.Ask)
+	if limit+1e-9 < q.Ask {
+		fail("the limit %.2f is below the ask %.2f", limit, q.Ask)
 	}
 	if limit > q.Ask*1.25+0.05 {
 		fail("the limit %.2f is far above the ask %.2f", limit, q.Ask)

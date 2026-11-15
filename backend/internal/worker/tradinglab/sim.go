@@ -38,9 +38,14 @@ func OpenShadow(book leapmuxv1.TradingBook, snap *Snapshot, occ string, limit fl
 	if problems := executionProblems(q, rules); len(problems) > 0 {
 		return notFilled("%s", problems[0])
 	}
+	// A buy pays the ask plus slippage, but a limit order never pays more
+	// than its limit, and one below the ask does not fill.
 	price := round2(q.Ask + slip(rules))
-	if limit > 0 && limit+1e-9 < price {
-		return notFilled("the limit %.2f is below the executable price %.2f", limit, price)
+	if limit > 0 {
+		if limit+1e-9 < q.Ask {
+			return notFilled("the limit %.2f is below the ask %.2f", limit, q.Ask)
+		}
+		price = math.Min(price, round2(limit))
 	}
 	perContract := price*float64(max(q.Multiplier, 100)) + fee(rules)
 	qty := uint32(math.Floor(rules.GetAllocationPerIdea() / perContract))
